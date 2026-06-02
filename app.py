@@ -5,6 +5,8 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import requests
+from PIL import Image
+from io import BytesIO
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
@@ -78,12 +80,13 @@ st.markdown("""
 # الهيدر بالصورة
 # ==========================================
 
-# عرض الصورة (استخدم الرابط المباشر أو اسم الملف)
+# جلب الصورة وعرضها بحجم أكبر
 try:
-    st.image("https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/refs/heads/main/ChatGPT%20Image%202%20%D9%8A%D9%88%D9%86%D9%8A%D9%88%202026%D8%8C%2009_05_59%20%D8%B5.png", width=80)
+    response = requests.get("https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/refs/heads/main/ChatGPT%20Image%202%20%D9%8A%D9%88%D9%86%D9%8A%D9%88%202026%D8%8C%2009_05_59%20%D8%B5.png")
+    img = Image.open(BytesIO(response.content))
+    st.image(img, width=180)  # increased from 80 to 180
 except:
-    # لو الصورة مش موجودة، اعرض النص فقط
-    pass
+    st.warning("صورة غير متاحة")
 
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
@@ -97,8 +100,9 @@ with col2:
 st.markdown("---")
 
 # ==========================================
-# جلب سعر الذهب الفوري
+# باقي الكود (نفس الكود السابق)
 # ==========================================
+
 GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
 
 @st.cache_data(ttl=30)
@@ -135,9 +139,6 @@ if real_price and real_price > 0:
 else:
     current_price = df['close'].iloc[-1]
 
-# ==========================================
-# حساب المؤشرات
-# ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -164,9 +165,6 @@ df['atr'] = calc_atr(df)
 current_rsi = df['rsi'].iloc[-1]
 current_atr = df['atr'].iloc[-1]
 
-# ==========================================
-# إشارات SMC
-# ==========================================
 recent_lows = df['low'].iloc[-20:].values
 recent_highs = df['high'].iloc[-20:].values
 liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1])
@@ -176,9 +174,6 @@ bos_bearish = current_price < df['low'].iloc[-6:-1].min()
 resistance = np.percentile(df['high'].iloc[-30:], 75)
 support = np.percentile(df['low'].iloc[-30:], 25)
 
-# ==========================================
-# نظام التسجيل
-# ==========================================
 bullish = 0
 bearish = 0
 signals = []
@@ -243,9 +238,6 @@ else:
     signal_action = "NEUTRAL"
     confidence = 50
 
-# ==========================================
-# خطة التداول
-# ==========================================
 if signal_action == "BUY":
     entry = current_price
     stop_loss = support - (current_atr * 0.5)
@@ -259,9 +251,6 @@ else:
     stop_loss = None
     targets = []
 
-# ==========================================
-# عرض السعر الرئيسي
-# ==========================================
 st.markdown(f"""
 <div style="background:linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding:25px; border-radius:15px; margin-bottom:20px; text-align:center; border:1px solid #ffd700">
     <h2 style="color:#ffd700; margin:0">𓋹 REAL TIME GOLD PRICE 𓋹</h2>
@@ -270,9 +259,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# البطاقات
-# ==========================================
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -314,9 +300,6 @@ with col4:
 
 st.markdown("---")
 
-# ==========================================
-# الشارت
-# ==========================================
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Gold', line=dict(color='#ffd700', width=2)))
 fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')))
@@ -327,9 +310,6 @@ fig.add_hline(y=current_price, line_dash="dot", line_color="white", annotation_t
 fig.update_layout(template="plotly_dark", height=450, title="📊 Gold Historical Chart")
 st.plotly_chart(fig, use_container_width=True)
 
-# ==========================================
-# RSI Chart
-# ==========================================
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='#9b59b6', width=2)))
 fig2.add_hline(y=70, line_dash="dash", line_color="#ff4444", annotation_text="Overbought")
@@ -339,9 +319,6 @@ st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("---")
 
-# ==========================================
-# المؤشرات
-# ==========================================
 st.subheader("📊 Technical Indicators")
 for s in signals:
     if "✅" in s or "📈" in s:
@@ -353,9 +330,6 @@ for s in signals:
 
 st.markdown("---")
 
-# ==========================================
-# خطة التداول
-# ==========================================
 st.subheader("🎯 Trading Plan")
 
 if signal_action == "BUY":
@@ -390,9 +364,6 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-# ==========================================
-# الفوتر
-# ==========================================
 st.markdown(f"""
 <div class="footer">
     𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT Analysis | Real-time Data 𓋹<br>
