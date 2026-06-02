@@ -222,20 +222,6 @@ st.markdown("""
         font-size: 0.8rem;
         color: #888;
     }
-    .pattern-card {
-        background: #1e1e2e;
-        border-radius: 10px;
-        padding: 10px;
-        margin: 5px;
-        text-align: center;
-        border: 1px solid #ffd70033;
-    }
-    .pattern-bullish {
-        border-left: 4px solid #00ff88;
-    }
-    .pattern-bearish {
-        border-left: 4px solid #ff4444;
-    }
     .footer {
         text-align: center;
         padding: 20px;
@@ -266,7 +252,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Chart Patterns + Advanced Indicators</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Advanced Indicators</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -534,7 +520,7 @@ if current_price is None:
     st.stop()
 
 # ==========================================
-# حساب المؤشرات الأساسية والمتقدمة
+# حساب المؤشرات المتقدمة
 # ==========================================
 
 def calc_rsi(data, period=14):
@@ -569,6 +555,26 @@ def calc_bollinger_bands(data, period=20, std_dev=2):
     upper = sma + (std * std_dev)
     lower = sma - (std * std_dev)
     return upper, sma, lower
+
+def calc_adx(df, period=14):
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    plus_dm = high.diff()
+    minus_dm = low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    
+    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    
+    plus_di = 100 * (plus_dm.ewm(span=period).mean() / atr)
+    minus_di = 100 * (abs(minus_dm).ewm(span=period).mean() / atr)
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    adx = dx.rolling(window=period).mean()
+    
+    return adx, plus_di, minus_di
 
 def calc_fibonacci_levels(high, low, current_price):
     diff = high - low
@@ -639,111 +645,22 @@ def detect_silver_bullet(df):
             return True
     return False
 
-def find_peaks(data, order=5):
-    peaks = []
-    for i in range(order, len(data) - order):
-        if all(data[i] > data[i-j] for j in range(1, order+1)) and all(data[i] > data[i+j] for j in range(1, order+1)):
-            peaks.append(data[i])
-    return peaks
-
-def find_troughs(data, order=5):
-    troughs = []
-    for i in range(order, len(data) - order):
-        if all(data[i] < data[i-j] for j in range(1, order+1)) and all(data[i] < data[i+j] for j in range(1, order+1)):
-            troughs.append(data[i])
-    return troughs
-
-def detect_double_top_bottom(df):
-    peaks = find_peaks(df['high'].values[-100:])
-    troughs = find_troughs(df['low'].values[-100:])
-    if len(peaks) >= 2:
-        last_two_peaks = peaks[-2:]
-        if abs(last_two_peaks[-1] - last_two_peaks[-2]) / last_two_peaks[-2] < 0.02:
-            return "DOUBLE TOP", "bearish", 4
-    if len(troughs) >= 2:
-        last_two_troughs = troughs[-2:]
-        if abs(last_two_troughs[-1] - last_two_troughs[-2]) / last_two_troughs[-2] < 0.02:
-            return "DOUBLE BOTTOM", "bullish", 4
-    return None, None, 0
-
-def detect_head_shoulders(df):
-    peaks = find_peaks(df['high'].values[-120:], order=3)
-    if len(peaks) >= 3:
-        head_idx = np.argmax([p for p in peaks[-5:]])
-        if head_idx > 0 and head_idx < len(peaks[-5:]) - 1:
-            left_shoulder = peaks[-5:][head_idx - 1]
-            head = peaks[-5:][head_idx]
-            right_shoulder = peaks[-5:][head_idx + 1]
-            if head > left_shoulder and head > right_shoulder:
-                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
-                    return "HEAD AND SHOULDERS", "bearish", 6
-    return None, None, 0
-
-def detect_inverse_head_shoulders(df):
-    troughs = find_troughs(df['low'].values[-120:], order=3)
-    if len(troughs) >= 3:
-        head_idx = np.argmin([t for t in troughs[-5:]])
-        if head_idx > 0 and head_idx < len(troughs[-5:]) - 1:
-            left_shoulder = troughs[-5:][head_idx - 1]
-            head = troughs[-5:][head_idx]
-            right_shoulder = troughs[-5:][head_idx + 1]
-            if head < left_shoulder and head < right_shoulder:
-                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
-                    return "INVERSE HEAD AND SHOULDERS", "bullish", 6
-    return None, None, 0
-
-def detect_triangle_patterns(df):
-    recent_data = df.iloc[-40:]
-    highs = recent_data['high'].values
-    lows = recent_data['low'].values
-    x = np.arange(len(highs))
-    slope_highs = np.polyfit(x, highs, 1)[0]
-    slope_lows = np.polyfit(x, lows, 1)[0]
-    if slope_lows > 0.01 and abs(slope_highs) < 0.005:
-        return "ASCENDING TRIANGLE", "bullish", 3
-    if slope_highs < -0.01 and abs(slope_lows) < 0.005:
-        return "DESCENDING TRIANGLE", "bearish", 3
-    return None, None, 0
-
-def detect_candle_patterns(df):
-    patterns = []
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    # Doji
-    if abs(latest['close'] - latest['open']) <= (latest['high'] - latest['low']) * 0.1:
-        patterns.append(("DOJI", "neutral", 2))
-    
-    # Hammer (انعكاس صاعد)
-    body = abs(latest['close'] - latest['open'])
-    lower_shadow = min(latest['open'], latest['close']) - latest['low']
-    if lower_shadow > body * 2 and latest['close'] > latest['open']:
-        patterns.append(("HAMMER", "bullish", 3))
-    
-    # Engulfing (ابتلاع)
-    if latest['close'] > latest['open'] and prev['close'] < prev['open']:
-        if latest['close'] > prev['open'] and latest['open'] < prev['close']:
-            patterns.append(("BULLISH ENGULFING", "bullish", 4))
-    if latest['close'] < latest['open'] and prev['close'] > prev['open']:
-        if latest['close'] < prev['open'] and latest['open'] > prev['close']:
-            patterns.append(("BEARISH ENGULFING", "bearish", 4))
-    
-    return patterns
-
-# حساب جميع المؤشرات
+# حساب المؤشرات
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['rsi'] = calc_rsi(df['close'])
 df['atr'] = calc_atr(df)
 df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
 df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
+df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
+df['vwap'] = (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
 
-# حساب فيبوناتشي
+# فيبوناتشي
 recent_high = df['high'].iloc[-50:].max()
 recent_low = df['low'].iloc[-50:].min()
 fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
 
-# حساب SMC/ICT
+# SMC/ICT
 df['liquidity_sweep_bullish'] = False
 df['liquidity_sweep_bearish'] = False
 df['bos_bullish'] = False
@@ -772,28 +689,6 @@ for fvg in fvgs:
     else:
         df.loc[df.index[-1], 'fvg_bearish'] = True
 
-# النماذج
-pattern_name, pattern_dir, pattern_score = detect_double_top_bottom(df)
-patterns = []
-if pattern_name:
-    patterns.append({"name": pattern_name, "direction": pattern_dir, "score": pattern_score})
-
-pattern_name, pattern_dir, pattern_score = detect_head_shoulders(df)
-if pattern_name:
-    patterns.append({"name": pattern_name, "direction": pattern_dir, "score": pattern_score})
-
-pattern_name, pattern_dir, pattern_score = detect_inverse_head_shoulders(df)
-if pattern_name:
-    patterns.append({"name": pattern_name, "direction": pattern_dir, "score": pattern_score})
-
-pattern_name, pattern_dir, pattern_score = detect_triangle_patterns(df)
-if pattern_name:
-    patterns.append({"name": pattern_name, "direction": pattern_dir, "score": pattern_score})
-
-candle_patterns = detect_candle_patterns(df)
-for cp in candle_patterns:
-    patterns.append({"name": cp[0], "direction": cp[1], "score": cp[2]})
-
 # الدعم والمقاومة
 resistance = np.percentile(df['high'].iloc[-30:], 75) if len(df) >= 30 else current_price + 20
 support = np.percentile(df['low'].iloc[-30:], 25) if len(df) >= 30 else current_price - 20
@@ -803,19 +698,20 @@ order_blocks = detect_order_blocks(df)
 order_block_bullish = any(ob[0] == 'bullish' for ob in order_blocks[-5:])
 order_block_bearish = any(ob[0] == 'bearish' for ob in order_blocks[-5:])
 
-# ICT - Silver Bullet
+# ICT
 silver_bullet = detect_silver_bullet(df)
-
-# MSS
 mss_list = detect_market_structure_shift(df)
 mss_bullish = any(mss[0] == 'bullish' for mss in mss_list[-3:])
 mss_bearish = any(mss[0] == 'bearish' for mss in mss_list[-3:])
 
+# القيم الحالية
 current_rsi = df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else 50
 current_atr = df['atr'].iloc[-1] if not pd.isna(df['atr'].iloc[-1]) else 20
 current_macd = df['macd'].iloc[-1] if not pd.isna(df['macd'].iloc[-1]) else 0
 current_macd_signal = df['macd_signal'].iloc[-1] if not pd.isna(df['macd_signal'].iloc[-1]) else 0
 current_bb_position = (current_price - df['bb_lower'].iloc[-1]) / (df['bb_upper'].iloc[-1] - df['bb_lower'].iloc[-1]) if not pd.isna(df['bb_upper'].iloc[-1]) else 0.5
+current_adx = df['adx'].iloc[-1] if not pd.isna(df['adx'].iloc[-1]) else 20
+current_vwap = df['vwap'].iloc[-1] if not pd.isna(df['vwap'].iloc[-1]) else current_price
 
 liquidity_sweep_bullish = df['liquidity_sweep_bullish'].iloc[-1] if 'liquidity_sweep_bullish' in df.columns else False
 liquidity_sweep_bearish = df['liquidity_sweep_bearish'].iloc[-1] if 'liquidity_sweep_bearish' in df.columns else False
@@ -858,10 +754,10 @@ else:
 # 4. Bollinger Bands (2 نقاط)
 if current_bb_position < 0.1:
     bullish += 2
-    signals.append(f"📊 BB Lower Band (oversold)")
+    signals.append("📊 BB Lower Band (Oversold)")
 elif current_bb_position > 0.9:
     bearish += 2
-    signals.append(f"📊 BB Upper Band (overbought)")
+    signals.append("📊 BB Upper Band (Overbought)")
 
 # 5. Fibonacci (2 نقاط)
 if current_price <= fib_levels['fib_382']:
@@ -871,7 +767,24 @@ if current_price >= fib_levels['fib_618']:
     bearish += 2
     signals.append(f"📐 Near Fib 61.8% (${fib_levels['fib_618']:.2f})")
 
-# 6. Order Blocks (3 نقاط)
+# 6. ADX (2 نقاط - قوة الاتجاه)
+if current_adx > 25:
+    if current_price > df['ema20'].iloc[-1]:
+        bullish += 2
+        signals.append(f"💪 ADX: {current_adx:.1f} (Strong Trend)")
+    else:
+        bearish += 2
+        signals.append(f"💪 ADX: {current_adx:.1f} (Strong Trend)")
+
+# 7. VWAP (1 نقطة)
+if current_price > current_vwap:
+    bullish += 1
+    signals.append("💰 Price above VWAP")
+else:
+    bearish += 1
+    signals.append("💰 Price below VWAP")
+
+# 8. Order Blocks (3 نقاط)
 if order_block_bullish:
     bullish += 3
     signals.append("🏛️ Bullish Order Block")
@@ -879,7 +792,7 @@ if order_block_bearish:
     bearish += 3
     signals.append("🏛️ Bearish Order Block")
 
-# 7. Fair Value Gaps (2 نقاط)
+# 9. Fair Value Gaps (2 نقاط)
 if fvg_bullish:
     bullish += 2
     signals.append("📉 Bullish FVG")
@@ -887,7 +800,7 @@ if fvg_bearish:
     bearish += 2
     signals.append("📈 Bearish FVG")
 
-# 8. Liquidity Sweeps (3 نقاط)
+# 10. Liquidity Sweeps (3 نقاط)
 if liquidity_sweep_bullish:
     bullish += 3
     signals.append("🎯 Liquidity Sweep Bullish")
@@ -895,7 +808,7 @@ if liquidity_sweep_bearish:
     bearish += 3
     signals.append("🎯 Liquidity Sweep Bearish")
 
-# 9. Break of Structure (2 نقاط)
+# 11. Break of Structure (2 نقاط)
 if bos_bullish:
     bullish += 2
     signals.append("🚀 BOS Bullish")
@@ -903,7 +816,7 @@ if bos_bearish:
     bearish += 2
     signals.append("🚀 BOS Bearish")
 
-# 10. Market Structure Shift (3 نقاط - ICT)
+# 12. Market Structure Shift (3 نقاط - ICT)
 if mss_bullish:
     bullish += 3
     signals.append("🔄 MSS Bullish (ICT)")
@@ -911,30 +824,12 @@ if mss_bearish:
     bearish += 3
     signals.append("🔄 MSS Bearish (ICT)")
 
-# 11. Silver Bullet (5 نقاط - ICT)
+# 13. Silver Bullet (5 نقاط - ICT)
 if silver_bullet:
     bullish += 5
     signals.append("🔫 Silver Bullet (ICT) - Strong Signal")
 
-# 12. Chart Patterns (2-6 نقاط)
-pattern_score_bullish = 0
-pattern_score_bearish = 0
-pattern_names = []
-for p in patterns:
-    if p['direction'] == 'bullish':
-        pattern_score_bullish += p['score']
-        pattern_names.append(f"📈 {p['name']} (+{p['score']})")
-    elif p['direction'] == 'bearish':
-        pattern_score_bearish += p['score']
-        pattern_names.append(f"📉 {p['name']} (-{p['score']})")
-    else:
-        pattern_names.append(f"📊 {p['name']}")
-bullish += pattern_score_bullish
-bearish += pattern_score_bearish
-for pn in pattern_names[:3]:
-    signals.append(pn)
-
-# 13. الدعم/المقاومة (2 نقاط)
+# 14. الدعم/المقاومة (2 نقاط)
 if current_price <= support + 5:
     bullish += 2
     signals.append(f"📍 Near Support: ${support:.2f}")
@@ -945,32 +840,32 @@ if current_price >= resistance - 5:
 net = bullish - bearish
 
 # الإشارة النهائية
-if net >= 18:
+if net >= 15:
     signal_type = "🔴🔴🔴 EXTREME STRONG BUY 🔴🔴🔴"
     signal_action = "BUY"
     confidence = 98
     signal_color = "#00ff88"
-elif net >= 12:
+elif net >= 10:
     signal_type = "🔴🔴 STRONG BUY 🔴🔴"
     signal_action = "BUY"
     confidence = 90
     signal_color = "#00ff88"
-elif net >= 6:
+elif net >= 5:
     signal_type = "🟢 BUY 🟢"
     signal_action = "BUY"
     confidence = 75
     signal_color = "#00ff88"
-elif net <= -18:
+elif net <= -15:
     signal_type = "🔴🔴🔴 EXTREME STRONG SELL 🔴🔴🔴"
     signal_action = "SELL"
     confidence = 98
     signal_color = "#ff4444"
-elif net <= -12:
+elif net <= -10:
     signal_type = "🔴🔴 STRONG SELL 🔴🔴"
     signal_action = "SELL"
     confidence = 90
     signal_color = "#ff4444"
-elif net <= -6:
+elif net <= -5:
     signal_type = "🔴 SELL 🔴"
     signal_action = "SELL"
     confidence = 75
@@ -1027,7 +922,7 @@ st.markdown(f"""
 # ==========================================
 # التبويبات
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Market Analysis", "📈 Indicators", "📐 Fibonacci & Levels", "🔬 Technical Details"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Market Analysis", "📈 Advanced Indicators", "📐 Fibonacci & Levels", "🔬 SMC/ICT Details"])
 
 with tab1:
     # بطاقات المؤشرات
@@ -1050,8 +945,8 @@ with tab1:
     with col3:
         st.markdown(f"""
         <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">{bullish} / {bearish}</div>
-            <div class="indicator-label">Bullish / Bearish</div>
+            <div class="indicator-value" style="color:#ffd700">{current_adx:.1f}</div>
+            <div class="indicator-label">ADX (Trend Strength)</div>
         </div>
         """, unsafe_allow_html=True)
     with col4:
@@ -1099,20 +994,33 @@ with tab1:
             lot_data.append({"Lot": f"{lot:.2f}", "Risk ($)": f"${risk:.2f}", "Risk %": f"{(risk / risk_manager.trading_capital) * 100:.2f}%"})
         st.dataframe(pd.DataFrame(lot_data), use_container_width=True, hide_index=True)
     
-    # الشارت
+    # الشارت المتقدم (3 أقسام)
     st.markdown("### 📈 Price Chart")
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.4])
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
+                        row_heights=[0.5, 0.25, 0.25],
+                        subplot_titles=("Price with EMA & Bollinger", "RSI", "MACD"))
+    
+    # السعر والمتوسطات
     fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='XAU/USD', line=dict(color='#ffd700', width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], mode='lines', name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], mode='lines', name='BB Lower', line=dict(color='gray', dash='dash')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='#9b59b6')), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="#ff4444", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="#00ff88", row=2, col=1)
     fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", row=1, col=1, annotation_text="Resistance")
     fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", row=1, col=1, annotation_text="Support")
-    fig.update_layout(template="plotly_dark", height=500)
+    
+    # RSI
+    fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='#9b59b6')), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="#ff4444", row=2, col=1, annotation_text="Overbought")
+    fig.add_hline(y=30, line_dash="dash", line_color="#00ff88", row=2, col=1, annotation_text="Oversold")
+    
+    # MACD
+    fig.add_trace(go.Scatter(x=df.index, y=df['macd'], mode='lines', name='MACD', line=dict(color='cyan')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], mode='lines', name='Signal', line=dict(color='yellow')), row=3, col=1)
+    colors = ['red' if val < 0 else 'green' for val in df['macd_histogram'].fillna(0)]
+    fig.add_trace(go.Bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color=colors), row=3, col=1)
+    
+    fig.update_layout(template="plotly_dark", height=700)
     st.plotly_chart(fig, use_container_width=True)
     
     # خطة التداول
@@ -1142,58 +1050,45 @@ with tab1:
 with tab2:
     st.markdown("### 📈 Advanced Indicators")
     
-    # MACD
-    st.markdown("#### 📊 MACD")
-    fig_macd = go.Figure()
-    fig_macd.add_trace(go.Scatter(x=df.index, y=df['macd'], mode='lines', name='MACD', line=dict(color='cyan')))
-    fig_macd.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], mode='lines', name='Signal', line=dict(color='yellow')))
-    colors = ['red' if val < 0 else 'green' for val in df['macd_histogram'].fillna(0)]
-    fig_macd.add_trace(go.Bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color=colors))
-    fig_macd.update_layout(template="plotly_dark", height=300)
-    st.plotly_chart(fig_macd, use_container_width=True)
-    
-    # Bollinger Bands
-    st.markdown("#### 📊 Bollinger Bands")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">${df['bb_upper'].iloc[-1]:.2f}</div>
-            <div class="indicator-label">Upper Band</div>
+        <div class="risk-card">
+            <b>📊 MACD:</b> {'Bullish' if current_macd > current_macd_signal else 'Bearish'}<br>
+            <b>📊 Bollinger Position:</b> {current_bb_position:.2f}<br>
+            <b>📊 ADX (Trend):</b> {current_adx:.1f} - {'Strong Trend' if current_adx > 25 else 'Weak Trend'}<br>
+            <b>💰 VWAP:</b> ${current_vwap:.2f}
         </div>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">${df['bb_lower'].iloc[-1]:.2f}</div>
-            <div class="indicator-label">Lower Band</div>
+        <div class="risk-card">
+            <b>📈 +DI:</b> {df['plus_di'].iloc[-1]:.1f}<br>
+            <b>📉 -DI:</b> {df['minus_di'].iloc[-1]:.1f}<br>
+            <b>📊 ATR:</b> ${current_atr:.2f}<br>
+            <b>📊 RSI:</b> {current_rsi:.1f}
         </div>
         """, unsafe_allow_html=True)
     
-    # RSI
-    st.markdown("#### 📊 RSI")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">{current_rsi:.1f}</div>
-            <div class="indicator-label">Current RSI</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#00ff88">70+ Overbought</div>
-            <div class="indicator-label">Sell Zone</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ff4444">30- Oversold</div>
-            <div class="indicator-label">Buy Zone</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Bollinger Bands Chart
+    st.markdown("#### 📊 Bollinger Bands")
+    fig_bb = go.Figure()
+    fig_bb.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Price', line=dict(color='#ffd700')))
+    fig_bb.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], mode='lines', name='Upper Band', line=dict(color='gray', dash='dash')))
+    fig_bb.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], mode='lines', name='Middle Band', line=dict(color='blue')))
+    fig_bb.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], mode='lines', name='Lower Band', line=dict(color='gray', dash='dash')))
+    fig_bb.update_layout(template="plotly_dark", height=300)
+    st.plotly_chart(fig_bb, use_container_width=True)
+    
+    # ADX Chart
+    st.markdown("#### 📊 ADX (Trend Strength)")
+    fig_adx = go.Figure()
+    fig_adx.add_trace(go.Scatter(x=df.index, y=df['adx'], mode='lines', name='ADX', line=dict(color='orange')))
+    fig_adx.add_trace(go.Scatter(x=df.index, y=df['plus_di'], mode='lines', name='+DI', line=dict(color='green')))
+    fig_adx.add_trace(go.Scatter(x=df.index, y=df['minus_di'], mode='lines', name='-DI', line=dict(color='red')))
+    fig_adx.add_hline(y=25, line_dash="dash", line_color="gray", annotation_text="Strong Trend Threshold")
+    fig_adx.update_layout(template="plotly_dark", height=300)
+    st.plotly_chart(fig_adx, use_container_width=True)
 
 with tab3:
     st.markdown("### 📐 Fibonacci & Key Levels")
@@ -1223,64 +1118,38 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
     
-    # نظرة عامة على المؤشرات
-    st.markdown("#### 📊 Indicator Overview")
-    st.markdown(f"""
-    <div class="risk-card">
-        <b>RSI:</b> {current_rsi:.1f} - {'Oversold (Buy Zone)' if current_rsi < 35 else 'Overbought (Sell Zone)' if current_rsi > 65 else 'Neutral'}<br>
-        <b>Bollinger Position:</b> {current_bb_position:.2f} - {'Near Lower Band (Support)' if current_bb_position < 0.2 else 'Near Upper Band (Resistance)' if current_bb_position > 0.8 else 'Middle Range'}<br>
-        <b>MACD:</b> {'Bullish' if current_macd > current_macd_signal else 'Bearish'}<br>
-        <b>ATR (Volatility):</b> ${current_atr:.2f}
-    </div>
-    """, unsafe_allow_html=True)
+    # VWAP Chart
+    st.markdown("#### 💰 VWAP (Volume Weighted Average Price)")
+    fig_vwap = go.Figure()
+    fig_vwap.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Price', line=dict(color='#ffd700')))
+    fig_vwap.add_trace(go.Scatter(x=df.index, y=df['vwap'], mode='lines', name='VWAP', line=dict(color='cyan')))
+    fig_vwap.update_layout(template="plotly_dark", height=300)
+    st.plotly_chart(fig_vwap, use_container_width=True)
 
 with tab4:
-    st.markdown("### 🔬 Technical Details")
+    st.markdown("### 🔬 SMC / ICT Details")
     
-    # SMC/ICT Signals
-    st.markdown("#### 🏛️ SMC / ICT Signals")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"""
         <div class="risk-card">
-            <b>Order Blocks:</b> {'Bullish' if order_block_bullish else 'Bearish' if order_block_bearish else 'None'}<br>
-            <b>Fair Value Gaps:</b> {'Bullish' if fvg_bullish else 'Bearish' if fvg_bearish else 'None'}<br>
-            <b>Liquidity Sweeps:</b> {'Bullish' if liquidity_sweep_bullish else 'Bearish' if liquidity_sweep_bearish else 'None'}<br>
-            <b>Break of Structure:</b> {'Bullish' if bos_bullish else 'Bearish' if bos_bearish else 'None'}
+            <b>🏛️ SMC Signals:</b><br>
+            • Order Blocks: {'Bullish' if order_block_bullish else 'Bearish' if order_block_bearish else 'None'}<br>
+            • Fair Value Gaps: {'Bullish' if fvg_bullish else 'Bearish' if fvg_bearish else 'None'}<br>
+            • Liquidity Sweeps: {'Bullish' if liquidity_sweep_bullish else 'Bearish' if liquidity_sweep_bearish else 'None'}<br>
+            • Break of Structure: {'Bullish' if bos_bullish else 'Bearish' if bos_bearish else 'None'}
         </div>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown(f"""
         <div class="risk-card">
-            <b>Market Structure Shift (MSS):</b> {'Bullish' if mss_bullish else 'Bearish' if mss_bearish else 'None'}<br>
-            <b>Silver Bullet (ICT):</b> {'✅ Active' if silver_bullet else '❌ Inactive'}<br>
-            <b>Support:</b> ${support:.2f}<br>
-            <b>Resistance:</b> ${resistance:.2f}
+            <b>🎯 ICT Signals:</b><br>
+            • MSS (Market Structure Shift): {'Bullish' if mss_bullish else 'Bearish' if mss_bearish else 'None'}<br>
+            • Silver Bullet: {'✅ Active' if silver_bullet else '❌ Inactive'}<br>
+            • Support: ${support:.2f}<br>
+            • Resistance: ${resistance:.2f}
         </div>
         """, unsafe_allow_html=True)
-    
-    # Chart Patterns
-    if patterns:
-        st.markdown("#### 📈 Chart Patterns Detected")
-        cols = st.columns(min(len(patterns), 3))
-        for i, p in enumerate(patterns):
-            emoji = "🟢" if p['direction'] == 'bullish' else "🔴" if p['direction'] == 'bearish' else "⚪"
-            with cols[i % 3]:
-                st.markdown(f"""
-                <div class="pattern-card">
-                    <div style="font-size:1rem; font-weight:bold">{emoji} {p['name']}</div>
-                    <div style="color:#888; font-size:0.7rem">{p['direction'].upper()} | {p['score']} pts</div>
-                </div>
-                """, unsafe_allow_html=True)
-    else:
-        st.info("No chart patterns detected")
-    
-    # Candle Patterns
-    if candle_patterns:
-        st.markdown("#### 🕯️ Candle Patterns")
-        for cp in candle_patterns:
-            emoji = "🟢" if cp[1] == 'bullish' else "🔴" if cp[1] == 'bearish' else "⚪"
-            st.markdown(f"{emoji} **{cp[0]}** - {cp[1].upper()} | {cp[2]} pts")
     
     # جميع الإشارات
     with st.expander("📋 All Technical Signals"):
@@ -1297,7 +1166,7 @@ with tab4:
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 GoldAPI.io | SMC + ICT + MACD + BB + Fibonacci + Patterns | Advanced Analysis 𓋹<br>
+    𓋹 GoldAPI.io | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci | Advanced Analysis 𓋹<br>
     <a href="https://t.me/Ehabka2002" target="_blank" style="color:#0088cc; text-decoration:none;">📱 اشترك في قناة التليجرام للإشارات اليومية</a><br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
