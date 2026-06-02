@@ -222,6 +222,19 @@ st.markdown("""
         font-size: 0.8rem;
         color: #888;
     }
+    .trade-row {
+        background: #1e1e2e;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 4px solid;
+    }
+    .trade-win {
+        border-left-color: #00ff88;
+    }
+    .trade-loss {
+        border-left-color: #ff4444;
+    }
     .footer {
         text-align: center;
         padding: 20px;
@@ -273,6 +286,182 @@ with col2:
 # إعدادات API
 # ==========================================
 GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
+
+# ==========================================
+# نظام إدارة الصفقات (TRADE MANAGER)
+# ==========================================
+
+class TradeManager:
+    def __init__(self):
+        self.trades_file = "trades_data.json"
+        self.load_trades()
+    
+    def load_trades(self):
+        """تحميل الصفقات من الملف"""
+        try:
+            if os.path.exists(self.trades_file):
+                with open(self.trades_file, "r", encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.open_trades = data.get("open_trades", [])
+                    self.closed_trades = data.get("closed_trades", [])
+            else:
+                self.open_trades = []
+                self.closed_trades = []
+                # إضافة بعض الصفقات التجريبية
+                self.add_demo_trades()
+        except Exception as e:
+            self.open_trades = []
+            self.closed_trades = []
+            self.add_demo_trades()
+    
+    def add_demo_trades(self):
+        """إضافة صفقات تجريبية للعرض"""
+        demo_trades = [
+            {
+                "id": "T001",
+                "date": "2024-01-15 10:30:00",
+                "direction": "BUY",
+                "entry": 2030.50,
+                "exit": 2045.20,
+                "lots": 0.25,
+                "status": "closed",
+                "profit": 367.50,
+                "result": "win",
+                "notes": "اختراق مقاومة قوية"
+            },
+            {
+                "id": "T002",
+                "date": "2024-01-16 14:15:00",
+                "direction": "SELL",
+                "entry": 2048.30,
+                "exit": 2040.10,
+                "lots": 0.30,
+                "status": "closed",
+                "profit": 246.00,
+                "result": "win",
+                "notes": "ارتداد من فيبوناتشي 61.8%"
+            },
+            {
+                "id": "T003",
+                "date": "2024-01-17 09:45:00",
+                "direction": "BUY",
+                "entry": 2035.00,
+                "exit": 2028.50,
+                "lots": 0.20,
+                "status": "closed",
+                "profit": -130.00,
+                "result": "loss",
+                "notes": "ضرب الاستوب لوز"
+            },
+            {
+                "id": "T004",
+                "date": "2024-01-18 11:00:00",
+                "direction": "BUY",
+                "entry": 2025.00,
+                "lots": 0.35,
+                "stop_loss": 2018.00,
+                "take_profit": 2040.00,
+                "status": "open",
+                "notes": "صفقة مفتوحة حالياً"
+            }
+        ]
+        for trade in demo_trades:
+            if trade["status"] == "open":
+                self.open_trades.append(trade)
+            else:
+                self.closed_trades.append(trade)
+        self.save_trades()
+    
+    def save_trades(self):
+        """حفظ الصفقات في الملف"""
+        try:
+            with open(self.trades_file, "w", encoding='utf-8') as f:
+                json.dump({
+                    "open_trades": self.open_trades,
+                    "closed_trades": self.closed_trades
+                }, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            pass
+    
+    def add_trade(self, trade_data):
+        """إضافة صفقة جديدة"""
+        trade_id = f"T{len(self.open_trades) + len(self.closed_trades) + 1:03d}"
+        new_trade = {
+            "id": trade_id,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "direction": trade_data["direction"],
+            "entry": trade_data["entry"],
+            "lots": trade_data["lots"],
+            "stop_loss": trade_data.get("stop_loss"),
+            "take_profit": trade_data.get("take_profit"),
+            "status": "open",
+            "notes": trade_data.get("notes", "")
+        }
+        self.open_trades.append(new_trade)
+        self.save_trades()
+        return trade_id
+    
+    def close_trade(self, trade_id, exit_price):
+        """إغلاق صفقة"""
+        for i, trade in enumerate(self.open_trades):
+            if trade["id"] == trade_id:
+                trade["exit"] = exit_price
+                trade["status"] = "closed"
+                
+                # حساب الربح/الخسارة
+                if trade["direction"] == "BUY":
+                    pips = (exit_price - trade["entry"]) * 100  # تحويل إلى بيبس
+                else:
+                    pips = (trade["entry"] - exit_price) * 100
+                
+                profit = pips * trade["lots"] * 0.1  # تقريبي لكل لوت = 10$ لكل بيب
+                trade["profit"] = round(profit, 2)
+                trade["result"] = "win" if profit > 0 else "loss"
+                trade["close_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                self.closed_trades.append(trade)
+                self.open_trades.pop(i)
+                self.save_trades()
+                return profit
+        return None
+    
+    def delete_trade(self, trade_id, is_open=True):
+        """حذف صفقة"""
+        if is_open:
+            self.open_trades = [t for t in self.open_trades if t["id"] != trade_id]
+        else:
+            self.closed_trades = [t for t in self.closed_trades if t["id"] != trade_id]
+        self.save_trades()
+    
+    def get_statistics(self):
+        """الحصول على إحصائيات الصفقات"""
+        if not self.closed_trades:
+            return {
+                "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "win_rate": 0,
+                "total_profit": 0,
+                "avg_profit": 0,
+                "best_trade": 0,
+                "worst_trade": 0
+            }
+        
+        total_trades = len(self.closed_trades)
+        winning_trades = [t for t in self.closed_trades if t.get("result") == "win"]
+        losing_trades = [t for t in self.closed_trades if t.get("result") == "loss"]
+        profits = [t.get("profit", 0) for t in self.closed_trades]
+        
+        return {
+            "total_trades": total_trades,
+            "winning_trades": len(winning_trades),
+            "losing_trades": len(losing_trades),
+            "win_rate": (len(winning_trades) / total_trades * 100) if total_trades > 0 else 0,
+            "total_profit": sum(profits),
+            "avg_profit": sum(profits) / total_trades if total_trades > 0 else 0,
+            "best_trade": max(profits) if profits else 0,
+            "worst_trade": min(profits) if profits else 0
+        }
 
 # ==========================================
 # نظام إدارة المخاطر
@@ -378,6 +567,7 @@ class RiskManager:
         }
 
 risk_manager = RiskManager()
+trade_manager = TradeManager()
 limits = risk_manager.get_trading_limits()
 
 # ==========================================
@@ -920,9 +1110,9 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# التبويبات
+# التبويبات (مع إضافة تبويب الصفقات)
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Market Analysis", "📈 Advanced Indicators", "📐 Fibonacci & Levels", "🔬 SMC/ICT Details"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Market Analysis", "📈 Advanced Indicators", "📐 Fibonacci & Levels", "🔬 SMC/ICT Details", "📝 Trade Journal"])
 
 with tab1:
     # بطاقات المؤشرات
@@ -1160,6 +1350,108 @@ with tab4:
                 st.error(s)
             else:
                 st.info(s)
+
+# ==========================================
+# TAB 5: TRADE JOURNAL - الصفقات
+# ==========================================
+with tab5:
+    st.markdown("### 📝 Trade Journal")
+    st.markdown("---")
+    
+    # إحصائيات الأداء
+    stats = trade_manager.get_statistics()
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("📊 Total Trades", stats["total_trades"])
+    with col2:
+        st.metric("✅ Win Rate", f"{stats['win_rate']:.1f}%")
+    with col3:
+        st.metric("💰 Total P&L", f"${stats['total_profit']:,.2f}")
+    with col4:
+        st.metric("🏆 Best Trade", f"${stats['best_trade']:.2f}")
+    with col5:
+        st.metric("💀 Worst Trade", f"${stats['worst_trade']:.2f}")
+    
+    st.markdown("---")
+    
+    # إضافة صفقة جديدة
+    with st.expander("➕ ADD NEW TRADE", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            trade_direction = st.selectbox("Direction", ["BUY", "SELL"], key="trade_dir")
+            trade_entry = st.number_input("Entry Price", value=current_price, step=1.0, format="%.2f", key="trade_entry")
+            trade_lots = st.number_input("Lot Size", value=0.25, step=0.05, format="%.2f", key="trade_lots")
+        with col2:
+            trade_stop = st.number_input("Stop Loss", value=current_price - 10 if trade_direction == "BUY" else current_price + 10, step=1.0, format="%.2f", key="trade_stop")
+            trade_tp = st.number_input("Take Profit", value=current_price + 20 if trade_direction == "BUY" else current_price - 20, step=1.0, format="%.2f", key="trade_tp")
+            trade_notes = st.text_input("Notes", placeholder="Optional", key="trade_notes")
+        
+        if st.button("✅ ADD TRADE", use_container_width=True):
+            if trade_entry > 0 and trade_lots > 0:
+                trade_data = {
+                    "direction": trade_direction,
+                    "entry": trade_entry,
+                    "lots": trade_lots,
+                    "stop_loss": trade_stop,
+                    "take_profit": trade_tp,
+                    "notes": trade_notes
+                }
+                trade_id = trade_manager.add_trade(trade_data)
+                st.success(f"✅ Trade {trade_id} added successfully!")
+                st.rerun()
+            else:
+                st.error("Please enter valid trade details")
+    
+    st.markdown("---")
+    
+    # الصفقات المفتوحة
+    st.markdown("### 🔓 Open Trades")
+    if trade_manager.open_trades:
+        for trade in trade_manager.open_trades:
+            with st.container():
+                color = "#00ff88" if trade["direction"] == "BUY" else "#ff4444"
+                st.markdown(f"""
+                <div class="trade-row" style="border-left-color: {color}">
+                    <b>🆔 {trade['id']}</b> | 📅 {trade['date']}<br>
+                    <b>{trade['direction']}</b> | Entry: ${trade['entry']:.2f} | Lots: {trade['lots']}<br>
+                    🛑 SL: ${trade.get('stop_loss', 0):.2f} | 🎯 TP: ${trade.get('take_profit', 0):.2f}<br>
+                    📝 {trade.get('notes', 'No notes')}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    exit_price = st.number_input(f"Exit price for {trade['id']}", value=current_price, step=1.0, format="%.2f", key=f"exit_{trade['id']}")
+                    if st.button(f"Close {trade['id']}", key=f"close_{trade['id']}"):
+                        profit = trade_manager.close_trade(trade['id'], exit_price)
+                        if profit:
+                            st.success(f"Trade closed! Profit: ${profit:.2f}")
+                            st.rerun()
+    else:
+        st.info("No open trades 📭")
+    
+    st.markdown("---")
+    
+    # الصفقات المغلقة
+    st.markdown("### 🔒 Closed Trades")
+    if trade_manager.closed_trades:
+        for trade in reversed(trade_manager.closed_trades[-20:]):  # آخر 20 صفقة
+            profit = trade.get("profit", 0)
+            profit_color = "#00ff88" if profit > 0 else "#ff4444"
+            profit_sign = "+" if profit > 0 else ""
+            result_emoji = "✅" if trade.get("result") == "win" else "❌"
+            
+            st.markdown(f"""
+            <div class="trade-row trade-{trade.get('result', 'loss')}">
+                <b>{result_emoji} 🆔 {trade['id']}</b> | 📅 {trade['date']}<br>
+                <b>{trade['direction']}</b> | Entry: ${trade['entry']:.2f} | Exit: ${trade.get('exit', 0):.2f} | Lots: {trade['lots']}<br>
+                📊 P&L: <span style="color:{profit_color}">{profit_sign}${abs(profit):.2f}</span><br>
+                📝 {trade.get('notes', 'No notes')}
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No closed trades yet 📭")
 
 # ==========================================
 # الفوتر
