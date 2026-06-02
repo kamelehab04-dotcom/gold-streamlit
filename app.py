@@ -35,19 +35,6 @@ st.markdown("""
         color: #aaa;
         margin-top: 10px;
     }
-    .nav-button {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 1px solid #ffd70033;
-        border-radius: 10px;
-        padding: 10px 20px;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.3s;
-    }
-    .nav-button:hover {
-        border-color: #ffd700;
-        transform: translateY(-2px);
-    }
     .stats-container {
         display: flex;
         justify-content: space-between;
@@ -209,7 +196,6 @@ st.markdown("""
         color: #ffd700;
         letter-spacing: 2px;
     }
-    /* تبويب التنقل */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -257,18 +243,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# إنشاء التبويبات (الصفحات)
+# إعدادات APIs
+# ==========================================
+GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
+NYT_API_KEY = "suEqGgxLCKO95ktzKCjmqAlBAtfb4CgVj800GTHgMJHnR2So"
+FCS_API_KEY = "HfsqvLZ0EVDYRvxfGmCa8EUsoK"  # المفتاح الجديد للتقويم الاقتصادي
+
+# ==========================================
+# إنشاء التبويبات
 # ==========================================
 tab1, tab2 = st.tabs(["📊 Gold Analysis Dashboard", "📅 Economic Calendar"])
 
 # ==========================================
-# الصفحة 1: تحليل الذهب (نفس الكود السابق)
+# الصفحة 1: تحليل الذهب
 # ==========================================
 with tab1:
-    # إعدادات APIs
-    GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
-    NYT_API_KEY = "suEqGgxLCKO95ktzKCjmqAlBAtfb4CgVj800GTHgMJHnR2So"
-    
     @st.cache_data(ttl=30)
     def get_real_price():
         try:
@@ -388,7 +377,6 @@ with tab1:
     current_rsi = df['rsi'].iloc[-1]
     current_atr = df['atr'].iloc[-1]
     
-    # SMC Signals
     recent_lows = df['low'].iloc[-20:].values
     recent_highs = df['high'].iloc[-20:].values
     liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1])
@@ -398,7 +386,6 @@ with tab1:
     resistance = np.percentile(df['high'].iloc[-30:], 75)
     support = np.percentile(df['low'].iloc[-30:], 25)
     
-    # التسجيل
     bullish = 0
     bearish = 0
     signals = []
@@ -491,7 +478,6 @@ with tab1:
         stop_loss = None
         targets = []
     
-    # عرض السعر
     change = real_price - (df['close'].iloc[-2] if len(df) > 1 else real_price) if real_price else 0
     change_percent = (change / (df['close'].iloc[-2] if len(df) > 1 else real_price)) * 100 if real_price else 0
     change_color = "#00ff88" if change >= 0 else "#ff4444"
@@ -505,7 +491,6 @@ with tab1:
     </div>
     """, unsafe_allow_html=True)
     
-    # بطاقات المؤشرات
     st.markdown("### 📊 Market Indicators")
     
     col1, col2, col3, col4 = st.columns(4)
@@ -538,7 +523,6 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    # الإشارة
     signal_class = "signal-buy" if signal_action == "BUY" else "signal-sell" if signal_action == "SELL" else "signal-neutral"
     st.markdown(f"""
     <div class="signal-card {signal_class}">
@@ -558,7 +542,6 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    # الشارت
     st.markdown("### 📈 Price Chart")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Gold', line=dict(color='#ffd700', width=2)))
@@ -569,7 +552,6 @@ with tab1:
     fig.update_layout(template="plotly_dark", height=450)
     st.plotly_chart(fig, use_container_width=True)
     
-    # خطة التداول
     if signal_action != "NEUTRAL":
         st.markdown("### 🎯 Trading Plan")
         st.markdown(f"""
@@ -589,7 +571,6 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    # المؤشرات
     with st.expander("📊 Technical Indicators"):
         for s in signals:
             if "✅" in s or "📈" in s:
@@ -600,65 +581,61 @@ with tab1:
                 st.info(s)
 
 # ==========================================
-# الصفحة 2: التقويم الاقتصادي
+# الصفحة 2: التقويم الاقتصادي (بيانات حقيقية)
 # ==========================================
 with tab2:
     st.markdown("### 📅 Economic Calendar")
     st.markdown("أهم الأحداث الاقتصادية المؤثرة على الذهب والأسواق المالية")
     st.markdown("---")
     
-    # دالة جلب التقويم الاقتصادي
     @st.cache_data(ttl=3600)
-    def get_economic_calendar():
-        """جلب بيانات التقويم الاقتصادي من مصادر متعددة"""
+    def get_economic_calendar_real():
+        """جلب بيانات التقويم الاقتصادي الحقيقية من FCS API"""
         events = []
         
-        # المصدر 1: API مجاني (ForexFactory عبر jblanked.com)
-        try:
-            url = "https://www.jblanked.com/news/api/calendar/"
-            headers = {"Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list):
-                    for event in data[:20]:
-                        impact_map = {"High": "high", "Medium": "medium", "Low": "low"}
-                        impact = impact_map.get(event.get("impact", "Low"), "low")
-                        events.append({
-                            "title": event.get("title", ""),
-                            "date": event.get("date", ""),
-                            "time": event.get("time", ""),
-                            "country": event.get("country", ""),
-                            "impact": impact,
-                            "actual": event.get("actual", "-"),
-                            "forecast": event.get("forecast", "-"),
-                            "previous": event.get("previous", "-")
-                        })
-        except:
-            pass
+        if FCS_API_KEY and FCS_API_KEY != "HfsqvLZ0EVDYRvxfGmCa8EUsoK":
+            try:
+                url = f"https://fcsapi.com/api-v3/calendar"
+                params = {
+                    "access_key": FCS_API_KEY,
+                    "limit": 50,
+                    "lang": "en"
+                }
+                response = requests.get(url, params=params, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status'):
+                        for event in data.get('response', [])[:30]:
+                            impact_map = {"3": "high", "2": "medium", "1": "low"}
+                            events.append({
+                                "title": event.get('event', ''),
+                                "date": event.get('date', ''),
+                                "time": event.get('time', ''),
+                                "country": event.get('country', ''),
+                                "impact": impact_map.get(str(event.get('impact', '1')), 'low'),
+                                "actual": event.get('actual', '-'),
+                                "forecast": event.get('forecast', '-'),
+                                "previous": event.get('previous', '-')
+                            })
+                        if events:
+                            return events
+            except Exception as e:
+                st.warning(f"API Error: {e}")
         
-        # المصدر 2: بيانات وهمية للاختبار (إذا فشل الـ API)
-        if not events:
-            today = datetime.now()
-            events = [
-                {"title": "Federal Reserve Interest Rate Decision", "date": today.strftime("%Y-%m-%d"), "time": "14:00", "country": "US", "impact": "high", "actual": "5.50%", "forecast": "5.50%", "previous": "5.50%"},
-                {"title": "US Non-Farm Payrolls", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "180K", "previous": "175K"},
-                {"title": "CPI Inflation Rate (YoY)", "date": (today + timedelta(days=5)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "3.2%", "previous": "3.1%"},
-                {"title": "ECB Interest Rate Decision", "date": (today + timedelta(days=3)).strftime("%Y-%m-%d"), "time": "09:15", "country": "EU", "impact": "high", "actual": "-", "forecast": "4.50%", "previous": "4.50%"},
-                {"title": "GDP Growth Rate (QoQ)", "date": (today + timedelta(days=4)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "2.5%", "previous": "2.8%"},
-                {"title": "Unemployment Rate", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "medium", "actual": "-", "forecast": "3.7%", "previous": "3.7%"},
-                {"title": "Retail Sales (MoM)", "date": (today + timedelta(days=6)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "medium", "actual": "-", "forecast": "0.5%", "previous": "0.3%"},
-                {"title": "German ZEW Economic Sentiment", "date": (today + timedelta(days=1)).strftime("%Y-%m-%d"), "time": "05:00", "country": "DE", "impact": "medium", "actual": "-", "forecast": "45.0", "previous": "42.9"},
-                {"title": "Bank of Japan Policy Rate", "date": (today + timedelta(days=4)).strftime("%Y-%m-%d"), "time": "03:00", "country": "JP", "impact": "medium", "actual": "-", "forecast": "-0.10%", "previous": "-0.10%"},
-                {"title": "Manufacturing PMI", "date": (today + timedelta(days=1)).strftime("%Y-%m-%d"), "time": "09:00", "country": "EU", "impact": "low", "actual": "-", "forecast": "48.5", "previous": "48.2"},
-            ]
-        
+        # بيانات تجريبية (Mock) في حالة فشل API
+        today = datetime.now()
+        events = [
+            {"title": "Federal Reserve Interest Rate Decision", "date": today.strftime("%Y-%m-%d"), "time": "14:00", "country": "US", "impact": "high", "actual": "5.50%", "forecast": "5.50%", "previous": "5.50%"},
+            {"title": "US Non-Farm Payrolls", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "180K", "previous": "175K"},
+            {"title": "CPI Inflation Rate (YoY)", "date": (today + timedelta(days=5)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "3.2%", "previous": "3.1%"},
+            {"title": "ECB Interest Rate Decision", "date": (today + timedelta(days=3)).strftime("%Y-%m-%d"), "time": "09:15", "country": "EU", "impact": "high", "actual": "-", "forecast": "4.50%", "previous": "4.50%"},
+            {"title": "GDP Growth Rate (QoQ)", "date": (today + timedelta(days=4)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "2.5%", "previous": "2.8%"},
+        ]
         return events
     
-    events = get_economic_calendar()
+    events = get_economic_calendar_real()
     
     if events:
-        # فلاتر
         col1, col2, col3 = st.columns(3)
         with col1:
             countries = ["All"] + sorted(list(set([e['country'] for e in events])))
@@ -669,7 +646,6 @@ with tab2:
         with col3:
             date_filter = st.selectbox("📅 Date", ["All", "Today", "Tomorrow", "This Week"])
         
-        # فلترة الأحداث
         filtered_events = events.copy()
         if selected_country != "All":
             filtered_events = [e for e in filtered_events if e['country'] == selected_country]
@@ -688,7 +664,6 @@ with tab2:
             week_end = week_start + timedelta(days=6)
             filtered_events = [e for e in filtered_events if week_start.strftime("%Y-%m-%d") <= e['date'] <= week_end.strftime("%Y-%m-%d")]
         
-        # عرض الإحصائيات
         st.markdown("---")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -703,7 +678,6 @@ with tab2:
         
         st.markdown("---")
         
-        # عرض الأحداث
         for event in filtered_events:
             impact_class = "event-high" if event['impact'] == 'high' else "event-medium" if event['impact'] == 'medium' else "event-low"
             impact_emoji = "🔴" if event['impact'] == 'high' else "🟡" if event['impact'] == 'medium' else "🟢"
@@ -711,12 +685,8 @@ with tab2:
             st.markdown(f"""
             <div class="event-card {impact_class}">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                    <div>
-                        <span style="font-size:1.1rem; font-weight:bold">📌 {event['title']}</span>
-                    </div>
-                    <div>
-                        <span style="color:#ffd700">{impact_emoji} {event['impact'].upper()} IMPACT</span>
-                    </div>
+                    <div><span style="font-size:1.1rem; font-weight:bold">📌 {event['title']}</span></div>
+                    <div><span style="color:#ffd700">{impact_emoji} {event['impact'].upper()} IMPACT</span></div>
                 </div>
                 <div style="margin-top: 10px; display: flex; gap: 20px; flex-wrap: wrap;">
                     <span>🌍 {event['country']}</span>
@@ -734,7 +704,6 @@ with tab2:
         if not filtered_events:
             st.info("No events found for the selected filters.")
         
-        # شرح تأثير الأحداث
         with st.expander("ℹ️ How to read this calendar"):
             st.markdown("""
             - **🔴 High Impact**: Likely to cause significant market movement
