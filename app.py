@@ -369,12 +369,6 @@ class RiskManager:
             "can_trade": self.can_trade()[0],
             "can_trade_message": self.can_trade()[1]
         }
-    
-    def update_pnl(self, profit_loss):
-        self.daily_pnl += profit_loss
-        self.trades_today += 1
-        self.save_daily_data()
-        return self.get_trading_limits()
 
 risk_manager = RiskManager()
 limits = risk_manager.get_trading_limits()
@@ -482,7 +476,6 @@ st.markdown("---")
 def get_spot_price():
     """جلب سعر الذهب الفوري الحقيقي من Yahoo Finance"""
     try:
-        # XAUUSD=X هو الرمز الصحيح للسعر الفوري
         gold = yf.Ticker("XAUUSD=X")
         df = gold.history(period="1d", interval="1m")
         if not df.empty:
@@ -785,21 +778,6 @@ with st.expander("📊 Technical Indicators Details"):
             st.error(s)
         else:
             st.info(s)
-
-# ==========================================
-# تبويب التقويم الاقتصادي (مبسط)
-# ==========================================
-with st.tabs(["📅 Economic Calendar"]):
-    st.markdown("### 📅 Economic Calendar")
-    st.markdown("---")
-    today = datetime.now()
-    events = [
-        {"title": "Federal Reserve Interest Rate Decision", "date": today.strftime("%Y-%m-%d"), "time": "14:00", "country": "US", "impact": "high"},
-        {"title": "US Non-Farm Payrolls", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high"},
-        {"title": "CPI Inflation Rate (YoY)", "date": (today + timedelta(days=5)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high"},
-    ]
-    for event in events:
-        st.markdown(f"🔴 **{event['title']** - {event['country']} | {event['date']} {event['time']}")
 
 # ==========================================
 # الفوتر
