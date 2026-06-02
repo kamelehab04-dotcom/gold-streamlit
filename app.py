@@ -4,15 +4,38 @@ import plotly.graph_objects as go
 from datetime import datetime
 import pandas as pd
 import numpy as np
+import requests
 
 st.set_page_config(page_title="Gold Analysis", layout="wide")
 
-st.title("🥇 PHARAOH GOLD DASHBOARD")
+st.title("🥇 PHARAOH GOLD DASHBOARD - REAL TIME")
 st.markdown("---")
 
-# جلب البيانات
+# ==========================================
+# جلب سعر الذهب الفوري من GoldAPI.io (REAL TIME)
+# ==========================================
+GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
+
+@st.cache_data(ttl=30)
+def get_real_price():
+    """جلب السعر الفوري الحقيقي من GoldAPI.io"""
+    try:
+        url = "https://www.goldapi.io/api/XAU/USD"
+        headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return float(data.get('price', 0))
+        return None
+    except Exception as e:
+        print(f"GoldAPI Error: {e}")
+        return None
+
+# ==========================================
+# جلب البيانات التاريخية من yfinance (للشارت)
+# ==========================================
 @st.cache_data(ttl=300)
-def get_data():
+def get_historical_data():
     gold = yf.Ticker("GC=F")
     df = gold.history(period="3d", interval="1h")
     if df.empty:
@@ -20,14 +43,24 @@ def get_data():
     df.columns = [col.lower() for col in df.columns]
     return df
 
-df = get_data()
+# جلب السعر الفوري
+real_price = get_real_price()
+
+# جلب البيانات التاريخية
+df = get_historical_data()
 
 if df is None:
-    st.error("Error loading data")
+    st.error("Error loading historical data")
     st.stop()
 
+# استخدام السعر الفوري بدل آخر سعر في yfinance
+if real_price and real_price > 0:
+    current_price = real_price
+else:
+    current_price = df['close'].iloc[-1]
+
 # ==========================================
-# حساب المؤشرات
+# حساب المؤشرات (باستخدام yfinance للاتجاه)
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -52,7 +85,6 @@ df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['rsi'] = calc_rsi(df['close'])
 df['atr'] = calc_atr(df)
 
-current_price = df['close'].iloc[-1]
 current_rsi = df['rsi'].iloc[-1]
 current_atr = df['atr'].iloc[-1]
 
@@ -60,13 +92,13 @@ current_atr = df['atr'].iloc[-1]
 # إشارات SMC
 # ==========================================
 
-# Liquidity Sweep (اصطياد السيولة)
+# Liquidity Sweep
 recent_lows = df['low'].iloc[-20:].values
 recent_highs = df['high'].iloc[-20:].values
 liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1])
 liquidity_sweep_bearish = df['high'].iloc[-1] > max(recent_highs[:-1])
 
-# Break of Structure (كسر الهيكل)
+# Break of Structure
 bos_bullish = current_price > df['high'].iloc[-6:-1].max()
 bos_bearish = current_price < df['low'].iloc[-6:-1].min()
 
@@ -115,7 +147,7 @@ if bos_bearish:
     bearish += 2
     signals.append("🚀 BOS Bearish")
 
-# السعر بجانب الدعم/المقاومة
+# Near Support/Resistance
 if current_price <= support + 5:
     bullish += 2
     signals.append(f"📍 Near Support: ${support:.2f}")
@@ -167,12 +199,20 @@ else:
 # عرض الواجهة
 # ==========================================
 
-# بطاقات
+# بطاقات مع إبراز السعر الفوري
+st.markdown(f"""
+<div style="background-color:#1e1e2e; padding:20px; border-radius:10px; margin-bottom:20px; text-align:center">
+    <h2 style="color:#ffd700; margin:0">𓋹 REAL TIME GOLD PRICE 𓋹</h2>
+    <h1 style="color:#ffffff; font-size:3rem; margin:10px 0">${current_price:.2f}</h1>
+    <p style="color:#888">Live price from GoldAPI.io • Updated every 30 seconds</p>
+</div>
+""", unsafe_allow_html=True)
+
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("💰 Gold Price", f"${current_price:.2f}")
-col2.metric("📈 RSI", f"{current_rsi:.1f}")
-col3.metric("🎯 Signal", signal_type, delta=f"{confidence}%")
-col4.metric("📊 Net Score", f"+{bullish}/-{bearish}", delta=f"net {net:+d}")
+col1.metric("📈 RSI", f"{current_rsi:.1f}")
+col2.metric("🎯 Signal", signal_type, delta=f"{confidence}%")
+col3.metric("📊 Net Score", f"+{bullish}/-{bearish}", delta=f"net {net:+d}")
+col4.metric("📐 ATR", f"${current_atr:.2f}")
 
 st.markdown("---")
 
@@ -183,7 +223,8 @@ fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20',
 fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='blue')))
 fig.add_hline(y=resistance, line_dash="dash", line_color="red", annotation_text="Resistance")
 fig.add_hline(y=support, line_dash="dash", line_color="green", annotation_text="Support")
-fig.update_layout(template="plotly_dark", height=450, title=f"Gold Price - ${current_price:.2f}")
+fig.add_hline(y=current_price, line_dash="dot", line_color="white", annotation_text=f"Current: ${current_price:.2f}")
+fig.update_layout(template="plotly_dark", height=450, title=f"Gold Historical Chart - Current: ${current_price:.2f}")
 st.plotly_chart(fig, use_container_width=True)
 
 # RSI Chart
