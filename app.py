@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import requests
 import json
 import os
 
@@ -250,7 +251,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | سعر فوري حقيقي XAU/USD | SMC + ICT</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | سعر فوري حقيقي | SMC + ICT</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -266,6 +267,11 @@ with col2:
         </a>
     </div>
     """, unsafe_allow_html=True)
+
+# ==========================================
+# إعدادات API
+# ==========================================
+GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
 
 # ==========================================
 # نظام إدارة المخاطر
@@ -469,26 +475,32 @@ else:
 st.markdown("---")
 
 # ==========================================
-# تحليل الذهب (سعر فوري حقيقي من Yahoo Finance)
+# تحليل الذهب (سعر فوري من GoldAPI)
 # ==========================================
 
 @st.cache_data(ttl=10)
 def get_spot_price():
-    """جلب سعر الذهب الفوري الحقيقي من Yahoo Finance"""
+    """جلب سعر الذهب الفوري من GoldAPI"""
     try:
-        gold = yf.Ticker("XAUUSD=X")
-        df = gold.history(period="1d", interval="1m")
-        if not df.empty:
-            return df['Close'].iloc[-1]
+        url = "https://www.goldapi.io/api/XAU/USD"
+        headers = {
+            "x-access-token": GOLD_API_KEY,
+            "Content-Type": "application/json"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return float(data.get('price', 0))
         return None
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"GoldAPI Error: {e}")
         return None
 
 @st.cache_data(ttl=300)
 def get_historical_data():
+    """جلب البيانات التاريخية من Yahoo Finance"""
     try:
-        gold = yf.Ticker("XAUUSD=X")
+        gold = yf.Ticker("GC=F")
         df = gold.history(period="1mo", interval="1h")
         if df.empty:
             return None
@@ -497,8 +509,10 @@ def get_historical_data():
     except:
         return None
 
-# جلب السعر الفوري الحقيقي
+# جلب السعر الفوري من GoldAPI
 current_price = get_spot_price()
+
+# جلب البيانات التاريخية
 df = get_historical_data()
 
 if df is None:
@@ -654,11 +668,11 @@ change_sign = "+" if change >= 0 else ""
 st.markdown(f"""
 <div class="price-card">
     <div class="price-label">
-        <span class="live-badge">LIVE SPOT</span> 𓋹 XAU/USD (REAL TIME) 𓋹
+        <span class="live-badge">LIVE SPOT</span> 𓋹 XAU/USD (GOLDAPI.IO) 𓋹
     </div>
     <div class="price-value">${current_price:,.2f}</div>
     <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
-    <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: Yahoo Finance (XAU/USD Spot)</div>
+    <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: GoldAPI.io (Real-time Spot)</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -784,7 +798,7 @@ with st.expander("📊 Technical Indicators Details"):
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 Real-time XAU/USD Spot from Yahoo Finance | SMC + ICT Analysis | Risk Management 𓋹<br>
+    𓋹 Real-time XAU/USD Spot from GoldAPI.io | SMC + ICT Analysis | Risk Management 𓋹<br>
     <a href="https://t.me/Ehabka2002" target="_blank" style="color:#0088cc; text-decoration:none;">📱 اشترك في قناة التليجرام للإشارات اليومية</a><br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
