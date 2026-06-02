@@ -5,20 +5,98 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import requests
+from PIL import Image
+import base64
+from io import BytesIO
 
-st.set_page_config(page_title="Gold Analysis", layout="wide")
-
-st.title("🥇 PHARAOH GOLD DASHBOARD - REAL TIME")
-st.markdown("---")
+st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# جلب سعر الذهب الفوري من GoldAPI.io (REAL TIME)
+# شعار فرعوني (كـ HTML/CSS)
+# ==========================================
+st.markdown("""
+<style>
+    .pharaoh-header {
+        text-align: center;
+        padding: 20px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 15px;
+        margin-bottom: 20px;
+        border: 1px solid #ffd70033;
+    }
+    .pharaoh-title {
+        font-size: 2.5rem;
+        color: #ffd700;
+        text-shadow: 2px 2px 4px #000000;
+        margin: 0;
+        font-weight: bold;
+    }
+    .pharaoh-subtitle {
+        font-size: 1rem;
+        color: #888;
+        margin: 5px 0 0 0;
+    }
+    .pharaoh-icon {
+        font-size: 3rem;
+    }
+    .gold-text {
+        color: #ffd700;
+    }
+    .signal-buy {
+        background-color: #00ff8833;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #00ff88;
+    }
+    .signal-sell {
+        background-color: #ff444433;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #ff4444;
+    }
+    .signal-neutral {
+        background-color: #ffaa0033;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #ffaa00;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        border: 1px solid #ffd70033;
+    }
+    .footer {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+        font-size: 0.8rem;
+        border-top: 1px solid #333;
+        margin-top: 30px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# الهيدر الفرعوني
+# ==========================================
+st.markdown("""
+<div class="pharaoh-header">
+    <div class="pharaoh-icon">𓋹𓋹𓋹</div>
+    <div class="pharaoh-title">PHARAOH GOLD DASHBOARD</div>
+    <div class="pharaoh-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT Analysis</div>
+    <div class="pharaoh-icon">𓋹𓋹𓋹</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# جلب سعر الذهب الفوري
 # ==========================================
 GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
 
 @st.cache_data(ttl=30)
 def get_real_price():
-    """جلب السعر الفوري الحقيقي من GoldAPI.io"""
     try:
         url = "https://www.goldapi.io/api/XAU/USD"
         headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
@@ -27,13 +105,9 @@ def get_real_price():
             data = response.json()
             return float(data.get('price', 0))
         return None
-    except Exception as e:
-        print(f"GoldAPI Error: {e}")
+    except:
         return None
 
-# ==========================================
-# جلب البيانات التاريخية من yfinance (للشارت)
-# ==========================================
 @st.cache_data(ttl=300)
 def get_historical_data():
     gold = yf.Ticker("GC=F")
@@ -43,24 +117,20 @@ def get_historical_data():
     df.columns = [col.lower() for col in df.columns]
     return df
 
-# جلب السعر الفوري
 real_price = get_real_price()
-
-# جلب البيانات التاريخية
 df = get_historical_data()
 
 if df is None:
-    st.error("Error loading historical data")
+    st.error("Error loading data")
     st.stop()
 
-# استخدام السعر الفوري بدل آخر سعر في yfinance
 if real_price and real_price > 0:
     current_price = real_price
 else:
     current_price = df['close'].iloc[-1]
 
 # ==========================================
-# حساب المؤشرات (باستخدام yfinance للاتجاه)
+# حساب المؤشرات
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -91,18 +161,12 @@ current_atr = df['atr'].iloc[-1]
 # ==========================================
 # إشارات SMC
 # ==========================================
-
-# Liquidity Sweep
 recent_lows = df['low'].iloc[-20:].values
 recent_highs = df['high'].iloc[-20:].values
 liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1])
 liquidity_sweep_bearish = df['high'].iloc[-1] > max(recent_highs[:-1])
-
-# Break of Structure
 bos_bullish = current_price > df['high'].iloc[-6:-1].max()
 bos_bearish = current_price < df['low'].iloc[-6:-1].min()
-
-# الدعم والمقاومة
 resistance = np.percentile(df['high'].iloc[-30:], 75)
 support = np.percentile(df['low'].iloc[-30:], 25)
 
@@ -113,7 +177,6 @@ bullish = 0
 bearish = 0
 signals = []
 
-# RSI
 if current_rsi < 45:
     bullish += 3
     signals.append(f"✅ RSI: {current_rsi:.1f} (BUY)")
@@ -123,7 +186,6 @@ elif current_rsi > 65:
 else:
     signals.append(f"📊 RSI: {current_rsi:.1f} (NEUTRAL)")
 
-# EMA
 if current_price > df['ema20'].iloc[-1]:
     bullish += 2
     signals.append("📈 Price above EMA20")
@@ -131,7 +193,6 @@ else:
     bearish += 2
     signals.append("📉 Price below EMA20")
 
-# Liquidity Sweep
 if liquidity_sweep_bullish:
     bullish += 3
     signals.append("🎯 Liquidity Sweep Bullish")
@@ -139,7 +200,6 @@ if liquidity_sweep_bearish:
     bearish += 3
     signals.append("🎯 Liquidity Sweep Bearish")
 
-# Break of Structure
 if bos_bullish:
     bullish += 2
     signals.append("🚀 BOS Bullish")
@@ -147,7 +207,6 @@ if bos_bearish:
     bearish += 2
     signals.append("🚀 BOS Bearish")
 
-# Near Support/Resistance
 if current_price <= support + 5:
     bullish += 2
     signals.append(f"📍 Near Support: ${support:.2f}")
@@ -157,7 +216,6 @@ if current_price >= resistance - 5:
 
 net = bullish - bearish
 
-# الإشارة النهائية
 if net >= 8:
     signal_type = "🔴🔴 STRONG BUY 🔴🔴"
     signal_action = "BUY"
@@ -196,49 +254,87 @@ else:
     targets = []
 
 # ==========================================
-# عرض الواجهة
+# عرض السعر الرئيسي
 # ==========================================
-
-# بطاقات مع إبراز السعر الفوري
 st.markdown(f"""
-<div style="background-color:#1e1e2e; padding:20px; border-radius:10px; margin-bottom:20px; text-align:center">
+<div style="background:linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding:25px; border-radius:15px; margin-bottom:20px; text-align:center; border:1px solid #ffd700">
     <h2 style="color:#ffd700; margin:0">𓋹 REAL TIME GOLD PRICE 𓋹</h2>
-    <h1 style="color:#ffffff; font-size:3rem; margin:10px 0">${current_price:.2f}</h1>
-    <p style="color:#888">Live price from GoldAPI.io • Updated every 30 seconds</p>
+    <h1 style="color:#ffffff; font-size:3.5rem; margin:10px 0">${current_price:.2f}</h1>
+    <p style="color:#888">Live from GoldAPI.io • Updated every 30 seconds</p>
 </div>
 """, unsafe_allow_html=True)
 
+# ==========================================
+# البطاقات
+# ==========================================
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("📈 RSI", f"{current_rsi:.1f}")
-col2.metric("🎯 Signal", signal_type, delta=f"{confidence}%")
-col3.metric("📊 Net Score", f"+{bullish}/-{bearish}", delta=f"net {net:+d}")
-col4.metric("📐 ATR", f"${current_atr:.2f}")
+
+with col1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:2rem">📈</div>
+        <div style="font-size:1.5rem; font-weight:bold">{current_rsi:.1f}</div>
+        <div style="color:#888">RSI</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    color = "#00ff88" if "BUY" in signal_type else "#ff4444" if "SELL" in signal_type else "#ffaa00"
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:2rem">🎯</div>
+        <div style="font-size:1.2rem; font-weight:bold; color:{color}">{signal_type.split('-')[0].strip()}</div>
+        <div style="color:#888">Signal | {confidence}%</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:2rem">📊</div>
+        <div style="font-size:1.2rem; font-weight:bold">{bullish} / {bearish}</div>
+        <div style="color:#888">Net: {net:+d}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col4:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="font-size:2rem">📐</div>
+        <div style="font-size:1.2rem; font-weight:bold">${current_atr:.2f}</div>
+        <div style="color:#888">ATR</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("---")
 
+# ==========================================
 # الشارت
+# ==========================================
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Gold', line=dict(color='gold', width=2)))
-fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='orange')))
-fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='blue')))
-fig.add_hline(y=resistance, line_dash="dash", line_color="red", annotation_text="Resistance")
-fig.add_hline(y=support, line_dash="dash", line_color="green", annotation_text="Support")
+fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Gold', line=dict(color='#ffd700', width=2)))
+fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')))
+fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')))
+fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", annotation_text="Resistance")
+fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", annotation_text="Support")
 fig.add_hline(y=current_price, line_dash="dot", line_color="white", annotation_text=f"Current: ${current_price:.2f}")
-fig.update_layout(template="plotly_dark", height=450, title=f"Gold Historical Chart - Current: ${current_price:.2f}")
+fig.update_layout(template="plotly_dark", height=450, title="📊 Gold Historical Chart")
 st.plotly_chart(fig, use_container_width=True)
 
 # RSI Chart
 fig2 = go.Figure()
-fig2.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='purple', width=2)))
-fig2.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
-fig2.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
-fig2.update_layout(template="plotly_dark", height=250, title="RSI Indicator")
+fig2.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='#9b59b6', width=2)))
+fig2.add_hline(y=70, line_dash="dash", line_color="#ff4444", annotation_text="Overbought")
+fig2.add_hline(y=30, line_dash="dash", line_color="#00ff88", annotation_text="Oversold")
+fig2.update_layout(template="plotly_dark", height=250, title="📊 RSI Indicator")
 st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("---")
 
+# ==========================================
 # المؤشرات
-st.subheader("📊 Indicators")
+# ==========================================
+st.subheader("📊 Technical Indicators")
 for s in signals:
     if "✅" in s or "📈" in s:
         st.success(s)
@@ -249,31 +345,48 @@ for s in signals:
 
 st.markdown("---")
 
+# ==========================================
 # خطة التداول
+# ==========================================
 st.subheader("🎯 Trading Plan")
 
 if signal_action == "BUY":
     st.markdown(f"""
-    | Level | Price |
-    |-------|-------|
-    | **Entry** | **${entry:.2f}** |
-    | **Stop Loss** | ${stop_loss:.2f} |
-    | **Target 1** | ${targets[0]:.2f} |
-    | **Target 2** | ${targets[1]:.2f} |
-    | **Target 3** | ${targets[2]:.2f} |
-    """)
+    <div class="signal-buy">
+        <b>🟢 BUY SIGNAL - {confidence}% confidence</b><br><br>
+        📍 <b>Entry:</b> ${entry:.2f}<br>
+        🛑 <b>Stop Loss:</b> ${stop_loss:.2f}<br><br>
+        🎯 <b>Targets:</b><br>
+        • Target 1: ${targets[0]:.2f}<br>
+        • Target 2: ${targets[1]:.2f}<br>
+        • Target 3: ${targets[2]:.2f}
+    </div>
+    """, unsafe_allow_html=True)
 elif signal_action == "SELL":
     st.markdown(f"""
-    | Level | Price |
-    |-------|-------|
-    | **Entry** | **${entry:.2f}** |
-    | **Stop Loss** | ${stop_loss:.2f} |
-    | **Target 1** | ${targets[0]:.2f} |
-    | **Target 2** | ${targets[1]:.2f} |
-    | **Target 3** | ${targets[2]:.2f} |
-    """)
+    <div class="signal-sell">
+        <b>🔴 SELL SIGNAL - {confidence}% confidence</b><br><br>
+        📍 <b>Entry:</b> ${entry:.2f}<br>
+        🛑 <b>Stop Loss:</b> ${stop_loss:.2f}<br><br>
+        🎯 <b>Targets:</b><br>
+        • Target 1: ${targets[0]:.2f}<br>
+        • Target 2: ${targets[1]:.2f}<br>
+        • Target 3: ${targets[2]:.2f}
+    </div>
+    """, unsafe_allow_html=True)
 else:
-    st.info("No clear signal. Continue monitoring.")
+    st.markdown("""
+    <div class="signal-neutral">
+        <b>🟡 WAIT - No clear signal</b><br><br>
+        Continue monitoring the market.
+    </div>
+    """, unsafe_allow_html=True)
 
-st.markdown("---")
-st.caption(f"🕐 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+# ==========================================
+# الفوتر
+# ==========================================
+st.markdown("""
+<div class="footer">
+    𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT Analysis | Real-time Data 𓋹<br>
+    Last update: {}</div>
+""".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')), unsafe_allow_html=True)
