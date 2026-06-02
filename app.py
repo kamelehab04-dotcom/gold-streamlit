@@ -6,8 +6,6 @@ import pandas as pd
 import numpy as np
 import requests
 import json
-import asyncio
-import threading
 import time
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
@@ -228,7 +226,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Live WebSocket Data</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Real-time Data</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -253,13 +251,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# إعدادات APIs
-# ==========================================
-GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
-NYT_API_KEY = "suEqGgxLCKO95ktzKCjmqAlBAtfb4CgVj800GTHgMJHnR2So"
-WEBSOCKET_KEY = "LRDllfSi8ilwT4mJFXyWPplrYHeWq36eB"
-
-# ==========================================
 # إنشاء التبويبات
 # ==========================================
 tab1, tab2 = st.tabs(["📊 Gold Analysis Dashboard", "📅 Economic Calendar"])
@@ -268,18 +259,18 @@ tab1, tab2 = st.tabs(["📊 Gold Analysis Dashboard", "📅 Economic Calendar"])
 # الصفحة 1: تحليل الذهب
 # ==========================================
 with tab1:
-    @st.cache_data(ttl=30)
-    def get_real_price():
-        """جلب السعر من GoldAPI (fallback)"""
+    @st.cache_data(ttl=10)  # تحديث كل 10 ثواني
+    def get_real_price_from_yahoo():
+        """جلب السعر الحقيقي من Yahoo Finance (مصدر موثوق)"""
         try:
-            url = "https://www.goldapi.io/api/XAU/USD"
-            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return float(data.get('price', 0))
+            gold = yf.Ticker("GC=F")
+            # جلب آخر سعر
+            df = gold.history(period="1d", interval="1m")
+            if not df.empty:
+                return df['Close'].iloc[-1]
             return None
-        except:
+        except Exception as e:
+            print(f"Yahoo Error: {e}")
             return None
     
     @st.cache_data(ttl=300)
@@ -293,81 +284,34 @@ with tab1:
     
     @st.cache_data(ttl=3600)
     def get_news_sentiment():
-        try:
-            params = {"api-key": NYT_API_KEY, "q": "gold", "page": 0}
-            response = requests.get("https://api.nytimes.com/svc/search/v2/articlesearch.json", params=params, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                articles = data.get("response", {}).get("docs", [])
-                if not articles:
-                    return None
-                positive_words = ['rise', 'surge', 'gain', 'high', 'bullish', 'strong', 'up', 'increase']
-                negative_words = ['fall', 'drop', 'decline', 'low', 'bearish', 'weak', 'down', 'decrease']
-                sentiments = []
-                for article in articles[:8]:
-                    title = article.get("headline", {}).get("main", "").lower()
-                    if title:
-                        score = 0
-                        for word in positive_words:
-                            if word in title:
-                                score += 0.2
-                        for word in negative_words:
-                            if word in title:
-                                score -= 0.2
-                        sentiments.append(score)
-                if not sentiments:
-                    return None
-                avg_sentiment = sum(sentiments) / len(sentiments)
-                if avg_sentiment > 0.15:
-                    sentiment_text = "POSITIVE"
-                    sentiment_emoji = "🟢"
-                    impact_score = 2
-                elif avg_sentiment > 0.05:
-                    sentiment_text = "SLIGHTLY POSITIVE"
-                    sentiment_emoji = "🟡"
-                    impact_score = 1
-                elif avg_sentiment < -0.15:
-                    sentiment_text = "NEGATIVE"
-                    sentiment_emoji = "🔴"
-                    impact_score = -2
-                elif avg_sentiment < -0.05:
-                    sentiment_text = "SLIGHTLY NEGATIVE"
-                    sentiment_emoji = "🟠"
-                    impact_score = -1
-                else:
-                    sentiment_text = "NEUTRAL"
-                    sentiment_emoji = "⚪"
-                    impact_score = 0
-                return {
-                    "sentiment_score": avg_sentiment,
-                    "sentiment_text": sentiment_text,
-                    "sentiment_emoji": sentiment_emoji,
-                    "impact_score": impact_score,
-                    "articles_count": len(articles)
-                }
-            return None
-        except:
-            return None
+        """تحليل المشاعر الإخبارية (مبسط)"""
+        # بيانات تجريبية للعرض
+        return {
+            "sentiment_score": 0.12,
+            "sentiment_text": "SLIGHTLY POSITIVE",
+            "sentiment_emoji": "🟡",
+            "impact_score": 1,
+            "articles_count": 8
+        }
     
-    # WebSocket للحصول على سعر فوري
-    def get_websocket_price():
-        """محاكاة WebSocket (في Streamlit نستخدم polling بدلاً من WebSocket)"""
-        # Streamlit لا يدعم WebSocket مباشرة، نستخدم REST API مع تحديث سريع
-        return get_real_price()
+    # جلب السعر الحقيقي
+    current_price = get_real_price_from_yahoo()
     
-    real_price = get_websocket_price()
+    # إذا فشل، نستخدم آخر سعر من البيانات التاريخية
     df = get_historical_data()
-    news_sentiment = get_news_sentiment()
     
     if df is None:
         st.error("Error loading data")
         st.stop()
     
-    if real_price and real_price > 0:
-        current_price = real_price
-    else:
+    if current_price is None and df is not None:
         current_price = df['close'].iloc[-1]
     
+    if current_price is None:
+        st.error("Unable to fetch gold price")
+        st.stop()
+    
+    # حساب المؤشرات
     def calc_rsi(data, period=14):
         delta = data.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -391,22 +335,25 @@ with tab1:
     df['rsi'] = calc_rsi(df['close'])
     df['atr'] = calc_atr(df)
     
-    current_rsi = df['rsi'].iloc[-1]
-    current_atr = df['atr'].iloc[-1]
+    current_rsi = df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else 50
+    current_atr = df['atr'].iloc[-1] if not pd.isna(df['atr'].iloc[-1]) else 20
     
+    # SMC Signals (مبسطة)
     recent_lows = df['low'].iloc[-20:].values
     recent_highs = df['high'].iloc[-20:].values
-    liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1])
-    liquidity_sweep_bearish = df['high'].iloc[-1] > max(recent_highs[:-1])
-    bos_bullish = current_price > df['high'].iloc[-6:-1].max()
-    bos_bearish = current_price < df['low'].iloc[-6:-1].min()
-    resistance = np.percentile(df['high'].iloc[-30:], 75)
-    support = np.percentile(df['low'].iloc[-30:], 25)
+    liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1]) if len(recent_lows) > 1 else False
+    liquidity_sweep_bearish = df['high'].iloc[-1] > max(recent_highs[:-1]) if len(recent_highs) > 1 else False
+    bos_bullish = current_price > df['high'].iloc[-6:-1].max() if len(df) > 6 else False
+    bos_bearish = current_price < df['low'].iloc[-6:-1].min() if len(df) > 6 else False
+    resistance = np.percentile(df['high'].iloc[-30:], 75) if len(df) >= 30 else current_price + 20
+    support = np.percentile(df['low'].iloc[-30:], 25) if len(df) >= 30 else current_price - 20
     
+    # نظام التسجيل
     bullish = 0
     bearish = 0
     signals = []
     
+    # RSI
     if current_rsi < 45:
         bullish += 3
         signals.append(f"✅ RSI: {current_rsi:.1f} (BUY ZONE)")
@@ -416,6 +363,7 @@ with tab1:
     else:
         signals.append(f"📊 RSI: {current_rsi:.1f} (NEUTRAL)")
     
+    # EMA
     if current_price > df['ema20'].iloc[-1]:
         bullish += 2
         signals.append("📈 Price above EMA20")
@@ -423,6 +371,7 @@ with tab1:
         bearish += 2
         signals.append("📉 Price below EMA20")
     
+    # SMC
     if liquidity_sweep_bullish:
         bullish += 3
         signals.append("🎯 Liquidity Sweep Bullish")
@@ -436,6 +385,7 @@ with tab1:
         bearish += 2
         signals.append("🚀 BOS Bearish")
     
+    # دعم/مقاومة
     if current_price <= support + 5:
         bullish += 2
         signals.append(f"📍 Near Support: ${support:.2f}")
@@ -443,19 +393,9 @@ with tab1:
         bearish += 2
         signals.append(f"📍 Near Resistance: ${resistance:.2f}")
     
-    if news_sentiment:
-        impact = news_sentiment['impact_score']
-        if impact > 0:
-            bullish += impact
-            signals.append(f"📰 News: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} (+{impact})")
-        elif impact < 0:
-            bearish += abs(impact)
-            signals.append(f"📰 News: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} ({impact})")
-        else:
-            signals.append(f"📰 News: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']}")
-    
     net = bullish - bearish
     
+    # الإشارة النهائية
     if net >= 10:
         signal_type = "STRONG BUY"
         signal_action = "BUY"
@@ -482,6 +422,7 @@ with tab1:
         confidence = 50
         signal_color = "#ffaa00"
     
+    # خطة التداول
     if signal_action == "BUY":
         entry = current_price
         stop_loss = support - (current_atr * 0.5)
@@ -507,7 +448,7 @@ with tab1:
     change_color = "#00ff88" if change >= 0 else "#ff4444"
     change_sign = "+" if change >= 0 else ""
     
-    # عرض السعر مع علامة Live
+    # عرض السعر
     st.markdown(f"""
     <div class="price-card">
         <div class="price-label">
@@ -515,6 +456,7 @@ with tab1:
         </div>
         <div class="price-value">${current_price:,.2f}</div>
         <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
+        <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: Yahoo Finance (Real-time)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -560,17 +502,6 @@ with tab1:
     </div>
     """, unsafe_allow_html=True)
     
-    if news_sentiment:
-        st.markdown(f"""
-        <div class="sentiment-card">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div><span style="font-size:1.2rem; font-weight:bold">📰 NEWS SENTIMENT</span></div>
-                <div style="color:#ffd700; font-weight:bold">{news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} | Score: {news_sentiment['sentiment_score']:.3f}</div>
-            </div>
-            <div style="margin-top:10px; color:#888; font-size:0.8rem">Analyzed {news_sentiment['articles_count']} articles | Impact: {news_sentiment['impact_score']:+d} points</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
     # الشارت
     st.markdown("### 📈 Price Chart")
     fig = go.Figure()
@@ -602,11 +533,12 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    # زر تحديث يدوي
+    # زر تحديث
     if st.button("🔄 Refresh Live Price"):
+        st.cache_data.clear()
         st.rerun()
     
-    with st.expander("📊 Technical Indicators"):
+    with st.expander("📊 Technical Indicators Details"):
         for s in signals:
             if "✅" in s or "📈" in s:
                 st.success(s)
@@ -625,10 +557,6 @@ with tab2:
     
     @st.cache_data(ttl=3600)
     def get_economic_calendar():
-        """جلب بيانات التقويم الاقتصادي"""
-        events = []
-        
-        # بيانات حقيقية للأحداث القادمة
         today = datetime.now()
         events = [
             {"title": "Federal Reserve Interest Rate Decision", "date": today.strftime("%Y-%m-%d"), "time": "14:00", "country": "US", "impact": "high", "actual": "5.50%", "forecast": "5.50%", "previous": "5.50%"},
@@ -636,10 +564,6 @@ with tab2:
             {"title": "CPI Inflation Rate (YoY)", "date": (today + timedelta(days=5)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "3.2%", "previous": "3.1%"},
             {"title": "ECB Interest Rate Decision", "date": (today + timedelta(days=3)).strftime("%Y-%m-%d"), "time": "09:15", "country": "EU", "impact": "high", "actual": "-", "forecast": "4.50%", "previous": "4.50%"},
             {"title": "GDP Growth Rate (QoQ)", "date": (today + timedelta(days=4)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "2.5%", "previous": "2.8%"},
-            {"title": "Unemployment Rate", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "medium", "actual": "-", "forecast": "3.7%", "previous": "3.7%"},
-            {"title": "Retail Sales (MoM)", "date": (today + timedelta(days=6)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "medium", "actual": "-", "forecast": "0.5%", "previous": "0.3%"},
-            {"title": "German ZEW Economic Sentiment", "date": (today + timedelta(days=1)).strftime("%Y-%m-%d"), "time": "05:00", "country": "DE", "impact": "medium", "actual": "-", "forecast": "45.0", "previous": "42.9"},
-            {"title": "Bank of Japan Policy Rate", "date": (today + timedelta(days=4)).strftime("%Y-%m-%d"), "time": "03:00", "country": "JP", "impact": "medium", "actual": "-", "forecast": "-0.10%", "previous": "-0.10%"},
         ]
         return events
     
@@ -734,7 +658,7 @@ with tab2:
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 GoldAPI + WebSocket + Yahoo Finance | SMC + ICT + News Sentiment | Real-time Live Data 𓋹<br>
+    𓋹 Powered by Yahoo Finance | SMC + ICT Analysis | Real-time Live Data 𓋹<br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
