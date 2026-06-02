@@ -5,10 +5,9 @@ from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import requests
-from textblob import TextBlob
+import json
 from PIL import Image
 from io import BytesIO
-import base64
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
@@ -169,15 +168,6 @@ st.markdown("""
         margin: 10px 0;
         border-left: 4px solid #ffd700;
     }
-    .sentiment-positive {
-        border-left-color: #00ff88;
-    }
-    .sentiment-negative {
-        border-left-color: #ff4444;
-    }
-    .sentiment-neutral {
-        border-left-color: #ffaa00;
-    }
     .footer {
         text-align: center;
         padding: 20px;
@@ -207,7 +197,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Chart Patterns + News Sentiment | Real-time Trading Signals</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Chart Patterns + News Sentiment</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -263,24 +253,20 @@ def get_historical_data():
     return df
 
 # ==========================================
-# تحليل المشاعر الإخبارية من NYT
+# تحليل المشاعر الإخبارية (نسخة مبسطة بدون TextBlob)
 # ==========================================
-@st.cache_data(ttl=3600)  # تحديث كل ساعة
+@st.cache_data(ttl=3600)
 def get_news_sentiment():
+    """تحليل المشاعر الإخبارية من NYT بدون TextBlob"""
     try:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
-        
         params = {
             "api-key": NYT_API_KEY,
-            "q": "gold price OR gold market OR XAU",
-            "begin_date": start_date.strftime("%Y%m%d"),
-            "end_date": end_date.strftime("%Y%m%d"),
-            "sort": "relevance",
+            "q": "gold",
             "page": 0
         }
         
         response = requests.get("https://api.nytimes.com/svc/search/v2/articlesearch.json", params=params, timeout=15)
+        
         if response.status_code == 200:
             data = response.json()
             articles = data.get("response", {}).get("docs", [])
@@ -288,20 +274,25 @@ def get_news_sentiment():
             if not articles:
                 return None
             
+            # تحليل بسيط للمشاعر (بدون TextBlob)
+            positive_words = ['rise', 'surge', 'gain', 'high', 'bullish', 'strong', 'up', 'increase', 'growth', 'record']
+            negative_words = ['fall', 'drop', 'decline', 'low', 'bearish', 'weak', 'down', 'decrease', 'crash', 'sell']
+            
             sentiments = []
             headlines = []
             
-            for article in articles[:10]:
-                title = article.get("headline", {}).get("main", "")
-                abstract = article.get("abstract", "")
-                lead = article.get("lead_paragraph", "")
-                text_to_analyze = f"{title}. {abstract}. {lead}"
-                
-                if len(text_to_analyze.strip()) > 20:
-                    blob = TextBlob(text_to_analyze)
-                    sentiment_score = blob.sentiment.polarity
-                    sentiments.append(sentiment_score)
-                    headlines.append({'title': title[:100], 'url': article.get("web_url"), 'sentiment': sentiment_score})
+            for article in articles[:8]:
+                title = article.get("headline", {}).get("main", "").lower()
+                if title:
+                    score = 0
+                    for word in positive_words:
+                        if word in title:
+                            score += 0.2
+                    for word in negative_words:
+                        if word in title:
+                            score -= 0.2
+                    sentiments.append(score)
+                    headlines.append({'title': article.get("headline", {}).get("main", "")[:100], 'score': score})
             
             if not sentiments:
                 return None
@@ -311,42 +302,35 @@ def get_news_sentiment():
             if avg_sentiment > 0.15:
                 sentiment_text = "POSITIVE"
                 sentiment_emoji = "🟢"
-                sentiment_color = "#00ff88"
                 impact_score = 2
             elif avg_sentiment > 0.05:
                 sentiment_text = "SLIGHTLY POSITIVE"
                 sentiment_emoji = "🟡"
-                sentiment_color = "#ffaa00"
                 impact_score = 1
             elif avg_sentiment < -0.15:
                 sentiment_text = "NEGATIVE"
                 sentiment_emoji = "🔴"
-                sentiment_color = "#ff4444"
                 impact_score = -2
             elif avg_sentiment < -0.05:
                 sentiment_text = "SLIGHTLY NEGATIVE"
                 sentiment_emoji = "🟠"
-                sentiment_color = "#ff8866"
                 impact_score = -1
             else:
                 sentiment_text = "NEUTRAL"
                 sentiment_emoji = "⚪"
-                sentiment_color = "#888888"
                 impact_score = 0
             
             return {
                 "sentiment_score": avg_sentiment,
                 "sentiment_text": sentiment_text,
                 "sentiment_emoji": sentiment_emoji,
-                "sentiment_color": sentiment_color,
                 "impact_score": impact_score,
                 "articles_count": len(articles),
-                "analyzed_count": len(sentiments),
                 "headlines": headlines[:5]
             }
         return None
     except Exception as e:
-        print(f"Error fetching news: {e}")
+        print(f"Error: {e}")
         return None
 
 # ==========================================
@@ -395,7 +379,7 @@ current_rsi = df['rsi'].iloc[-1]
 current_atr = df['atr'].iloc[-1]
 
 # ==========================================
-# كشف القمم والقيعان (للنماذج)
+# كشف القمم والقيعان
 # ==========================================
 def find_peaks(data, order=5):
     peaks = []
@@ -412,7 +396,7 @@ def find_troughs(data, order=5):
     return troughs
 
 # ==========================================
-# نماذج التداول (Chart Patterns)
+# نماذج التداول المبسطة
 # ==========================================
 
 def detect_double_top_bottom(df):
@@ -461,20 +445,6 @@ def detect_head_shoulders(df):
                     return "HEAD AND SHOULDERS", "bearish", 6
     return None, None, 0
 
-def detect_inverse_head_shoulders(df):
-    troughs = find_troughs(df['low'].values[-120:], order=3)
-    
-    if len(troughs) >= 3:
-        head_idx = np.argmin([t for t in troughs[-5:]])
-        if head_idx > 0 and head_idx < len(troughs[-5:]) - 1:
-            left_shoulder = troughs[-5:][head_idx - 1]
-            head = troughs[-5:][head_idx]
-            right_shoulder = troughs[-5:][head_idx + 1]
-            if head < left_shoulder and head < right_shoulder:
-                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
-                    return "INVERSE HEAD AND SHOULDERS", "bullish", 6
-    return None, None, 0
-
 def detect_ascending_triangle(df):
     recent_data = df.iloc[-40:]
     highs = recent_data['high'].values
@@ -487,99 +457,28 @@ def detect_ascending_triangle(df):
         return "ASCENDING TRIANGLE", "bullish", 3
     return None, None, 0
 
-def detect_descending_triangle(df):
-    recent_data = df.iloc[-40:]
-    highs = recent_data['high'].values
-    lows = recent_data['low'].values
-    x = np.arange(len(highs))
-    slope_highs = np.polyfit(x, highs, 1)[0]
-    slope_lows = np.polyfit(x, lows, 1)[0]
-    
-    if slope_highs < -0.01 and abs(slope_lows) < 0.005:
-        return "DESCENDING TRIANGLE", "bearish", 3
-    return None, None, 0
-
-def detect_bullish_flag(df):
-    recent_data = df.iloc[-30:]
-    first_candle = recent_data.iloc[0]
-    last_candle = recent_data.iloc[-1]
-    if first_candle['close'] > first_candle['open']:
-        flag_range = (recent_data['high'].max() - recent_data['low'].min()) / recent_data['low'].min()
-        if flag_range < 0.01:
-            return "BULLISH FLAG", "bullish", 3
-    return None, None, 0
-
-def detect_bearish_flag(df):
-    recent_data = df.iloc[-30:]
-    first_candle = recent_data.iloc[0]
-    if first_candle['close'] < first_candle['open']:
-        flag_range = (recent_data['high'].max() - recent_data['low'].min()) / recent_data['low'].min()
-        if flag_range < 0.01:
-            return "BEARISH FLAG", "bearish", 3
-    return None, None, 0
-
-def detect_rounding_bottom(df):
-    recent_lows = df['low'].values[-50:]
-    mid = len(recent_lows) // 2
-    left_min = np.min(recent_lows[:mid])
-    right_min = np.min(recent_lows[mid:])
-    center_min = np.min(recent_lows)
-    if center_min < left_min and center_min < right_min:
-        return "ROUNDING BOTTOM", "bullish", 2
-    return None, None, 0
-
 def analyze_all_patterns(df):
     patterns = []
-    total_pattern_score = 0
     
     pattern, direction, score = detect_double_top_bottom(df)
     if pattern:
         patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
     
     pattern, direction, score = detect_triple_top_bottom(df)
     if pattern:
         patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
     
     pattern, direction, score = detect_head_shoulders(df)
     if pattern:
         patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
-    
-    pattern, direction, score = detect_inverse_head_shoulders(df)
-    if pattern:
-        patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
     
     pattern, direction, score = detect_ascending_triangle(df)
     if pattern:
         patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
     
-    pattern, direction, score = detect_descending_triangle(df)
-    if pattern:
-        patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
-    
-    pattern, direction, score = detect_bullish_flag(df)
-    if pattern:
-        patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
-    
-    pattern, direction, score = detect_bearish_flag(df)
-    if pattern:
-        patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
-    
-    pattern, direction, score = detect_rounding_bottom(df)
-    if pattern:
-        patterns.append({"name": pattern, "direction": direction, "score": score})
-        total_pattern_score += score if direction == "bullish" else -score
-    
-    return patterns, total_pattern_score
+    return patterns
 
-patterns, pattern_score = analyze_all_patterns(df)
+patterns = analyze_all_patterns(df)
 
 # ==========================================
 # SMC Signals
@@ -594,7 +493,7 @@ resistance = np.percentile(df['high'].iloc[-30:], 75)
 support = np.percentile(df['low'].iloc[-30:], 25)
 
 # ==========================================
-# نظام التسجيل (مع النماذج والأخبار)
+# نظام التسجيل
 # ==========================================
 bullish = 0
 bearish = 0
@@ -654,34 +553,34 @@ if news_sentiment:
     impact = news_sentiment['impact_score']
     if impact > 0:
         bullish += impact
-        signals.append(f"📰 News Sentiment: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} (+{impact})")
+        signals.append(f"📰 News: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} (+{impact})")
     elif impact < 0:
         bearish += abs(impact)
-        signals.append(f"📰 News Sentiment: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} ({impact})")
+        signals.append(f"📰 News: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} ({impact})")
     else:
-        signals.append(f"📰 News Sentiment: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']}")
+        signals.append(f"📰 News: {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']}")
 
 net = bullish - bearish
 
 # ==========================================
 # الإشارة النهائية
 # ==========================================
-if net >= 14:
+if net >= 12:
     signal_type = "STRONG BUY"
     signal_action = "BUY"
     confidence = 95
     signal_color = "#00ff88"
-elif net >= 8:
+elif net >= 7:
     signal_type = "BUY"
     signal_action = "BUY"
     confidence = 80
     signal_color = "#00ff88"
-elif net <= -14:
+elif net <= -12:
     signal_type = "STRONG SELL"
     signal_action = "SELL"
     confidence = 95
     signal_color = "#ff4444"
-elif net <= -8:
+elif net <= -7:
     signal_type = "SELL"
     signal_action = "SELL"
     confidence = 80
@@ -779,48 +678,41 @@ st.markdown(f"""
 # تحليل المشاعر الإخبارية
 # ==========================================
 if news_sentiment:
-    sentiment_class = "sentiment-positive" if news_sentiment['impact_score'] > 0 else "sentiment-negative" if news_sentiment['impact_score'] < 0 else "sentiment-neutral"
-    
     st.markdown(f"""
-    <div class="sentiment-card {sentiment_class}">
+    <div class="sentiment-card">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
-                <span style="font-size:1.2rem; font-weight:bold">📰 NEWS SENTIMENT ANALYSIS</span>
+                <span style="font-size:1.2rem; font-weight:bold">📰 NEWS SENTIMENT</span>
             </div>
-            <div style="color:{news_sentiment['sentiment_color']}; font-weight:bold">
+            <div style="color:#ffd700; font-weight:bold">
                 {news_sentiment['sentiment_emoji']} {news_sentiment['sentiment_text']} | Score: {news_sentiment['sentiment_score']:.3f}
             </div>
         </div>
         <div style="margin-top:10px; color:#888; font-size:0.8rem">
-            Analyzed {news_sentiment['analyzed_count']} articles from NYT | Impact: {news_sentiment['impact_score']:+d} points
+            Analyzed {news_sentiment['articles_count']} articles | Impact: {news_sentiment['impact_score']:+d} points
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # عرض العناوين
     if news_sentiment['headlines']:
-        with st.expander("📰 Recent News Headlines"):
-            for headline in news_sentiment['headlines'][:3]:
-                emoji = "🟢" if headline['sentiment'] > 0.1 else "🔴" if headline['sentiment'] < -0.1 else "⚪"
-                st.markdown(f"{emoji} **{headline['title']}**")
-                st.caption(f"Sentiment: {headline['sentiment']:.3f}")
-                st.markdown("---")
+        with st.expander("📰 Recent Headlines"):
+            for h in news_sentiment['headlines'][:3]:
+                emoji = "🟢" if h['score'] > 0.1 else "🔴" if h['score'] < -0.1 else "⚪"
+                st.markdown(f"{emoji} **{h['title']}**")
 
 # ==========================================
 # النماذج المكتشفة
 # ==========================================
 if patterns:
-    st.markdown("### 📈 Detected Chart Patterns")
-    
+    st.markdown("### 📈 Detected Patterns")
     cols = st.columns(min(len(patterns), 4))
     for i, p in enumerate(patterns):
-        col_idx = i % 4
-        with cols[col_idx]:
+        with cols[i % 4]:
             emoji = "🟢" if p['direction'] == "bullish" else "🔴"
             st.markdown(f"""
             <div class="pattern-card">
-                <div style="font-size:1.2rem; font-weight:bold">{emoji} {p['name']}</div>
-                <div style="color:#888; font-size:0.8rem">{p['direction'].upper()} | +{p['score']} pts</div>
+                <div style="font-size:1rem; font-weight:bold">{emoji} {p['name']}</div>
+                <div style="color:#888; font-size:0.7rem">{p['direction'].upper()} | {p['score']} pts</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -842,59 +734,46 @@ st.plotly_chart(fig, use_container_width=True)
 # جدول الأهداف
 # ==========================================
 if signal_action != "NEUTRAL":
-    st.markdown("### 🎯 Trading Plan & Targets")
+    st.markdown("### 🎯 Trading Plan")
     
     st.markdown(f"""
     <div class="targets-table">
         <div class="target-row">
-            <span class="target-label">📍 Entry Price</span>
+            <span class="target-label">📍 Entry</span>
             <span class="target-value">${entry:.2f}</span>
         </div>
         <div class="target-row">
             <span class="target-label">🛑 Stop Loss</span>
             <span class="target-value">${stop_loss:.2f}</span>
         </div>
+        <div class="target-row">
+            <span class="target-label">🎯 Target 1</span>
+            <span class="target-value">${targets[0]:.2f}</span>
+        </div>
+        <div class="target-row">
+            <span class="target-label">🎯 Target 2</span>
+            <span class="target-value">${targets[1]:.2f}</span>
+        </div>
+        <div class="target-row">
+            <span class="target-label">🎯 Target 3</span>
+            <span class="target-value">${targets[2]:.2f}</span>
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown("#### 🎯 Take Profit Targets")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#00ff88">${targets[0]:.2f}</div>
-            <div class="indicator-label">🎯 Target 1</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffaa00">${targets[1]:.2f}</div>
-            <div class="indicator-label">🎯 Target 2</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">${targets[2]:.2f}</div>
-            <div class="indicator-label">🎯 Target 3</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
     if signal_action == "BUY":
-        rr_ratio = (targets[0] - entry) / (entry - stop_loss)
+        rr = (targets[0] - entry) / (entry - stop_loss)
     else:
-        rr_ratio = (entry - targets[0]) / (stop_loss - entry)
+        rr = (entry - targets[0]) / (stop_loss - entry)
     
     st.markdown(f"""
     <div class="stats-container" style="margin-top:20px">
         <div class="stat-card">
-            <div class="stat-number" style="font-size:1.2rem">Risk/Reward</div>
-            <div class="stat-label">1 : {rr_ratio:.2f}</div>
+            <div class="stat-number" style="font-size:1rem">Risk/Reward</div>
+            <div class="stat-label">1 : {rr:.2f}</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number" style="font-size:1.2rem">Risk Amount</div>
+            <div class="stat-number" style="font-size:1rem">Risk</div>
             <div class="stat-label">2% of capital</div>
         </div>
     </div>
@@ -903,8 +782,8 @@ if signal_action != "NEUTRAL":
 # ==========================================
 # المؤشرات الفنية
 # ==========================================
-with st.expander("📊 Technical Indicators Details"):
-    for s in signals:
+with st.expander("📊 Technical Indicators"):
+    for s in signals[:12]:
         if "✅" in s or "📈" in s:
             st.success(s)
         elif "⚠️" in s or "📉" in s:
@@ -930,7 +809,7 @@ st.markdown("""
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT + Chart Patterns + NYT News Sentiment | Real-time Data 𓋹<br>
+    𓋹 GoldAPI + Yahoo Finance | SMC + ICT + Patterns + News | Real-time 𓋹<br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
