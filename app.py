@@ -4,7 +4,6 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-import requests
 import json
 import os
 
@@ -251,7 +250,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT | Risk Management System</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | سعر فوري حقيقي XAU/USD | SMC + ICT</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -269,41 +268,33 @@ with col2:
     """, unsafe_allow_html=True)
 
 # ==========================================
-# نظام إدارة المخاطر مع حساب اللوت
+# نظام إدارة المخاطر
 # ==========================================
 
 class RiskManager:
     def __init__(self):
-        # الحساب الأصلي للشركة
-        self.total_account = 100000  # $100,000
-        # الحد الأقصى للخسارة المسموح به (10%)
-        self.max_loss_percent = 10  # 10%
-        # الحساب الفعلي المتاح للتداول
-        self.trading_capital = self.total_account * (self.max_loss_percent / 100)  # $10,000
+        self.total_account = 100000
+        self.max_loss_percent = 10
+        self.trading_capital = self.total_account * (self.max_loss_percent / 100)
         
-        # حدود التداول اليومية (نسبة من رأس المال المتداول)
-        self.daily_loss_percent = 5  # 5% من $10,000 = $500
-        self.daily_profit_target_percent = 10  # 10% من $10,000 = $1,000
-        self.max_daily_profit_percent = 12  # 12% من $10,000 = $1,200
-        self.risk_per_trade_percent = 1  # 1% من $10,000 = $100
+        self.daily_loss_percent = 5
+        self.daily_profit_target_percent = 10
+        self.max_daily_profit_percent = 12
+        self.risk_per_trade_percent = 1
         
-        # حساب القيم بالدولار
         self.daily_max_loss = (self.daily_loss_percent / 100) * self.trading_capital
         self.daily_profit_target = (self.daily_profit_target_percent / 100) * self.trading_capital
         self.daily_max_profit = (self.max_daily_profit_percent / 100) * self.trading_capital
         self.risk_per_trade = (self.risk_per_trade_percent / 100) * self.trading_capital
         
-        # قيمة النقطة للذهب (1 لوت = 0.1 دولار لكل نقطة)
-        self.point_value_per_lot = 0.1  # 0.1 USD per point for 1 lot
+        self.point_value_per_lot = 0.1
         
-        # تتبع اليوم الحالي
         self.today = datetime.now().strftime("%Y-%m-%d")
         self.daily_pnl = 0
         self.trades_today = 0
         self.load_daily_data()
     
     def load_daily_data(self):
-        """تحميل بيانات اليوم من ملف"""
         try:
             if os.path.exists("daily_trading.json"):
                 with open("daily_trading.json", "r") as f:
@@ -315,7 +306,6 @@ class RiskManager:
             pass
     
     def save_daily_data(self):
-        """حفظ بيانات اليوم"""
         try:
             with open("daily_trading.json", "w") as f:
                 json.dump({
@@ -327,13 +317,11 @@ class RiskManager:
             pass
     
     def reset_daily(self):
-        """إعادة تعيين بيانات اليوم (لليوم الجديد)"""
         self.daily_pnl = 0
         self.trades_today = 0
         self.save_daily_data()
     
     def can_trade(self):
-        """التحقق من إمكانية التداول"""
         if self.daily_pnl <= -self.daily_max_loss:
             return False, f"❌ تم الوصول إلى الحد الأقصى للخسارة اليومية (${self.daily_max_loss:,.2f})"
         if self.daily_pnl >= self.daily_max_profit:
@@ -343,38 +331,26 @@ class RiskManager:
         return True, "✅ يمكنك التداول"
     
     def calculate_position_size(self, entry_price, stop_loss_price):
-        """حساب حجم العقد (باللوت) بناءً على المخاطرة"""
-        risk_amount = self.risk_per_trade  # $100
-        stop_distance_pips = abs(entry_price - stop_loss_price)  # المسافة بالنقاط (دولار)
-        
+        risk_amount = self.risk_per_trade
+        stop_distance_pips = abs(entry_price - stop_loss_price)
         if stop_distance_pips > 0:
-            # حجم العقد = المخاطرة / (قيمة النقطة × مسافة الوقف)
-            # قيمة النقطة للذهب = 0.1 لكل لوت
             position_size = risk_amount / (stop_distance_pips * self.point_value_per_lot)
             return round(position_size, 2)
         return 0
     
     def calculate_risk_per_trade(self, entry_price, stop_loss_price, lot_size):
-        """حساب المخاطرة الفعلية بالدولار لوت معين"""
         stop_distance_pips = abs(entry_price - stop_loss_price)
         risk = lot_size * stop_distance_pips * self.point_value_per_lot
         return round(risk, 2)
     
-    def get_recommended_lot(self, entry_price, stop_loss_price, account_risk_percent=None):
-        """الحصول على اللوت الموصى به بناءً على نسبة المخاطرة"""
-        if account_risk_percent is None:
-            account_risk_percent = self.risk_per_trade_percent
-        
-        risk_amount = (account_risk_percent / 100) * self.trading_capital
+    def get_recommended_lot(self, entry_price, stop_loss_price):
         stop_distance_pips = abs(entry_price - stop_loss_price)
-        
         if stop_distance_pips > 0:
-            lot_size = risk_amount / (stop_distance_pips * self.point_value_per_lot)
+            lot_size = self.risk_per_trade / (stop_distance_pips * self.point_value_per_lot)
             return round(lot_size, 2)
         return 0
     
     def get_trading_limits(self):
-        """الحصول على حدود التداول اليومية"""
         remaining_loss = self.daily_max_loss + self.daily_pnl if self.daily_pnl < 0 else self.daily_max_loss
         remaining_profit = self.daily_max_profit - self.daily_pnl if self.daily_pnl > 0 else self.daily_max_profit
         
@@ -395,21 +371,18 @@ class RiskManager:
         }
     
     def update_pnl(self, profit_loss):
-        """تحديث الربح/الخسارة بعد الصفقة"""
         self.daily_pnl += profit_loss
         self.trades_today += 1
         self.save_daily_data()
         return self.get_trading_limits()
 
-# إنشاء مدير المخاطر
 risk_manager = RiskManager()
+limits = risk_manager.get_trading_limits()
 
 # ==========================================
 # عرض لوحة إدارة المخاطر
 # ==========================================
 st.markdown("### 🛡️ Risk Management System")
-
-limits = risk_manager.get_trading_limits()
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -502,526 +475,338 @@ else:
 st.markdown("---")
 
 # ==========================================
-# إعدادات API
+# تحليل الذهب (سعر فوري حقيقي من Yahoo Finance)
 # ==========================================
-GOLD_API_KEY = "405b78ab30807179fcc9dbad5156da0a"
 
-# ==========================================
-# إنشاء التبويبات
-# ==========================================
-tab1, tab2, tab3 = st.tabs(["📊 Gold Analysis", "📅 Economic Calendar", "⚙️ Risk Settings"])
+@st.cache_data(ttl=10)
+def get_spot_price():
+    """جلب سعر الذهب الفوري الحقيقي من Yahoo Finance"""
+    try:
+        # XAUUSD=X هو الرمز الصحيح للسعر الفوري
+        gold = yf.Ticker("XAUUSD=X")
+        df = gold.history(period="1d", interval="1m")
+        if not df.empty:
+            return df['Close'].iloc[-1]
+        return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
-# ==========================================
-# الصفحة 1: تحليل الذهب مع حساب اللوت
-# ==========================================
-with tab1:
-    @st.cache_data(ttl=10)
-    def get_spot_price():
-        try:
-            url = "https://www.goldapi.io/api/XAU/USD"
-            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return float(data.get('price', 0))
-            return None
-        except:
-            return None
-    
-    @st.cache_data(ttl=300)
-    def get_historical_data():
-        gold = yf.Ticker("GC=F")
+@st.cache_data(ttl=300)
+def get_historical_data():
+    try:
+        gold = yf.Ticker("XAUUSD=X")
         df = gold.history(period="1mo", interval="1h")
         if df.empty:
             return None
         df.columns = [col.lower() for col in df.columns]
         return df
-    
-    current_price = get_spot_price()
-    df = get_historical_data()
-    
-    if df is None:
-        st.error("Error loading historical data")
-        st.stop()
-    
-    if current_price is None and df is not None:
-        current_price = df['close'].iloc[-1]
-    
-    if current_price is None:
-        st.error("Unable to fetch gold spot price")
-        st.stop()
-    
-    def calc_rsi(data, period=14):
-        delta = data.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
-    
-    def calc_atr(df, period=14):
-        high = df['high']
-        low = df['low']
-        close = df['close']
-        tr1 = high - low
-        tr2 = abs(high - close.shift())
-        tr3 = abs(low - close.shift())
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        return tr.rolling(window=period).mean()
-    
-    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['rsi'] = calc_rsi(df['close'])
-    df['atr'] = calc_atr(df)
-    
-    current_rsi = df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else 50
-    current_atr = df['atr'].iloc[-1] if not pd.isna(df['atr'].iloc[-1]) else 20
-    
-    recent_lows = df['low'].iloc[-20:].values
-    recent_highs = df['high'].iloc[-20:].values
-    liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1]) if len(recent_lows) > 1 else False
-    liquidity_sweep_bearish = df['high'].iloc[-1] > max(recent_highs[:-1]) if len(recent_highs) > 1 else False
-    bos_bullish = current_price > df['high'].iloc[-6:-1].max() if len(df) > 6 else False
-    bos_bearish = current_price < df['low'].iloc[-6:-1].min() if len(df) > 6 else False
-    resistance = np.percentile(df['high'].iloc[-30:], 75) if len(df) >= 30 else current_price + 20
-    support = np.percentile(df['low'].iloc[-30:], 25) if len(df) >= 30 else current_price - 20
-    
-    bullish = 0
-    bearish = 0
-    signals = []
-    
-    if current_rsi < 45:
-        bullish += 3
-        signals.append(f"✅ RSI: {current_rsi:.1f} (BUY ZONE)")
-    elif current_rsi > 65:
-        bearish += 3
-        signals.append(f"⚠️ RSI: {current_rsi:.1f} (SELL ZONE)")
-    else:
-        signals.append(f"📊 RSI: {current_rsi:.1f} (NEUTRAL)")
-    
-    if current_price > df['ema20'].iloc[-1]:
-        bullish += 2
-        signals.append("📈 Price above EMA20")
-    else:
-        bearish += 2
-        signals.append("📉 Price below EMA20")
-    
-    if liquidity_sweep_bullish:
-        bullish += 3
-        signals.append("🎯 Liquidity Sweep Bullish")
-    if liquidity_sweep_bearish:
-        bearish += 3
-        signals.append("🎯 Liquidity Sweep Bearish")
-    if bos_bullish:
-        bullish += 2
-        signals.append("🚀 BOS Bullish")
-    if bos_bearish:
-        bearish += 2
-        signals.append("🚀 BOS Bearish")
-    
-    if current_price <= support + 5:
-        bullish += 2
-        signals.append(f"📍 Near Support: ${support:.2f}")
-    if current_price >= resistance - 5:
-        bearish += 2
-        signals.append(f"📍 Near Resistance: ${resistance:.2f}")
-    
-    net = bullish - bearish
-    
-    if net >= 10:
-        signal_type = "STRONG BUY"
-        signal_action = "BUY"
-        confidence = 95
-        signal_color = "#00ff88"
-    elif net >= 5:
-        signal_type = "BUY"
-        signal_action = "BUY"
-        confidence = 80
-        signal_color = "#00ff88"
-    elif net <= -10:
-        signal_type = "STRONG SELL"
-        signal_action = "SELL"
-        confidence = 95
-        signal_color = "#ff4444"
-    elif net <= -5:
-        signal_type = "SELL"
-        signal_action = "SELL"
-        confidence = 80
-        signal_color = "#ff4444"
-    else:
-        signal_type = "WAIT"
-        signal_action = "NEUTRAL"
-        confidence = 50
-        signal_color = "#ffaa00"
-    
-    # حساب اللوت المناسب
-    if signal_action == "BUY":
-        entry = current_price
-        stop_loss = support - (current_atr * 0.5)
-        recommended_lot = risk_manager.get_recommended_lot(entry, stop_loss)
-        position_size = risk_manager.calculate_position_size(entry, stop_loss)
-        targets = [resistance, resistance + (current_atr * 1.5), resistance + (current_atr * 3)]
-        risk_amount = risk_manager.calculate_risk_per_trade(entry, stop_loss, recommended_lot)
-    elif signal_action == "SELL":
-        entry = current_price
-        stop_loss = resistance + (current_atr * 0.5)
-        recommended_lot = risk_manager.get_recommended_lot(entry, stop_loss)
-        position_size = risk_manager.calculate_position_size(entry, stop_loss)
-        targets = [support, support - (current_atr * 1.5), support - (current_atr * 3)]
-        risk_amount = risk_manager.calculate_risk_per_trade(entry, stop_loss, recommended_lot)
-    else:
-        entry = current_price
-        stop_loss = None
-        recommended_lot = 0
-        position_size = 0
-        targets = []
-        risk_amount = 0
-    
-    # حساب التغير
-    if len(df) > 1:
-        prev_price = df['close'].iloc[-2]
-        change = current_price - prev_price
-        change_percent = (change / prev_price) * 100
-    else:
-        change = 0
-        change_percent = 0
-    
-    change_color = "#00ff88" if change >= 0 else "#ff4444"
-    change_sign = "+" if change >= 0 else ""
-    
-    # عرض السعر
+    except:
+        return None
+
+# جلب السعر الفوري الحقيقي
+current_price = get_spot_price()
+df = get_historical_data()
+
+if df is None:
+    st.error("Error loading historical data")
+    st.stop()
+
+if current_price is None and df is not None:
+    current_price = df['close'].iloc[-1]
+
+if current_price is None:
+    st.error("Unable to fetch gold spot price")
+    st.stop()
+
+# حساب المؤشرات
+def calc_rsi(data, period=14):
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calc_atr(df, period=14):
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(window=period).mean()
+
+df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+df['rsi'] = calc_rsi(df['close'])
+df['atr'] = calc_atr(df)
+
+current_rsi = df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else 50
+current_atr = df['atr'].iloc[-1] if not pd.isna(df['atr'].iloc[-1]) else 20
+
+# SMC Signals
+recent_lows = df['low'].iloc[-20:].values
+recent_highs = df['high'].iloc[-20:].values
+liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1]) if len(recent_lows) > 1 else False
+liquidity_sweep_bearish = df['high'].iloc[-1] > max(recent_highs[:-1]) if len(recent_highs) > 1 else False
+bos_bullish = current_price > df['high'].iloc[-6:-1].max() if len(df) > 6 else False
+bos_bearish = current_price < df['low'].iloc[-6:-1].min() if len(df) > 6 else False
+resistance = np.percentile(df['high'].iloc[-30:], 75) if len(df) >= 30 else current_price + 20
+support = np.percentile(df['low'].iloc[-30:], 25) if len(df) >= 30 else current_price - 20
+
+# نظام التسجيل
+bullish = 0
+bearish = 0
+signals = []
+
+if current_rsi < 45:
+    bullish += 3
+    signals.append(f"✅ RSI: {current_rsi:.1f} (BUY ZONE)")
+elif current_rsi > 65:
+    bearish += 3
+    signals.append(f"⚠️ RSI: {current_rsi:.1f} (SELL ZONE)")
+else:
+    signals.append(f"📊 RSI: {current_rsi:.1f} (NEUTRAL)")
+
+if current_price > df['ema20'].iloc[-1]:
+    bullish += 2
+    signals.append("📈 Price above EMA20")
+else:
+    bearish += 2
+    signals.append("📉 Price below EMA20")
+
+if liquidity_sweep_bullish:
+    bullish += 3
+    signals.append("🎯 Liquidity Sweep Bullish")
+if liquidity_sweep_bearish:
+    bearish += 3
+    signals.append("🎯 Liquidity Sweep Bearish")
+if bos_bullish:
+    bullish += 2
+    signals.append("🚀 BOS Bullish")
+if bos_bearish:
+    bearish += 2
+    signals.append("🚀 BOS Bearish")
+
+if current_price <= support + 5:
+    bullish += 2
+    signals.append(f"📍 Near Support: ${support:.2f}")
+if current_price >= resistance - 5:
+    bearish += 2
+    signals.append(f"📍 Near Resistance: ${resistance:.2f}")
+
+net = bullish - bearish
+
+if net >= 10:
+    signal_type = "STRONG BUY"
+    signal_action = "BUY"
+    confidence = 95
+    signal_color = "#00ff88"
+elif net >= 5:
+    signal_type = "BUY"
+    signal_action = "BUY"
+    confidence = 80
+    signal_color = "#00ff88"
+elif net <= -10:
+    signal_type = "STRONG SELL"
+    signal_action = "SELL"
+    confidence = 95
+    signal_color = "#ff4444"
+elif net <= -5:
+    signal_type = "SELL"
+    signal_action = "SELL"
+    confidence = 80
+    signal_color = "#ff4444"
+else:
+    signal_type = "WAIT"
+    signal_action = "NEUTRAL"
+    confidence = 50
+    signal_color = "#ffaa00"
+
+# حساب اللوت
+if signal_action == "BUY":
+    entry = current_price
+    stop_loss = support - (current_atr * 0.5)
+    recommended_lot = risk_manager.get_recommended_lot(entry, stop_loss)
+    targets = [resistance, resistance + (current_atr * 1.5), resistance + (current_atr * 3)]
+    risk_amount = risk_manager.calculate_risk_per_trade(entry, stop_loss, recommended_lot)
+elif signal_action == "SELL":
+    entry = current_price
+    stop_loss = resistance + (current_atr * 0.5)
+    recommended_lot = risk_manager.get_recommended_lot(entry, stop_loss)
+    targets = [support, support - (current_atr * 1.5), support - (current_atr * 3)]
+    risk_amount = risk_manager.calculate_risk_per_trade(entry, stop_loss, recommended_lot)
+else:
+    entry = current_price
+    stop_loss = None
+    recommended_lot = 0
+    targets = []
+    risk_amount = 0
+
+# حساب التغير
+if len(df) > 1:
+    prev_price = df['close'].iloc[-2]
+    change = current_price - prev_price
+    change_percent = (change / prev_price) * 100
+else:
+    change = 0
+    change_percent = 0
+
+change_color = "#00ff88" if change >= 0 else "#ff4444"
+change_sign = "+" if change >= 0 else ""
+
+# عرض السعر
+st.markdown(f"""
+<div class="price-card">
+    <div class="price-label">
+        <span class="live-badge">LIVE SPOT</span> 𓋹 XAU/USD (REAL TIME) 𓋹
+    </div>
+    <div class="price-value">${current_price:,.2f}</div>
+    <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
+    <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: Yahoo Finance (XAU/USD Spot)</div>
+</div>
+""", unsafe_allow_html=True)
+
+# بطاقات المؤشرات
+st.markdown("### 📊 Market Indicators")
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
     st.markdown(f"""
-    <div class="price-card">
-        <div class="price-label">
-            <span class="live-badge">SPOT PRICE</span> 𓋹 XAU/USD (GOLD SPOT) 𓋹
-        </div>
-        <div class="price-value">${current_price:,.2f}</div>
-        <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
+    <div class="indicator-card">
+        <div class="indicator-value" style="color:#ffd700">{current_rsi:.1f}</div>
+        <div class="indicator-label">RSI (14)</div>
     </div>
     """, unsafe_allow_html=True)
+with col2:
+    st.markdown(f"""
+    <div class="indicator-card">
+        <div class="indicator-value" style="color:#ffd700">${current_atr:.2f}</div>
+        <div class="indicator-label">ATR</div>
+    </div>
+    """, unsafe_allow_html=True)
+with col3:
+    st.markdown(f"""
+    <div class="indicator-card">
+        <div class="indicator-value" style="color:#ffd700">{bullish} / {bearish}</div>
+        <div class="indicator-label">Bullish / Bearish</div>
+    </div>
+    """, unsafe_allow_html=True)
+with col4:
+    st.markdown(f"""
+    <div class="indicator-card">
+        <div class="indicator-value" style="color:#ffd700">{net:+d}</div>
+        <div class="indicator-label">Net Score</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# الإشارة
+signal_class = "signal-buy" if signal_action == "BUY" else "signal-sell" if signal_action == "SELL" else "signal-neutral"
+st.markdown(f"""
+<div class="signal-card {signal_class}">
+    <div class="signal-title" style="color:{signal_color}">{signal_type} SIGNAL</div>
+    <div class="signal-confidence">Confidence: {confidence}% | Score: {net:+d}</div>
+</div>
+""", unsafe_allow_html=True)
+
+# اللوت الموصى به
+if signal_action != "NEUTRAL" and limits['can_trade']:
+    st.markdown("### 📊 Position Size Calculator")
     
-    # بطاقات المؤشرات
-    st.markdown("### 📊 Market Indicators")
-    
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">{current_rsi:.1f}</div>
-            <div class="indicator-label">RSI (14)</div>
+        <div class="lot-card">
+            <div class="lot-label">🔢 RECOMMENDED LOT SIZE</div>
+            <div class="lot-value">{recommended_lot:.2f} LOTS</div>
+            <div class="lot-label">Risk: ${risk_manager.risk_per_trade:,.0f} | 1% of capital</div>
         </div>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">${current_atr:.2f}</div>
-            <div class="indicator-label">ATR</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">{bullish} / {bearish}</div>
-            <div class="indicator-label">Bullish / Bearish</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col4:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">{net:+d}</div>
-            <div class="indicator-label">Net Score</div>
+        <div class="lot-card">
+            <div class="lot-label">💰 ACTUAL RISK</div>
+            <div class="lot-value">${risk_amount:,.2f}</div>
+            <div class="lot-label">With current lot size</div>
         </div>
         """, unsafe_allow_html=True)
     
-    # الإشارة
-    signal_class = "signal-buy" if signal_action == "BUY" else "signal-sell" if signal_action == "SELL" else "signal-neutral"
+    # جدول أحجام اللوتات
+    st.markdown("#### 📋 Lot Size Alternatives")
+    lot_options = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.00]
+    lot_data = []
+    for lot in lot_options:
+        risk = risk_manager.calculate_risk_per_trade(entry, stop_loss, lot)
+        lot_data.append({"Lot": f"{lot:.2f}", "Risk ($)": f"${risk:.2f}", "Risk %": f"{(risk / risk_manager.trading_capital) * 100:.2f}%"})
+    st.dataframe(pd.DataFrame(lot_data), use_container_width=True, hide_index=True)
+
+# الشارت
+st.markdown("### 📈 Price Chart")
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='XAU/USD', line=dict(color='#ffd700', width=2)))
+fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')))
+fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')))
+fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", annotation_text="Resistance")
+fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", annotation_text="Support")
+fig.update_layout(template="plotly_dark", height=450)
+st.plotly_chart(fig, use_container_width=True)
+
+# خطة التداول
+if signal_action != "NEUTRAL" and limits['can_trade']:
+    st.markdown("### 🎯 Trading Plan")
     st.markdown(f"""
-    <div class="signal-card {signal_class}">
-        <div class="signal-title" style="color:{signal_color}">{signal_type} SIGNAL</div>
-        <div class="signal-confidence">Confidence: {confidence}% | Score: {net:+d}</div>
+    <div class="targets-table">
+        <div class="target-row"><span class="target-label">📍 Entry</span><span class="target-value">${entry:.2f}</span></div>
+        <div class="target-row"><span class="target-label">🛑 Stop Loss</span><span class="target-value">${stop_loss:.2f}</span></div>
+        <div class="target-row"><span class="target-label">📊 Lot Size</span><span class="target-value">{recommended_lot:.2f} lots</span></div>
+        <div class="target-row"><span class="target-label">💰 Risk</span><span class="target-value">${risk_amount:,.2f}</span></div>
+        <div class="target-row"><span class="target-label">🎯 Target 1</span><span class="target-value">${targets[0]:.2f}</span></div>
+        <div class="target-row"><span class="target-label">🎯 Target 2</span><span class="target-value">${targets[1]:.2f}</span></div>
+        <div class="target-row"><span class="target-label">🎯 Target 3</span><span class="target-value">${targets[2]:.2f}</span></div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # عرض اللوت الموصى به
-    if signal_action != "NEUTRAL" and limits['can_trade']:
-        st.markdown("### 📊 Position Size Calculator")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"""
-            <div class="lot-card">
-                <div class="lot-label">🔢 RECOMMENDED LOT SIZE</div>
-                <div class="lot-value">{recommended_lot:.2f} LOTS</div>
-                <div class="lot-label">بناءً على مخاطرة ${risk_manager.risk_per_trade:,.0f} | 1% من رأس المال</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"""
-            <div class="lot-card">
-                <div class="lot-label">💰 RISK PER TRADE</div>
-                <div class="lot-value">${risk_amount:,.2f}</div>
-                <div class="lot-label">المخاطرة الفعلية بهذا اللوت</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # جدول أحجام اللوتات المختلفة
-        st.markdown("#### 📋 Lot Size Alternatives")
-        
-        lot_options = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.00]
-        
-        lot_data = []
-        for lot in lot_options:
-            risk = risk_manager.calculate_risk_per_trade(entry, stop_loss, lot)
-            lot_data.append({"Lot Size": f"{lot:.2f}", "Risk ($)": f"${risk:.2f}", "Risk %": f"{(risk / risk_manager.trading_capital) * 100:.2f}%"})
-        
-        st.dataframe(pd.DataFrame(lot_data), use_container_width=True, hide_index=True)
-    
-    # الشارت
-    st.markdown("### 📈 Price Chart")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='XAU/USD', line=dict(color='#ffd700', width=2)))
-    fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')))
-    fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')))
-    fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", annotation_text="Resistance")
-    fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", annotation_text="Support")
-    fig.update_layout(template="plotly_dark", height=450)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # خطة التداول
-    if signal_action != "NEUTRAL" and limits['can_trade']:
-        st.markdown("### 🎯 Trading Plan")
-        st.markdown(f"""
-        <div class="targets-table">
-            <div class="target-row"><span class="target-label">📍 Entry</span><span class="target-value">${entry:.2f}</span></div>
-            <div class="target-row"><span class="target-label">🛑 Stop Loss</span><span class="target-value">${stop_loss:.2f}</span></div>
-            <div class="target-row"><span class="target-label">📊 Position Size</span><span class="target-value">{recommended_lot:.2f} lots</span></div>
-            <div class="target-row"><span class="target-label">💰 Risk Amount</span><span class="target-value">${risk_amount:,.2f}</span></div>
-            <div class="target-row"><span class="target-label">🎯 Target 1</span><span class="target-value">${targets[0]:.2f}</span></div>
-            <div class="target-row"><span class="target-label">🎯 Target 2</span><span class="target-value">${targets[1]:.2f}</span></div>
-            <div class="target-row"><span class="target-label">🎯 Target 3</span><span class="target-value">${targets[2]:.2f}</span></div>
-        </div>
-        """, unsafe_allow_html=True)
-        rr = (targets[0] - entry) / (entry - stop_loss) if signal_action == "BUY" else (entry - targets[0]) / (stop_loss - entry)
-        st.markdown(f"""
-        <div class="stats-container" style="margin-top:20px">
-            <div class="stat-card"><div class="stat-number" style="font-size:1rem">Risk/Reward</div><div class="stat-label">1 : {rr:.2f}</div></div>
-            <div class="stat-card"><div class="stat-number" style="font-size:1rem">Remaining Risk</div><div class="stat-label">${limits['remaining_loss']:,.2f}</div></div>
-        </div>
-        """, unsafe_allow_html=True)
-    elif not limits['can_trade']:
-        st.warning(limits['can_trade_message'])
-    
-    with st.expander("📊 Technical Indicators Details"):
-        for s in signals:
-            if "✅" in s or "📈" in s:
-                st.success(s)
-            elif "⚠️" in s or "📉" in s:
-                st.error(s)
-            else:
-                st.info(s)
+    rr = (targets[0] - entry) / (entry - stop_loss) if signal_action == "BUY" else (entry - targets[0]) / (stop_loss - entry)
+    st.markdown(f"""
+    <div class="stats-container" style="margin-top:20px">
+        <div class="stat-card"><div class="stat-number" style="font-size:1rem">Risk/Reward</div><div class="stat-label">1 : {rr:.2f}</div></div>
+        <div class="stat-card"><div class="stat-number" style="font-size:1rem">Remaining Risk</div><div class="stat-label">${limits['remaining_loss']:,.2f}</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+elif not limits['can_trade']:
+    st.warning(limits['can_trade_message'])
+
+with st.expander("📊 Technical Indicators Details"):
+    for s in signals:
+        if "✅" in s or "📈" in s:
+            st.success(s)
+        elif "⚠️" in s or "📉" in s:
+            st.error(s)
+        else:
+            st.info(s)
 
 # ==========================================
-# الصفحة 2: التقويم الاقتصادي
+# تبويب التقويم الاقتصادي (مبسط)
 # ==========================================
-with tab2:
+with st.tabs(["📅 Economic Calendar"]):
     st.markdown("### 📅 Economic Calendar")
-    st.markdown("أهم الأحداث الاقتصادية المؤثرة على الذهب والأسواق المالية")
     st.markdown("---")
-    
-    @st.cache_data(ttl=3600)
-    def get_economic_calendar():
-        today = datetime.now()
-        events = [
-            {"title": "Federal Reserve Interest Rate Decision", "date": today.strftime("%Y-%m-%d"), "time": "14:00", "country": "US", "impact": "high", "actual": "5.50%", "forecast": "5.50%", "previous": "5.50%"},
-            {"title": "US Non-Farm Payrolls", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "180K", "previous": "175K"},
-            {"title": "CPI Inflation Rate (YoY)", "date": (today + timedelta(days=5)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "3.2%", "previous": "3.1%"},
-            {"title": "ECB Interest Rate Decision", "date": (today + timedelta(days=3)).strftime("%Y-%m-%d"), "time": "09:15", "country": "EU", "impact": "high", "actual": "-", "forecast": "4.50%", "previous": "4.50%"},
-            {"title": "GDP Growth Rate (QoQ)", "date": (today + timedelta(days=4)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high", "actual": "-", "forecast": "2.5%", "previous": "2.8%"},
-        ]
-        return events
-    
-    events = get_economic_calendar()
-    
-    if events:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            countries = ["All"] + sorted(list(set([e['country'] for e in events])))
-            selected_country = st.selectbox("🌍 Filter by Country", countries)
-        with col2:
-            impacts = ["All", "high", "medium", "low"]
-            selected_impact = st.selectbox("⚠️ Filter by Impact", impacts)
-        with col3:
-            date_filter = st.selectbox("📅 Date", ["All", "Today", "Tomorrow", "This Week"])
-        
-        filtered_events = events.copy()
-        if selected_country != "All":
-            filtered_events = [e for e in filtered_events if e['country'] == selected_country]
-        if selected_impact != "All":
-            filtered_events = [e for e in filtered_events if e['impact'] == selected_impact]
-        
-        if date_filter == "Today":
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            filtered_events = [e for e in filtered_events if e['date'] == today_str]
-        elif date_filter == "Tomorrow":
-            tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-            filtered_events = [e for e in filtered_events if e['date'] == tomorrow_str]
-        elif date_filter == "This Week":
-            today = datetime.now()
-            week_start = today - timedelta(days=today.weekday())
-            week_end = week_start + timedelta(days=6)
-            filtered_events = [e for e in filtered_events if week_start.strftime("%Y-%m-%d") <= e['date'] <= week_end.strftime("%Y-%m-%d")]
-        
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            high_impact = len([e for e in filtered_events if e['impact'] == 'high'])
-            st.metric("🔴 High Impact Events", high_impact)
-        with col2:
-            medium_impact = len([e for e in filtered_events if e['impact'] == 'medium'])
-            st.metric("🟡 Medium Impact Events", medium_impact)
-        with col3:
-            low_impact = len([e for e in filtered_events if e['impact'] == 'low'])
-            st.metric("🟢 Low Impact Events", low_impact)
-        
-        st.markdown("---")
-        
-        for event in filtered_events:
-            impact_class = "event-high" if event['impact'] == 'high' else "event-medium" if event['impact'] == 'medium' else "event-low"
-            impact_emoji = "🔴" if event['impact'] == 'high' else "🟡" if event['impact'] == 'medium' else "🟢"
-            
-            st.markdown(f"""
-            <div class="event-card {impact_class}">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                    <div><span style="font-size:1.1rem; font-weight:bold">📌 {event['title']}</span></div>
-                    <div><span style="color:#ffd700">{impact_emoji} {event['impact'].upper()} IMPACT</span></div>
-                </div>
-                <div style="margin-top: 10px; display: flex; gap: 20px; flex-wrap: wrap;">
-                    <span>🌍 {event['country']}</span>
-                    <span>📅 {event['date']}</span>
-                    <span>⏰ {event['time']}</span>
-                </div>
-                <div style="margin-top: 10px; display: flex; gap: 20px; flex-wrap: wrap; color: #888;">
-                    <span>Actual: <strong style="color:#fff">{event['actual']}</strong></span>
-                    <span>Forecast: <strong style="color:#fff">{event['forecast']}</strong></span>
-                    <span>Previous: <strong style="color:#fff">{event['previous']}</strong></span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        if not filtered_events:
-            st.info("No events found for the selected filters.")
-        
-        with st.expander("ℹ️ How to read this calendar"):
-            st.markdown("""
-            - **🔴 High Impact**: Likely to cause significant market movement
-            - **🟡 Medium Impact**: May cause some market movement
-            - **🟢 Low Impact**: Minor market impact expected
-            
-            **How to use this data:**
-            - Events with HIGH impact on the USD are most important for gold
-            - Actual vs Forecast vs Previous show the outcome relative to expectations
-            """)
-    else:
-        st.error("Unable to load economic calendar data. Please try again later.")
-
-# ==========================================
-# الصفحة 3: إعدادات المخاطر
-# ==========================================
-with tab3:
-    st.markdown("### ⚙️ Risk Management Settings")
-    st.markdown("قم بتعديل إعدادات إدارة المخاطر حسب احتياجاتك")
-    st.markdown("---")
-    
-    st.markdown("#### 📊 Current Settings")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"""
-        - **Total Account:** ${limits['total_account']:,.0f}
-        - **Trading Capital (10%):** ${limits['trading_capital']:,.0f}
-        - **Max Daily Loss:** {risk_manager.daily_loss_percent}% (${limits['daily_max_loss']:,.0f})
-        - **Daily Profit Target:** {risk_manager.daily_profit_target_percent}% (${limits['profit_target']:,.0f})
-        - **Max Daily Profit:** {risk_manager.max_daily_profit_percent}% (${limits['daily_max_profit']:,.0f})
-        - **Risk Per Trade:** {risk_manager.risk_per_trade_percent}% (${limits['risk_per_trade']:,.0f})
-        """)
-    
-    with col2:
-        st.markdown(f"""
-        - **Today's P&L:** ${limits['daily_pnl']:,.2f} ({limits['daily_pnl_percent']:+.2f}%)
-        - **Trades Today:** {limits['trades_today']}/10
-        - **Remaining Loss Capacity:** ${limits['remaining_loss']:,.2f}
-        - **Remaining Profit Capacity:** ${limits['remaining_profit']:,.2f}
-        - **Point Value:** $0.1 per point per lot
-        """)
-    
-    st.markdown("---")
-    
-    st.markdown("#### ✏️ Modify Settings")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        new_total_account = st.number_input("Total Account ($)", value=risk_manager.total_account, step=10000, min_value=10000)
-        new_daily_loss = st.slider("Max Daily Loss (%)", min_value=1, max_value=20, value=risk_manager.daily_loss_percent)
-        new_daily_target = st.slider("Daily Profit Target (%)", min_value=1, max_value=30, value=risk_manager.daily_profit_target_percent)
-    
-    with col2:
-        new_max_profit = st.slider("Max Daily Profit (%)", min_value=1, max_value=50, value=risk_manager.max_daily_profit_percent)
-        new_risk_per_trade = st.slider("Risk Per Trade (%)", min_value=0.5, max_value=5.0, value=float(risk_manager.risk_per_trade_percent), step=0.5)
-    
-    if st.button("💾 Save Settings", use_container_width=True):
-        st.success("✅ Settings saved successfully!")
-        st.info("Note: In this demo, settings reset on page refresh. In production, save to database.")
-    
-    st.markdown("---")
-    
-    if st.button("🔄 Reset Today's Trading Data", use_container_width=True):
-        risk_manager.reset_daily()
-        st.success("✅ Today's trading data has been reset!")
-        st.rerun()
-    
-    st.markdown("---")
-    
-    with st.expander("📖 Risk Management Rules"):
-        st.markdown("""
-        ### 🏛️ قواعد إدارة المخاطر للمتداول الممول
-        
-        #### 1. هيكل الحساب
-        - **الحساب الأصلي:** $100,000
-        - **الحد الأقصى للخسارة:** 10% = $10,000
-        - **رأس المال المتداول الفعلي:** $10,000 (هذا هو المبلغ الذي تدير به المخاطر)
-        
-        #### 2. حدود الخسارة اليومية
-        - الحد الأقصى للخسارة اليومية هو **5%** من رأس المال المتداول ($500)
-        - عند الوصول إلى هذا الحد، يتوقف التداول تلقائياً حتى اليوم التالي
-        
-        #### 3. أهداف الربح اليومية
-        - الهدف اليومي هو **10%** من رأس المال المتداول ($1,000)
-        - الحد الأقصى للربح اليومي هو **12%** ($1,200) لحماية الأرباح
-        
-        #### 4. إدارة الصفقات
-        - المخاطرة القصوى لكل صفقة: **1%** من رأس المال المتداول ($100)
-        - الحد الأقصى للصفقات اليومية: **10 صفقات**
-        - نسبة المخاطرة/العائد: **1:2** كحد أدنى
-        
-        #### 5. حساب اللوت المناسب
-        ```
-        اللوت = المخاطرة بالدولار / (وقف الخسارة بالنقاط × 0.1)
-        ```
-        
-        #### 6. أوقات الأخبار
-        - **يُمنع التداول** قبل 15 دقيقة من الأخبار الهامة
-        - الأخبار عالية التأثير تتطلب انتظار 15 دقيقة بعد الإعلان
-        """)
+    today = datetime.now()
+    events = [
+        {"title": "Federal Reserve Interest Rate Decision", "date": today.strftime("%Y-%m-%d"), "time": "14:00", "country": "US", "impact": "high"},
+        {"title": "US Non-Farm Payrolls", "date": (today + timedelta(days=2)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high"},
+        {"title": "CPI Inflation Rate (YoY)", "date": (today + timedelta(days=5)).strftime("%Y-%m-%d"), "time": "08:30", "country": "US", "impact": "high"},
+    ]
+    for event in events:
+        st.markdown(f"🔴 **{event['title']** - {event['country']} | {event['date']} {event['time']}")
 
 # ==========================================
 # الفوتر
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 Powered by GoldAPI.io | SMC + ICT Analysis | Risk Management System 𓋹<br>
-    📊 الحساب: ${limits['total_account']:,.0f} | رأس المال المتداول: ${limits['trading_capital']:,.0f} | الخسارة القصوى: 10%<br>
-    📈 قيمة النقطة: 0.1 دولار لكل لوت | المخاطرة الموصى بها: 1%<br>
-    <br>
+    𓋹 Real-time XAU/USD Spot from Yahoo Finance | SMC + ICT Analysis | Risk Management 𓋹<br>
     <a href="https://t.me/Ehabka2002" target="_blank" style="color:#0088cc; text-decoration:none;">📱 اشترك في قناة التليجرام للإشارات اليومية</a><br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
