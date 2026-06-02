@@ -204,6 +204,23 @@ st.markdown("""
     .target-value {
         color: #ffffff;
     }
+    .lot-card {
+        background: #1e1e2e;
+        border-radius: 12px;
+        padding: 15px;
+        margin: 10px 0;
+        border: 1px solid #ffd70033;
+        text-align: center;
+    }
+    .lot-value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #00ff88;
+    }
+    .lot-label {
+        font-size: 0.8rem;
+        color: #888;
+    }
     .footer {
         text-align: center;
         padding: 20px;
@@ -252,22 +269,32 @@ with col2:
     """, unsafe_allow_html=True)
 
 # ==========================================
-# نظام إدارة المخاطر (Risk Management)
+# نظام إدارة المخاطر مع حساب اللوت
 # ==========================================
 
 class RiskManager:
     def __init__(self):
-        self.account_size = 100000  # حجم الحساب الأصلي
-        self.max_drawdown_percent = 5  # الحد الأقصى للخسارة اليومية 5%
-        self.daily_profit_target_percent = 10  # الهدف اليومي 10%
-        self.max_daily_profit_percent = 12  # الحد الأقصى للربح اليومي 12%
-        self.risk_per_trade_percent = 1  # المخاطرة في الصفقة الواحدة 1%
+        # الحساب الأصلي للشركة
+        self.total_account = 100000  # $100,000
+        # الحد الأقصى للخسارة المسموح به (10%)
+        self.max_loss_percent = 10  # 10%
+        # الحساب الفعلي المتاح للتداول
+        self.trading_capital = self.total_account * (self.max_loss_percent / 100)  # $10,000
+        
+        # حدود التداول اليومية (نسبة من رأس المال المتداول)
+        self.daily_loss_percent = 5  # 5% من $10,000 = $500
+        self.daily_profit_target_percent = 10  # 10% من $10,000 = $1,000
+        self.max_daily_profit_percent = 12  # 12% من $10,000 = $1,200
+        self.risk_per_trade_percent = 1  # 1% من $10,000 = $100
         
         # حساب القيم بالدولار
-        self.max_daily_loss = (self.max_drawdown_percent / 100) * self.account_size
-        self.daily_profit_target = (self.daily_profit_target_percent / 100) * self.account_size
-        self.max_daily_profit = (self.max_daily_profit_percent / 100) * self.account_size
-        self.risk_per_trade = (self.risk_per_trade_percent / 100) * self.account_size
+        self.daily_max_loss = (self.daily_loss_percent / 100) * self.trading_capital
+        self.daily_profit_target = (self.daily_profit_target_percent / 100) * self.trading_capital
+        self.daily_max_profit = (self.max_daily_profit_percent / 100) * self.trading_capital
+        self.risk_per_trade = (self.risk_per_trade_percent / 100) * self.trading_capital
+        
+        # قيمة النقطة للذهب (1 لوت = 0.1 دولار لكل نقطة)
+        self.point_value_per_lot = 0.1  # 0.1 USD per point for 1 lot
         
         # تتبع اليوم الحالي
         self.today = datetime.now().strftime("%Y-%m-%d")
@@ -307,40 +334,57 @@ class RiskManager:
     
     def can_trade(self):
         """التحقق من إمكانية التداول"""
-        # التحقق من الخسارة اليومية
-        if self.daily_pnl <= -self.max_daily_loss:
-            return False, f"❌ تم الوصول إلى الحد الأقصى للخسارة اليومية (${self.max_daily_loss:,.2f})"
-        
-        # التحقق من الربح اليومي (لعدم تجاوز الحد)
-        if self.daily_pnl >= self.max_daily_profit:
-            return False, f"✅ تم تحقيق الحد الأقصى للربح اليومي (${self.max_daily_profit:,.2f})"
-        
-        # التحقق من عدد الصفقات
+        if self.daily_pnl <= -self.daily_max_loss:
+            return False, f"❌ تم الوصول إلى الحد الأقصى للخسارة اليومية (${self.daily_max_loss:,.2f})"
+        if self.daily_pnl >= self.daily_max_profit:
+            return False, f"✅ تم تحقيق الحد الأقصى للربح اليومي (${self.daily_max_profit:,.2f})"
         if self.trades_today >= 10:
             return False, "⚠️ تم الوصول إلى الحد الأقصى لعدد الصفقات اليومية (10 صفقات)"
-        
         return True, "✅ يمكنك التداول"
     
     def calculate_position_size(self, entry_price, stop_loss_price):
-        """حساب حجم العقد المناسب بناءً على المخاطرة"""
-        risk_amount = self.risk_per_trade
-        stop_distance = abs(entry_price - stop_loss_price)
+        """حساب حجم العقد (باللوت) بناءً على المخاطرة"""
+        risk_amount = self.risk_per_trade  # $100
+        stop_distance_pips = abs(entry_price - stop_loss_price)  # المسافة بالنقاط (دولار)
         
-        if stop_distance > 0:
-            position_size = risk_amount / stop_distance
+        if stop_distance_pips > 0:
+            # حجم العقد = المخاطرة / (قيمة النقطة × مسافة الوقف)
+            # قيمة النقطة للذهب = 0.1 لكل لوت
+            position_size = risk_amount / (stop_distance_pips * self.point_value_per_lot)
             return round(position_size, 2)
+        return 0
+    
+    def calculate_risk_per_trade(self, entry_price, stop_loss_price, lot_size):
+        """حساب المخاطرة الفعلية بالدولار لوت معين"""
+        stop_distance_pips = abs(entry_price - stop_loss_price)
+        risk = lot_size * stop_distance_pips * self.point_value_per_lot
+        return round(risk, 2)
+    
+    def get_recommended_lot(self, entry_price, stop_loss_price, account_risk_percent=None):
+        """الحصول على اللوت الموصى به بناءً على نسبة المخاطرة"""
+        if account_risk_percent is None:
+            account_risk_percent = self.risk_per_trade_percent
+        
+        risk_amount = (account_risk_percent / 100) * self.trading_capital
+        stop_distance_pips = abs(entry_price - stop_loss_price)
+        
+        if stop_distance_pips > 0:
+            lot_size = risk_amount / (stop_distance_pips * self.point_value_per_lot)
+            return round(lot_size, 2)
         return 0
     
     def get_trading_limits(self):
         """الحصول على حدود التداول اليومية"""
-        remaining_loss = self.max_daily_loss + self.daily_pnl if self.daily_pnl < 0 else self.max_daily_loss
-        remaining_profit = self.max_daily_profit - self.daily_pnl if self.daily_pnl > 0 else self.max_daily_profit
+        remaining_loss = self.daily_max_loss + self.daily_pnl if self.daily_pnl < 0 else self.daily_max_loss
+        remaining_profit = self.daily_max_profit - self.daily_pnl if self.daily_pnl > 0 else self.daily_max_profit
         
         return {
+            "total_account": self.total_account,
+            "trading_capital": self.trading_capital,
             "daily_pnl": self.daily_pnl,
-            "daily_pnl_percent": (self.daily_pnl / self.account_size) * 100,
-            "max_loss": self.max_daily_loss,
-            "max_profit": self.max_daily_profit,
+            "daily_pnl_percent": (self.daily_pnl / self.trading_capital) * 100,
+            "daily_max_loss": self.daily_max_loss,
+            "daily_max_profit": self.daily_max_profit,
             "profit_target": self.daily_profit_target,
             "remaining_loss": remaining_loss,
             "remaining_profit": remaining_profit,
@@ -365,7 +409,6 @@ risk_manager = RiskManager()
 # ==========================================
 st.markdown("### 🛡️ Risk Management System")
 
-# عرض حدود التداول
 limits = risk_manager.get_trading_limits()
 
 col1, col2, col3, col4 = st.columns(4)
@@ -373,13 +416,22 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown(f"""
     <div class="risk-card">
-        <div style="font-size:0.9rem; color:#888">Account Size</div>
-        <div style="font-size:1.5rem; font-weight:bold; color:#ffd700">${risk_manager.account_size:,.0f}</div>
-        <div style="font-size:0.8rem; color:#888">حجم الحساب الأصلي</div>
+        <div style="font-size:0.9rem; color:#888">Total Account</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#ffd700">${limits['total_account']:,.0f}</div>
+        <div style="font-size:0.8rem; color:#888">الحساب الأصلي</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col2:
+    st.markdown(f"""
+    <div class="risk-card">
+        <div style="font-size:0.9rem; color:#888">Trading Capital</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#ffd700">${limits['trading_capital']:,.0f}</div>
+        <div style="font-size:0.8rem; color:#888">10% من الحساب</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
     color = "#00ff88" if limits['daily_pnl'] >= 0 else "#ff4444"
     st.markdown(f"""
     <div class="risk-card">
@@ -389,30 +441,54 @@ with col2:
     </div>
     """, unsafe_allow_html=True)
 
-with col3:
+with col4:
     st.markdown(f"""
     <div class="risk-card">
         <div style="font-size:0.9rem; color:#888">Max Daily Loss</div>
-        <div style="font-size:1.5rem; font-weight:bold; color:#ff4444">${limits['max_loss']:,.0f}</div>
-        <div style="font-size:0.8rem; color:#888">5% من الحساب</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#ff4444">${limits['daily_max_loss']:,.0f}</div>
+        <div style="font-size:0.8rem; color:#888">5% من رأس المال</div>
     </div>
     """, unsafe_allow_html=True)
 
-with col4:
+col1, col2, col3, col4 = st.columns(4)
+with col1:
     st.markdown(f"""
     <div class="risk-card">
         <div style="font-size:0.9rem; color:#888">Daily Target</div>
         <div style="font-size:1.5rem; font-weight:bold; color:#00ff88">${limits['profit_target']:,.0f}</div>
-        <div style="font-size:0.8rem; color:#888">10% / {limits['max_profit']:,.0f} max</div>
+        <div style="font-size:0.8rem; color:#888">10% هدف يومي</div>
+    </div>
+    """, unsafe_allow_html=True)
+with col2:
+    st.markdown(f"""
+    <div class="risk-card">
+        <div style="font-size:0.9rem; color:#888">Max Daily Profit</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#00ff88">${limits['daily_max_profit']:,.0f}</div>
+        <div style="font-size:0.8rem; color:#888">12% حد أقصى</div>
+    </div>
+    """, unsafe_allow_html=True)
+with col3:
+    st.markdown(f"""
+    <div class="risk-card">
+        <div style="font-size:0.9rem; color:#888">Risk Per Trade</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#ffaa00">${limits['risk_per_trade']:,.0f}</div>
+        <div style="font-size:0.8rem; color:#888">1% من رأس المال</div>
+    </div>
+    """, unsafe_allow_html=True)
+with col4:
+    st.markdown(f"""
+    <div class="risk-card">
+        <div style="font-size:0.9rem; color:#888">Trades Today</div>
+        <div style="font-size:1.5rem; font-weight:bold; color:#ffaa00">{limits['trades_today']}/10</div>
+        <div style="font-size:0.8rem; color:#888">الحد الأقصى 10 صفقات</div>
     </div>
     """, unsafe_allow_html=True)
 
-# عرض حالة التداول
 if limits['can_trade']:
     st.markdown(f"""
     <div class="risk-success">
         ✅ {limits['can_trade_message']}<br>
-        📊 الصفقات اليوم: {limits['trades_today']}/10 | المخاطرة لكل صفقة: ${limits['risk_per_trade']:,.2f}
+        📊 الخسارة المتبقية: ${limits['remaining_loss']:,.2f} | الربح المتبقي: ${limits['remaining_profit']:,.2f}
     </div>
     """, unsafe_allow_html=True)
 else:
@@ -436,7 +512,7 @@ GOLD_API_KEY = "405b78ab30807179fcc9dbad5156da0a"
 tab1, tab2, tab3 = st.tabs(["📊 Gold Analysis", "📅 Economic Calendar", "⚙️ Risk Settings"])
 
 # ==========================================
-# الصفحة 1: تحليل الذهب
+# الصفحة 1: تحليل الذهب مع حساب اللوت
 # ==========================================
 with tab1:
     @st.cache_data(ttl=10)
@@ -578,22 +654,28 @@ with tab1:
         confidence = 50
         signal_color = "#ffaa00"
     
-    # حساب حجم العقد بناءً على المخاطرة
+    # حساب اللوت المناسب
     if signal_action == "BUY":
         entry = current_price
         stop_loss = support - (current_atr * 0.5)
+        recommended_lot = risk_manager.get_recommended_lot(entry, stop_loss)
         position_size = risk_manager.calculate_position_size(entry, stop_loss)
         targets = [resistance, resistance + (current_atr * 1.5), resistance + (current_atr * 3)]
+        risk_amount = risk_manager.calculate_risk_per_trade(entry, stop_loss, recommended_lot)
     elif signal_action == "SELL":
         entry = current_price
         stop_loss = resistance + (current_atr * 0.5)
+        recommended_lot = risk_manager.get_recommended_lot(entry, stop_loss)
         position_size = risk_manager.calculate_position_size(entry, stop_loss)
         targets = [support, support - (current_atr * 1.5), support - (current_atr * 3)]
+        risk_amount = risk_manager.calculate_risk_per_trade(entry, stop_loss, recommended_lot)
     else:
         entry = current_price
         stop_loss = None
+        recommended_lot = 0
         position_size = 0
         targets = []
+        risk_amount = 0
     
     # حساب التغير
     if len(df) > 1:
@@ -660,6 +742,40 @@ with tab1:
     </div>
     """, unsafe_allow_html=True)
     
+    # عرض اللوت الموصى به
+    if signal_action != "NEUTRAL" and limits['can_trade']:
+        st.markdown("### 📊 Position Size Calculator")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"""
+            <div class="lot-card">
+                <div class="lot-label">🔢 RECOMMENDED LOT SIZE</div>
+                <div class="lot-value">{recommended_lot:.2f} LOTS</div>
+                <div class="lot-label">بناءً على مخاطرة ${risk_manager.risk_per_trade:,.0f} | 1% من رأس المال</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class="lot-card">
+                <div class="lot-label">💰 RISK PER TRADE</div>
+                <div class="lot-value">${risk_amount:,.2f}</div>
+                <div class="lot-label">المخاطرة الفعلية بهذا اللوت</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # جدول أحجام اللوتات المختلفة
+        st.markdown("#### 📋 Lot Size Alternatives")
+        
+        lot_options = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.00]
+        
+        lot_data = []
+        for lot in lot_options:
+            risk = risk_manager.calculate_risk_per_trade(entry, stop_loss, lot)
+            lot_data.append({"Lot Size": f"{lot:.2f}", "Risk ($)": f"${risk:.2f}", "Risk %": f"{(risk / risk_manager.trading_capital) * 100:.2f}%"})
+        
+        st.dataframe(pd.DataFrame(lot_data), use_container_width=True, hide_index=True)
+    
     # الشارت
     st.markdown("### 📈 Price Chart")
     fig = go.Figure()
@@ -671,15 +787,15 @@ with tab1:
     fig.update_layout(template="plotly_dark", height=450)
     st.plotly_chart(fig, use_container_width=True)
     
-    # خطة التداول مع حجم العقد
+    # خطة التداول
     if signal_action != "NEUTRAL" and limits['can_trade']:
         st.markdown("### 🎯 Trading Plan")
         st.markdown(f"""
         <div class="targets-table">
             <div class="target-row"><span class="target-label">📍 Entry</span><span class="target-value">${entry:.2f}</span></div>
             <div class="target-row"><span class="target-label">🛑 Stop Loss</span><span class="target-value">${stop_loss:.2f}</span></div>
-            <div class="target-row"><span class="target-label">📊 Position Size</span><span class="target-value">{position_size:.2f} lots</span></div>
-            <div class="target-row"><span class="target-label">💰 Risk Amount</span><span class="target-value">${risk_manager.risk_per_trade:,.2f}</span></div>
+            <div class="target-row"><span class="target-label">📊 Position Size</span><span class="target-value">{recommended_lot:.2f} lots</span></div>
+            <div class="target-row"><span class="target-label">💰 Risk Amount</span><span class="target-value">${risk_amount:,.2f}</span></div>
             <div class="target-row"><span class="target-label">🎯 Target 1</span><span class="target-value">${targets[0]:.2f}</span></div>
             <div class="target-row"><span class="target-label">🎯 Target 2</span><span class="target-value">${targets[1]:.2f}</span></div>
             <div class="target-row"><span class="target-label">🎯 Target 3</span><span class="target-value">${targets[2]:.2f}</span></div>
@@ -689,7 +805,7 @@ with tab1:
         st.markdown(f"""
         <div class="stats-container" style="margin-top:20px">
             <div class="stat-card"><div class="stat-number" style="font-size:1rem">Risk/Reward</div><div class="stat-label">1 : {rr:.2f}</div></div>
-            <div class="stat-card"><div class="stat-number" style="font-size:1rem">Max Risk Daily</div><div class="stat-label">${limits['remaining_loss']:,.2f} left</div></div>
+            <div class="stat-card"><div class="stat-number" style="font-size:1rem">Remaining Risk</div><div class="stat-label">${limits['remaining_loss']:,.2f}</div></div>
         </div>
         """, unsafe_allow_html=True)
     elif not limits['can_trade']:
@@ -804,8 +920,7 @@ with tab2:
             **How to use this data:**
             - Events with HIGH impact on the USD are most important for gold
             - Actual vs Forecast vs Previous show the outcome relative to expectations
-            """
-            )
+            """)
     else:
         st.error("Unable to load economic calendar data. Please try again later.")
 
@@ -817,17 +932,17 @@ with tab3:
     st.markdown("قم بتعديل إعدادات إدارة المخاطر حسب احتياجاتك")
     st.markdown("---")
     
-    # عرض الإعدادات الحالية
     st.markdown("#### 📊 Current Settings")
     
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"""
-        - **Account Size:** ${risk_manager.account_size:,.0f}
-        - **Max Daily Loss:** {risk_manager.max_drawdown_percent}% (${risk_manager.max_daily_loss:,.0f})
-        - **Daily Profit Target:** {risk_manager.daily_profit_target_percent}% (${risk_manager.daily_profit_target:,.0f})
-        - **Max Daily Profit:** {risk_manager.max_daily_profit_percent}% (${risk_manager.max_daily_profit:,.0f})
-        - **Risk Per Trade:** {risk_manager.risk_per_trade_percent}% (${risk_manager.risk_per_trade:,.2f})
+        - **Total Account:** ${limits['total_account']:,.0f}
+        - **Trading Capital (10%):** ${limits['trading_capital']:,.0f}
+        - **Max Daily Loss:** {risk_manager.daily_loss_percent}% (${limits['daily_max_loss']:,.0f})
+        - **Daily Profit Target:** {risk_manager.daily_profit_target_percent}% (${limits['profit_target']:,.0f})
+        - **Max Daily Profit:** {risk_manager.max_daily_profit_percent}% (${limits['daily_max_profit']:,.0f})
+        - **Risk Per Trade:** {risk_manager.risk_per_trade_percent}% (${limits['risk_per_trade']:,.0f})
         """)
     
     with col2:
@@ -836,17 +951,17 @@ with tab3:
         - **Trades Today:** {limits['trades_today']}/10
         - **Remaining Loss Capacity:** ${limits['remaining_loss']:,.2f}
         - **Remaining Profit Capacity:** ${limits['remaining_profit']:,.2f}
+        - **Point Value:** $0.1 per point per lot
         """)
     
     st.markdown("---")
     
-    # تعديل الإعدادات
     st.markdown("#### ✏️ Modify Settings")
     
     col1, col2 = st.columns(2)
     with col1:
-        new_account_size = st.number_input("Account Size ($)", value=risk_manager.account_size, step=10000, min_value=10000)
-        new_max_daily_loss = st.slider("Max Daily Loss (%)", min_value=1, max_value=20, value=risk_manager.max_drawdown_percent)
+        new_total_account = st.number_input("Total Account ($)", value=risk_manager.total_account, step=10000, min_value=10000)
+        new_daily_loss = st.slider("Max Daily Loss (%)", min_value=1, max_value=20, value=risk_manager.daily_loss_percent)
         new_daily_target = st.slider("Daily Profit Target (%)", min_value=1, max_value=30, value=risk_manager.daily_profit_target_percent)
     
     with col2:
@@ -854,14 +969,11 @@ with tab3:
         new_risk_per_trade = st.slider("Risk Per Trade (%)", min_value=0.5, max_value=5.0, value=float(risk_manager.risk_per_trade_percent), step=0.5)
     
     if st.button("💾 Save Settings", use_container_width=True):
-        # تحديث الإعدادات (في نسخة كاملة، هنعدل الـ risk_manager)
         st.success("✅ Settings saved successfully!")
         st.info("Note: In this demo, settings reset on page refresh. In production, save to database.")
     
     st.markdown("---")
     
-    # زر إعادة تعيين اليوم
-    st.markdown("#### 🔄 Daily Reset")
     if st.button("🔄 Reset Today's Trading Data", use_container_width=True):
         risk_manager.reset_daily()
         st.success("✅ Today's trading data has been reset!")
@@ -869,32 +981,36 @@ with tab3:
     
     st.markdown("---")
     
-    # قواعد إدارة المخاطر
     with st.expander("📖 Risk Management Rules"):
         st.markdown("""
         ### 🏛️ قواعد إدارة المخاطر للمتداول الممول
         
-        #### 1. حدود الخسارة اليومية
-        - الحد الأقصى للخسارة اليومية هو **5%** من رأس المال
+        #### 1. هيكل الحساب
+        - **الحساب الأصلي:** $100,000
+        - **الحد الأقصى للخسارة:** 10% = $10,000
+        - **رأس المال المتداول الفعلي:** $10,000 (هذا هو المبلغ الذي تدير به المخاطر)
+        
+        #### 2. حدود الخسارة اليومية
+        - الحد الأقصى للخسارة اليومية هو **5%** من رأس المال المتداول ($500)
         - عند الوصول إلى هذا الحد، يتوقف التداول تلقائياً حتى اليوم التالي
         
-        #### 2. أهداف الربح اليومية
-        - الهدف اليومي هو **10%** من رأس المال
-        - الحد الأقصى للربح اليومي هو **12%** (لحماية الأرباح)
+        #### 3. أهداف الربح اليومية
+        - الهدف اليومي هو **10%** من رأس المال المتداول ($1,000)
+        - الحد الأقصى للربح اليومي هو **12%** ($1,200) لحماية الأرباح
         
-        #### 3. إدارة الصفقات
-        - المخاطرة القصوى لكل صفقة: **1%** من رأس المال
+        #### 4. إدارة الصفقات
+        - المخاطرة القصوى لكل صفقة: **1%** من رأس المال المتداول ($100)
         - الحد الأقصى للصفقات اليومية: **10 صفقات**
         - نسبة المخاطرة/العائد: **1:2** كحد أدنى
         
-        #### 4. أوقات الأخبار
+        #### 5. حساب اللوت المناسب
+        ```
+        اللوت = المخاطرة بالدولار / (وقف الخسارة بالنقاط × 0.1)
+        ```
+        
+        #### 6. أوقات الأخبار
         - **يُمنع التداول** قبل 15 دقيقة من الأخبار الهامة
         - الأخبار عالية التأثير تتطلب انتظار 15 دقيقة بعد الإعلان
-        
-        #### 5. قواعد إضافية
-        - لا تزيد حجم العقد عن الحد المحدد
-        - استخدم الوقف المتحرك لحماية الأرباح
-        - لا تخاطر بأكثر من 2% من الحساب في يوم واحد
         """)
 
 # ==========================================
@@ -903,6 +1019,8 @@ with tab3:
 st.markdown(f"""
 <div class="footer">
     𓋹 Powered by GoldAPI.io | SMC + ICT Analysis | Risk Management System 𓋹<br>
+    📊 الحساب: ${limits['total_account']:,.0f} | رأس المال المتداول: ${limits['trading_capital']:,.0f} | الخسارة القصوى: 10%<br>
+    📈 قيمة النقطة: 0.1 دولار لكل لوت | المخاطرة الموصى بها: 1%<br>
     <br>
     <a href="https://t.me/Ehabka2002" target="_blank" style="color:#0088cc; text-decoration:none;">📱 اشترك في قناة التليجرام للإشارات اليومية</a><br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
