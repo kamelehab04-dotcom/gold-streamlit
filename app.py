@@ -4,9 +4,6 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-import requests
-import json
-import time
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
@@ -72,7 +69,6 @@ st.markdown("""
         text-align: center;
         border: 2px solid #ffd700;
         margin: 20px 0;
-        transition: all 0.3s;
     }
     .price-label {
         font-size: 1.2rem;
@@ -167,23 +163,6 @@ st.markdown("""
     .target-value {
         color: #ffffff;
     }
-    .sentiment-card {
-        background: #1e1e2e;
-        border-radius: 12px;
-        padding: 15px;
-        margin: 10px 0;
-        border-left: 4px solid #ffd700;
-    }
-    .event-card {
-        background: #1e1e2e;
-        border-radius: 10px;
-        padding: 15px;
-        margin: 10px 0;
-        border-left: 4px solid;
-    }
-    .event-high { border-left-color: #ff4444; }
-    .event-medium { border-left-color: #ffaa00; }
-    .event-low { border-left-color: #00ff88; }
     .footer {
         text-align: center;
         padding: 20px;
@@ -191,18 +170,6 @@ st.markdown("""
         font-size: 0.8rem;
         border-top: 1px solid #333;
         margin-top: 30px;
-    }
-    .rating-badge {
-        background: #1e1e2e;
-        border-radius: 10px;
-        padding: 10px 15px;
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .stars {
-        color: #ffd700;
-        letter-spacing: 2px;
     }
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
@@ -226,7 +193,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Multi-Source Data</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT | REAL-TIME SPOT PRICE (XAU/USD)</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -251,76 +218,43 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# إعدادات APIs
-# ==========================================
-NEW_API_KEY = "405b78ab30807179fcc9dbad5156da0a"
-GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
-
-# ==========================================
 # إنشاء التبويبات
 # ==========================================
 tab1, tab2 = st.tabs(["📊 Gold Analysis Dashboard", "📅 Economic Calendar"])
 
 # ==========================================
-# الصفحة 1: تحليل الذهب
+# الصفحة 1: تحليل الذهب (سعر فوري)
 # ==========================================
 with tab1:
     @st.cache_data(ttl=10)
-    def get_real_price_multisource():
-        """جلب السعر الحقيقي من مصادر متعددة"""
-        prices = []
-        
-        # المصدر 1: Yahoo Finance (الأكثر دقة)
+    def get_spot_price():
+        """جلب سعر الذهب الفوري (Spot) من Yahoo Finance"""
         try:
-            gold = yf.Ticker("GC=F")
+            # XAUUSD=X هو رمز السعر الفوري للذهب مقابل الدولار
+            gold = yf.Ticker("XAUUSD=X")
             df = gold.history(period="1d", interval="1m")
             if not df.empty:
-                prices.append(df['Close'].iloc[-1])
-                print(f"Yahoo: {df['Close'].iloc[-1]}")
-        except:
-            pass
-        
-        # المصدر 2: GoldAPI (بالمفتاح الجديد)
-        try:
-            url = "https://www.goldapi.io/api/XAU/USD"
-            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                prices.append(float(data.get('price', 0)))
-                print(f"GoldAPI: {data.get('price', 0)}")
-        except:
-            pass
-        
-        # المصدر 3: API جديد (إذا كان يعمل)
-        try:
-            url = f"https://api.example.com/gold/price?apikey={NEW_API_KEY}"
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                price = float(data.get('price', 0)) or float(data.get('gold_price', 0))
-                if price > 0:
-                    prices.append(price)
-        except:
-            pass
-        
-        if prices:
-            # نأخذ المتوسط أو أحدث سعر
-            return sum(prices) / len(prices)
-        
-        return None
+                return df['Close'].iloc[-1]
+            return None
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
     
     @st.cache_data(ttl=300)
     def get_historical_data():
-        gold = yf.Ticker("GC=F")
-        df = gold.history(period="1mo", interval="1h")
-        if df.empty:
+        """جلب البيانات التاريخية للشارت (أيضاً فوري)"""
+        try:
+            gold = yf.Ticker("XAUUSD=X")
+            df = gold.history(period="1mo", interval="1h")
+            if df.empty:
+                return None
+            df.columns = [col.lower() for col in df.columns]
+            return df
+        except:
             return None
-        df.columns = [col.lower() for col in df.columns]
-        return df
     
-    # جلب السعر الحقيقي
-    current_price = get_real_price_multisource()
+    # جلب السعر الفوري
+    current_price = get_spot_price()
     
     # جلب البيانات التاريخية
     df = get_historical_data()
@@ -333,7 +267,7 @@ with tab1:
         current_price = df['close'].iloc[-1]
     
     if current_price is None:
-        st.error("Unable to fetch gold price")
+        st.error("Unable to fetch gold spot price")
         st.stop()
     
     # حساب المؤشرات
@@ -467,15 +401,15 @@ with tab1:
     change_color = "#00ff88" if change >= 0 else "#ff4444"
     change_sign = "+" if change >= 0 else ""
     
-    # عرض السعر
+    # عرض السعر الفوري
     st.markdown(f"""
     <div class="price-card">
         <div class="price-label">
-            <span class="live-badge">LIVE</span> 𓋹 REAL TIME GOLD PRICE 𓋹
+            <span class="live-badge">SPOT PRICE</span> 𓋹 XAU/USD (GOLD SPOT) 𓋹
         </div>
         <div class="price-value">${current_price:,.2f}</div>
         <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
-        <div style="color:#888; font-size:0.8rem; margin-top:10px">Multi-Source Data (Yahoo + GoldAPI)</div>
+        <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: Yahoo Finance (Real-time Spot)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -524,12 +458,12 @@ with tab1:
     # الشارت
     st.markdown("### 📈 Price Chart")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Gold', line=dict(color='#ffd700', width=2)))
+    fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='XAU/USD', line=dict(color='#ffd700', width=2)))
     fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')))
     fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')))
     fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", annotation_text="Resistance")
     fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", annotation_text="Support")
-    fig.update_layout(template="plotly_dark", height=450)
+    fig.update_layout(template="plotly_dark", height=450, title="XAU/USD - Gold Spot Price")
     st.plotly_chart(fig, use_container_width=True)
     
     # خطة التداول
@@ -677,7 +611,7 @@ with tab2:
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 Multi-Source Data (Yahoo + GoldAPI) | SMC + ICT Analysis | Real-time Live Data 𓋹<br>
+    𓋹 Powered by Yahoo Finance (XAU/USD Spot) | SMC + ICT Analysis | Real-time Live Data 𓋹<br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
