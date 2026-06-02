@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import requests
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
@@ -218,33 +219,42 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
+# إعدادات API
+# ==========================================
+GOLD_API_KEY = "405b78ab30807179fcc9dbad5156da0a"
+
+# ==========================================
 # إنشاء التبويبات
 # ==========================================
 tab1, tab2 = st.tabs(["📊 Gold Analysis Dashboard", "📅 Economic Calendar"])
 
 # ==========================================
-# الصفحة 1: تحليل الذهب (سعر فوري)
+# الصفحة 1: تحليل الذهب
 # ==========================================
 with tab1:
     @st.cache_data(ttl=10)
     def get_spot_price():
-        """جلب سعر الذهب الفوري (Spot) من Yahoo Finance"""
+        """جلب سعر الذهب الفوري من GoldAPI"""
         try:
-            # XAUUSD=X هو رمز السعر الفوري للذهب مقابل الدولار
-            gold = yf.Ticker("XAUUSD=X")
-            df = gold.history(period="1d", interval="1m")
-            if not df.empty:
-                return df['Close'].iloc[-1]
+            url = "https://www.goldapi.io/api/XAU/USD"
+            headers = {
+                "x-access-token": GOLD_API_KEY,
+                "Content-Type": "application/json"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return float(data.get('price', 0))
             return None
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"GoldAPI Error: {e}")
             return None
     
     @st.cache_data(ttl=300)
     def get_historical_data():
-        """جلب البيانات التاريخية للشارت (أيضاً فوري)"""
+        """جلب البيانات التاريخية من Yahoo Finance"""
         try:
-            gold = yf.Ticker("XAUUSD=X")
+            gold = yf.Ticker("GC=F")
             df = gold.history(period="1mo", interval="1h")
             if df.empty:
                 return None
@@ -260,7 +270,7 @@ with tab1:
     df = get_historical_data()
     
     if df is None:
-        st.error("Error loading data")
+        st.error("Error loading historical data")
         st.stop()
     
     if current_price is None and df is not None:
@@ -389,7 +399,7 @@ with tab1:
         stop_loss = None
         targets = []
     
-    # حساب التغير
+    # حساب التغير (من البيانات التاريخية)
     if len(df) > 1:
         prev_price = df['close'].iloc[-2]
         change = current_price - prev_price
@@ -409,7 +419,7 @@ with tab1:
         </div>
         <div class="price-value">${current_price:,.2f}</div>
         <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
-        <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: Yahoo Finance (Real-time Spot)</div>
+        <div style="color:#888; font-size:0.8rem; margin-top:10px">Source: GoldAPI.io (Real-time Spot)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -611,7 +621,7 @@ with tab2:
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 Powered by Yahoo Finance (XAU/USD Spot) | SMC + ICT Analysis | Real-time Live Data 𓋹<br>
+    𓋹 Powered by GoldAPI.io (Spot Price) | SMC + ICT Analysis | Real-time Live Data 𓋹<br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
