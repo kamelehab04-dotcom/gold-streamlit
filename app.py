@@ -5,14 +5,11 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import requests
-from PIL import Image
-import base64
-from io import BytesIO
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# شعار فرعوني (كـ HTML/CSS)
+# CSS للتنسيق
 # ==========================================
 st.markdown("""
 <style>
@@ -23,24 +20,23 @@ st.markdown("""
         border-radius: 15px;
         margin-bottom: 20px;
         border: 1px solid #ffd70033;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        flex-wrap: wrap;
     }
     .pharaoh-title {
-        font-size: 2.5rem;
+        font-size: 2rem;
         color: #ffd700;
         text-shadow: 2px 2px 4px #000000;
         margin: 0;
         font-weight: bold;
     }
     .pharaoh-subtitle {
-        font-size: 1rem;
+        font-size: 0.8rem;
         color: #888;
         margin: 5px 0 0 0;
-    }
-    .pharaoh-icon {
-        font-size: 3rem;
-    }
-    .gold-text {
-        color: #ffd700;
     }
     .signal-buy {
         background-color: #00ff8833;
@@ -79,16 +75,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# الهيدر الفرعوني
+# الهيدر بالصورة
 # ==========================================
-st.markdown("""
-<div class="pharaoh-header">
-    <div class="pharaoh-icon">𓋹𓋹𓋹</div>
-    <div class="pharaoh-title">PHARAOH GOLD DASHBOARD</div>
-    <div class="pharaoh-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT Analysis</div>
-    <div class="pharaoh-icon">𓋹𓋹𓋹</div>
-</div>
-""", unsafe_allow_html=True)
+
+# عرض الصورة (استخدم الرابط المباشر أو اسم الملف)
+try:
+    st.image("https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/refs/heads/main/ChatGPT%20Image%202%20%D9%8A%D9%88%D9%86%D9%8A%D9%88%202026%D8%8C%2009_05_59%20%D8%B5.png", width=80)
+except:
+    # لو الصورة مش موجودة، اعرض النص فقط
+    pass
+
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.markdown("""
+    <div style="text-align:center">
+        <h1 style="color:#ffd700; margin:0">𓋹 PHARAOH GOLD DASHBOARD 𓋹</h1>
+        <p style="color:#888">بوت تحليل الذهب الفرعوني | SMC + ICT Analysis</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("---")
 
 # ==========================================
 # جلب سعر الذهب الفوري
@@ -321,7 +327,9 @@ fig.add_hline(y=current_price, line_dash="dot", line_color="white", annotation_t
 fig.update_layout(template="plotly_dark", height=450, title="📊 Gold Historical Chart")
 st.plotly_chart(fig, use_container_width=True)
 
+# ==========================================
 # RSI Chart
+# ==========================================
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='#9b59b6', width=2)))
 fig2.add_hline(y=70, line_dash="dash", line_color="#ff4444", annotation_text="Overbought")
@@ -385,8 +393,9 @@ else:
 # ==========================================
 # الفوتر
 # ==========================================
-st.markdown("""
+st.markdown(f"""
 <div class="footer">
     𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT Analysis | Real-time Data 𓋹<br>
-    Last update: {}</div>
-""".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')), unsafe_allow_html=True)
+    Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+</div>
+""", unsafe_allow_html=True)
