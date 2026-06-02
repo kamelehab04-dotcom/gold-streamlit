@@ -12,11 +12,10 @@ import base64
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق - نفس نظام الصورة
+# CSS للتنسيق
 # ==========================================
 st.markdown("""
 <style>
-    /* التنسيق العام */
     .main-header {
         text-align: center;
         padding: 30px;
@@ -38,8 +37,6 @@ st.markdown("""
         color: #aaa;
         margin-top: 10px;
     }
-    
-    /* بطاقات الإحصائيات */
     .stats-container {
         display: flex;
         justify-content: space-between;
@@ -69,8 +66,6 @@ st.markdown("""
         color: #888;
         margin-top: 10px;
     }
-    
-    /* بطاقة السعر الرئيسية */
     .price-card {
         background: linear-gradient(135deg, #ffd70015 0%, #ffaa0015 100%);
         border-radius: 20px;
@@ -94,8 +89,6 @@ st.markdown("""
         font-size: 1rem;
         color: #00ff88;
     }
-    
-    /* بطاقات المؤشرات */
     .indicator-card {
         background: #1e1e2e;
         border-radius: 12px;
@@ -112,8 +105,6 @@ st.markdown("""
         font-size: 0.8rem;
         color: #888;
     }
-    
-    /* إشارات التداول */
     .signal-card {
         border-radius: 15px;
         padding: 20px;
@@ -140,8 +131,6 @@ st.markdown("""
         font-size: 0.9rem;
         margin-top: 10px;
     }
-    
-    /* جدول الأهداف */
     .targets-table {
         background: #1e1e2e;
         border-radius: 12px;
@@ -164,8 +153,20 @@ st.markdown("""
     .target-value {
         color: #ffffff;
     }
-    
-    /* الفوتر */
+    .pattern-card {
+        background: #1e1e2e;
+        border-radius: 10px;
+        padding: 10px;
+        margin: 5px;
+        text-align: center;
+        border: 1px solid #ffd70033;
+    }
+    .pattern-bullish {
+        border-left: 4px solid #00ff88;
+    }
+    .pattern-bearish {
+        border-left: 4px solid #ff4444;
+    }
     .footer {
         text-align: center;
         padding: 20px;
@@ -174,8 +175,6 @@ st.markdown("""
         border-top: 1px solid #333;
         margin-top: 30px;
     }
-    
-    /* شارة التقييم */
     .rating-badge {
         background: #1e1e2e;
         border-radius: 10px;
@@ -192,17 +191,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# الهيدر الرئيسي (نفس نظام الصورة)
+# الهيدر
 # ==========================================
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT Analysis | Real-time Trading Signals</div>
+    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT + Chart Patterns | Real-time Trading Signals</div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# بطاقات الإحصائيات (زي الصورة)
+# بطاقات الإحصائيات
 # ==========================================
 st.markdown("""
 <div class="stats-container">
@@ -222,7 +221,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# جلب سعر الذهب الفوري
+# جلب البيانات
 # ==========================================
 GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
 
@@ -242,7 +241,7 @@ def get_real_price():
 @st.cache_data(ttl=300)
 def get_historical_data():
     gold = yf.Ticker("GC=F")
-    df = gold.history(period="3d", interval="1h")
+    df = gold.history(period="1mo", interval="1h")
     if df.empty:
         return None
     df.columns = [col.lower() for col in df.columns]
@@ -261,7 +260,7 @@ else:
     current_price = df['close'].iloc[-1]
 
 # ==========================================
-# حساب المؤشرات
+# حساب المؤشرات الأساسية
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -290,7 +289,210 @@ current_rsi = df['rsi'].iloc[-1]
 current_atr = df['atr'].iloc[-1]
 
 # ==========================================
-# إشارات SMC
+# كشف القمم والقيعان (للنماذج)
+# ==========================================
+def find_peaks(data, order=5):
+    peaks = []
+    for i in range(order, len(data) - order):
+        if all(data[i] > data[i-j] for j in range(1, order+1)) and all(data[i] > data[i+j] for j in range(1, order+1)):
+            peaks.append(data[i])
+    return peaks
+
+def find_troughs(data, order=5):
+    troughs = []
+    for i in range(order, len(data) - order):
+        if all(data[i] < data[i-j] for j in range(1, order+1)) and all(data[i] < data[i+j] for j in range(1, order+1)):
+            troughs.append(data[i])
+    return troughs
+
+# ==========================================
+# نماذج التداول (Chart Patterns)
+# ==========================================
+
+# 1. Double Top / Double Bottom
+def detect_double_top_bottom(df):
+    peaks = find_peaks(df['high'].values[-100:])
+    troughs = find_troughs(df['low'].values[-100:])
+    
+    if len(peaks) >= 2:
+        last_two_peaks = peaks[-2:]
+        if abs(last_two_peaks[-1] - last_two_peaks[-2]) / last_two_peaks[-2] < 0.02:
+            return "DOUBLE TOP", "bearish", 4
+    
+    if len(troughs) >= 2:
+        last_two_troughs = troughs[-2:]
+        if abs(last_two_troughs[-1] - last_two_troughs[-2]) / last_two_troughs[-2] < 0.02:
+            return "DOUBLE BOTTOM", "bullish", 4
+    
+    return None, None, 0
+
+# 2. Triple Top / Triple Bottom
+def detect_triple_top_bottom(df):
+    peaks = find_peaks(df['high'].values[-150:])
+    troughs = find_troughs(df['low'].values[-150:])
+    
+    if len(peaks) >= 3:
+        last_three_peaks = peaks[-3:]
+        if max(last_three_peaks) - min(last_three_peaks) < np.mean(last_three_peaks) * 0.03:
+            return "TRIPLE TOP", "bearish", 5
+    
+    if len(troughs) >= 3:
+        last_three_troughs = troughs[-3:]
+        if max(last_three_troughs) - min(last_three_troughs) < np.mean(last_three_troughs) * 0.03:
+            return "TRIPLE BOTTOM", "bullish", 5
+    
+    return None, None, 0
+
+# 3. Head and Shoulders
+def detect_head_shoulders(df):
+    peaks = find_peaks(df['high'].values[-120:], order=3)
+    
+    if len(peaks) >= 3:
+        head_idx = np.argmax([p for p in peaks[-5:]])
+        if head_idx > 0 and head_idx < len(peaks[-5:]) - 1:
+            left_shoulder = peaks[-5:][head_idx - 1]
+            head = peaks[-5:][head_idx]
+            right_shoulder = peaks[-5:][head_idx + 1]
+            if head > left_shoulder and head > right_shoulder:
+                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
+                    return "HEAD AND SHOULDERS", "bearish", 6
+    return None, None, 0
+
+# 4. Inverse Head and Shoulders
+def detect_inverse_head_shoulders(df):
+    troughs = find_troughs(df['low'].values[-120:], order=3)
+    
+    if len(troughs) >= 3:
+        head_idx = np.argmin([t for t in troughs[-5:]])
+        if head_idx > 0 and head_idx < len(troughs[-5:]) - 1:
+            left_shoulder = troughs[-5:][head_idx - 1]
+            head = troughs[-5:][head_idx]
+            right_shoulder = troughs[-5:][head_idx + 1]
+            if head < left_shoulder and head < right_shoulder:
+                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
+                    return "INVERSE HEAD AND SHOULDERS", "bullish", 6
+    return None, None, 0
+
+# 5. Ascending Triangle
+def detect_ascending_triangle(df):
+    recent_data = df.iloc[-40:]
+    highs = recent_data['high'].values
+    lows = recent_data['low'].values
+    x = np.arange(len(highs))
+    slope_highs = np.polyfit(x, highs, 1)[0]
+    slope_lows = np.polyfit(x, lows, 1)[0]
+    
+    if slope_lows > 0.01 and abs(slope_highs) < 0.005:
+        return "ASCENDING TRIANGLE", "bullish", 3
+    return None, None, 0
+
+# 6. Descending Triangle
+def detect_descending_triangle(df):
+    recent_data = df.iloc[-40:]
+    highs = recent_data['high'].values
+    lows = recent_data['low'].values
+    x = np.arange(len(highs))
+    slope_highs = np.polyfit(x, highs, 1)[0]
+    slope_lows = np.polyfit(x, lows, 1)[0]
+    
+    if slope_highs < -0.01 and abs(slope_lows) < 0.005:
+        return "DESCENDING TRIANGLE", "bearish", 3
+    return None, None, 0
+
+# 7. Bullish Flag
+def detect_bullish_flag(df):
+    recent_data = df.iloc[-30:]
+    first_candle = recent_data.iloc[0]
+    last_candle = recent_data.iloc[-1]
+    if first_candle['close'] > first_candle['open']:
+        flag_range = (recent_data['high'].max() - recent_data['low'].min()) / recent_data['low'].min()
+        if flag_range < 0.01:
+            return "BULLISH FLAG", "bullish", 3
+    return None, None, 0
+
+# 8. Bearish Flag
+def detect_bearish_flag(df):
+    recent_data = df.iloc[-30:]
+    first_candle = recent_data.iloc[0]
+    if first_candle['close'] < first_candle['open']:
+        flag_range = (recent_data['high'].max() - recent_data['low'].min()) / recent_data['low'].min()
+        if flag_range < 0.01:
+            return "BEARISH FLAG", "bearish", 3
+    return None, None, 0
+
+# 9. Rounding Bottom
+def detect_rounding_bottom(df):
+    recent_lows = df['low'].values[-50:]
+    mid = len(recent_lows) // 2
+    left_min = np.min(recent_lows[:mid])
+    right_min = np.min(recent_lows[mid:])
+    center_min = np.min(recent_lows)
+    if center_min < left_min and center_min < right_min:
+        return "ROUNDING BOTTOM", "bullish", 2
+    return None, None, 0
+
+# ==========================================
+# تنفيذ جميع النماذج
+# ==========================================
+def analyze_all_patterns(df):
+    patterns = []
+    total_pattern_score = 0
+    
+    # تشغيل كل النماذج
+    pattern, direction, score = detect_double_top_bottom(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_triple_top_bottom(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_head_shoulders(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_inverse_head_shoulders(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_ascending_triangle(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_descending_triangle(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_bullish_flag(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_bearish_flag(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    pattern, direction, score = detect_rounding_bottom(df)
+    if pattern:
+        patterns.append({"name": pattern, "direction": direction, "score": score})
+        total_pattern_score += score if direction == "bullish" else -score
+    
+    return patterns, total_pattern_score
+
+# ==========================================
+# تنفيذ التحليل
+# ==========================================
+patterns, pattern_score = analyze_all_patterns(df)
+
+# ==========================================
+# SMC Signals (نفس الكود السابق)
 # ==========================================
 recent_lows = df['low'].iloc[-20:].values
 recent_highs = df['high'].iloc[-20:].values
@@ -302,12 +504,13 @@ resistance = np.percentile(df['high'].iloc[-30:], 75)
 support = np.percentile(df['low'].iloc[-30:], 25)
 
 # ==========================================
-# نظام التسجيل
+# نظام التسجيل (مع إضافة النماذج)
 # ==========================================
 bullish = 0
 bearish = 0
 signals = []
 
+# RSI
 if current_rsi < 45:
     bullish += 3
     signals.append(f"✅ RSI: {current_rsi:.1f} (BUY ZONE)")
@@ -317,6 +520,7 @@ elif current_rsi > 65:
 else:
     signals.append(f"📊 RSI: {current_rsi:.1f} (NEUTRAL)")
 
+# EMA
 if current_price > df['ema20'].iloc[-1]:
     bullish += 2
     signals.append("📈 Price above EMA20")
@@ -324,13 +528,13 @@ else:
     bearish += 2
     signals.append("📉 Price below EMA20")
 
+# SMC
 if liquidity_sweep_bullish:
     bullish += 3
     signals.append("🎯 Liquidity Sweep Bullish")
 if liquidity_sweep_bearish:
     bearish += 3
     signals.append("🎯 Liquidity Sweep Bearish")
-
 if bos_bullish:
     bullish += 2
     signals.append("🚀 BOS Bullish")
@@ -338,6 +542,7 @@ if bos_bearish:
     bearish += 2
     signals.append("🚀 BOS Bearish")
 
+# Support/Resistance
 if current_price <= support + 5:
     bullish += 2
     signals.append(f"📍 Near Support: ${support:.2f}")
@@ -345,27 +550,39 @@ if current_price >= resistance - 5:
     bearish += 2
     signals.append(f"📍 Near Resistance: ${resistance:.2f}")
 
+# إضافة نقاط النماذج
+for p in patterns:
+    if p['direction'] == "bullish":
+        bullish += p['score']
+        signals.append(f"📈 {p['name']} (+{p['score']})")
+    else:
+        bearish += p['score']
+        signals.append(f"📉 {p['name']} (-{p['score']})")
+
 net = bullish - bearish
 
-if net >= 8:
+# ==========================================
+# الإشارة النهائية
+# ==========================================
+if net >= 12:
     signal_type = "STRONG BUY"
     signal_action = "BUY"
-    confidence = 90
+    confidence = 95
     signal_color = "#00ff88"
-elif net >= 4:
+elif net >= 7:
     signal_type = "BUY"
     signal_action = "BUY"
-    confidence = 75
+    confidence = 80
     signal_color = "#00ff88"
-elif net <= -8:
+elif net <= -12:
     signal_type = "STRONG SELL"
     signal_action = "SELL"
-    confidence = 90
+    confidence = 95
     signal_color = "#ff4444"
-elif net <= -4:
+elif net <= -7:
     signal_type = "SELL"
     signal_action = "SELL"
-    confidence = 75
+    confidence = 80
     signal_color = "#ff4444"
 else:
     signal_type = "WAIT"
@@ -390,7 +607,7 @@ else:
     targets = []
 
 # ==========================================
-# عرض السعر الرئيسي (نفس نظام الصورة)
+# عرض السعر
 # ==========================================
 change = real_price - (df['close'].iloc[-2] if len(df) > 1 else real_price) if real_price else 0
 change_percent = (change / (df['close'].iloc[-2] if len(df) > 1 else real_price)) * 100 if real_price else 0
@@ -445,7 +662,7 @@ with col4:
     """, unsafe_allow_html=True)
 
 # ==========================================
-# إشارة التداول (نفس نظام الصورة)
+# إشارة التداول
 # ==========================================
 signal_class = "signal-buy" if signal_action == "BUY" else "signal-sell" if signal_action == "SELL" else "signal-neutral"
 
@@ -455,6 +672,24 @@ st.markdown(f"""
     <div class="signal-confidence">Confidence: {confidence}% | Score: {net:+d}</div>
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# عرض النماذج المكتشفة
+# ==========================================
+if patterns:
+    st.markdown("### 📈 Detected Chart Patterns")
+    
+    cols = st.columns(min(len(patterns), 4))
+    for i, p in enumerate(patterns):
+        col_idx = i % 4
+        with cols[col_idx]:
+            emoji = "🟢" if p['direction'] == "bullish" else "🔴"
+            st.markdown(f"""
+            <div class="pattern-card pattern-{p['direction']}">
+                <div style="font-size:1.2rem; font-weight:bold">{emoji} {p['name']}</div>
+                <div style="color:#888; font-size:0.8rem">{p['direction'].upper()} | +{p['score']} pts</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ==========================================
 # الشارت
@@ -467,12 +702,11 @@ fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20',
 fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')))
 fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", annotation_text="Resistance")
 fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", annotation_text="Support")
-fig.add_hline(y=current_price, line_dash="dot", line_color="white", annotation_text=f"Current: ${current_price:.2f}")
-fig.update_layout(template="plotly_dark", height=400)
+fig.update_layout(template="plotly_dark", height=450)
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# جدول الأهداف (نفس نظام الصورة)
+# جدول الأهداف
 # ==========================================
 if signal_action != "NEUTRAL":
     st.markdown("### 🎯 Trading Plan & Targets")
@@ -493,12 +727,6 @@ if signal_action != "NEUTRAL":
     st.markdown("#### 🎯 Take Profit Targets")
     
     col1, col2, col3 = st.columns(3)
-    targets_data = [
-        {"level": "Target 1", "price": targets[0], "reward": f"{(targets[0]-entry):+.2f}" if signal_action=="BUY" else f"{(entry-targets[0]):+.2f}"},
-        {"level": "Target 2", "price": targets[1], "reward": f"{(targets[1]-entry):+.2f}" if signal_action=="BUY" else f"{(entry-targets[1]):+.2f}"},
-        {"level": "Target 3", "price": targets[2], "reward": f"{(targets[2]-entry):+.2f}" if signal_action=="BUY" else f"{(entry-targets[2]):+.2f}"},
-    ]
-    
     with col1:
         st.markdown(f"""
         <div class="indicator-card">
@@ -521,7 +749,6 @@ if signal_action != "NEUTRAL":
         </div>
         """, unsafe_allow_html=True)
     
-    # نسبة المخاطرة/العائد
     if signal_action == "BUY":
         rr_ratio = (targets[0] - entry) / (entry - stop_loss)
     else:
@@ -553,7 +780,7 @@ with st.expander("📊 Technical Indicators Details"):
             st.info(s)
 
 # ==========================================
-# شارة التقييم (نفس نظام الصورة)
+# شارة التقييم
 # ==========================================
 st.markdown("""
 <div style="display: flex; justify-content: center; margin: 30px 0">
@@ -570,7 +797,7 @@ st.markdown("""
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT Analysis | Real-time Data 𓋹<br>
+    𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT + Chart Patterns Analysis | Real-time Data 𓋹<br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
