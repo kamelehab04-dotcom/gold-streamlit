@@ -7,222 +7,47 @@ import numpy as np
 import requests
 from PIL import Image
 from io import BytesIO
-import base64
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق - نفس نظام الصورة
+# محاولة عرض الصورة بثلاث طرق مختلفة
 # ==========================================
-st.markdown("""
-<style>
-    /* التنسيق العام */
-    .main-header {
-        text-align: center;
-        padding: 30px;
-        background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
-        border-radius: 20px;
-        margin-bottom: 30px;
-        border: 1px solid #ffd70033;
-    }
-    .main-title {
-        font-size: 2.5rem;
-        color: #ffd700;
-        text-shadow: 2px 2px 4px #000000;
-        margin: 0;
-        font-weight: bold;
-        letter-spacing: 2px;
-    }
-    .main-subtitle {
-        font-size: 1rem;
-        color: #aaa;
-        margin-top: 10px;
-    }
-    
-    /* بطاقات الإحصائيات */
-    .stats-container {
-        display: flex;
-        justify-content: space-between;
-        gap: 20px;
-        margin: 30px 0;
-    }
-    .stat-card {
-        flex: 1;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        border: 1px solid #ffd70033;
-        transition: transform 0.3s;
-    }
-    .stat-card:hover {
-        transform: translateY(-5px);
-        border-color: #ffd70066;
-    }
-    .stat-number {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #ffd700;
-    }
-    .stat-label {
-        font-size: 0.9rem;
-        color: #888;
-        margin-top: 10px;
-    }
-    
-    /* بطاقة السعر الرئيسية */
-    .price-card {
-        background: linear-gradient(135deg, #ffd70015 0%, #ffaa0015 100%);
-        border-radius: 20px;
-        padding: 30px;
-        text-align: center;
-        border: 2px solid #ffd700;
-        margin: 20px 0;
-    }
-    .price-label {
-        font-size: 1.2rem;
-        color: #ffd700;
-        letter-spacing: 2px;
-    }
-    .price-value {
-        font-size: 4rem;
-        font-weight: bold;
-        color: #ffffff;
-        margin: 10px 0;
-    }
-    .price-change {
-        font-size: 1rem;
-        color: #00ff88;
-    }
-    
-    /* بطاقات المؤشرات */
-    .indicator-card {
-        background: #1e1e2e;
-        border-radius: 12px;
-        padding: 15px;
-        text-align: center;
-        border-left: 4px solid #ffd700;
-        margin: 10px 0;
-    }
-    .indicator-value {
-        font-size: 1.8rem;
-        font-weight: bold;
-    }
-    .indicator-label {
-        font-size: 0.8rem;
-        color: #888;
-    }
-    
-    /* إشارات التداول */
-    .signal-card {
-        border-radius: 15px;
-        padding: 20px;
-        margin: 20px 0;
-        text-align: center;
-    }
-    .signal-buy {
-        background: linear-gradient(135deg, #00ff8820 0%, #00cc6620 100%);
-        border: 1px solid #00ff88;
-    }
-    .signal-sell {
-        background: linear-gradient(135deg, #ff444420 0%, #cc333320 100%);
-        border: 1px solid #ff4444;
-    }
-    .signal-neutral {
-        background: linear-gradient(135deg, #ffaa0020 0%, #cc880020 100%);
-        border: 1px solid #ffaa00;
-    }
-    .signal-title {
-        font-size: 1.5rem;
-        font-weight: bold;
-    }
-    .signal-confidence {
-        font-size: 0.9rem;
-        margin-top: 10px;
-    }
-    
-    /* جدول الأهداف */
-    .targets-table {
-        background: #1e1e2e;
-        border-radius: 12px;
-        overflow: hidden;
-        margin: 20px 0;
-    }
-    .target-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 12px 20px;
-        border-bottom: 1px solid #333;
-    }
-    .target-row:last-child {
-        border-bottom: none;
-    }
-    .target-label {
-        color: #ffd700;
-        font-weight: bold;
-    }
-    .target-value {
-        color: #ffffff;
-    }
-    
-    /* الفوتر */
-    .footer {
-        text-align: center;
-        padding: 20px;
-        color: #666;
-        font-size: 0.8rem;
-        border-top: 1px solid #333;
-        margin-top: 30px;
-    }
-    
-    /* شارة التقييم */
-    .rating-badge {
-        background: #1e1e2e;
-        border-radius: 10px;
-        padding: 10px 15px;
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .stars {
-        color: #ffd700;
-        letter-spacing: 2px;
-    }
-</style>
-""", unsafe_allow_html=True)
+
+st.markdown("### 𓋹 PHARAOH GOLD DASHBOARD 𓋹")
+st.markdown("---")
+
+# الطريقة الأولى: محاولة تحميل الصورة من الرابط المباشر
+image_url = "https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/refs/heads/main/file_0000000069e87246902490b6800f8681.png"
+
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    try:
+        # محاولة عرض الصورة من الرابط
+        st.image(image_url, width=200)
+        st.success("✅ الصورة ظهرت من الرابط!")
+    except:
+        st.warning("⚠️ الصورة غير متاحة من الرابط")
+        
+        # الطريقة الثانية: لو الصورة موجودة في نفس المجلد
+        try:
+            st.image("file_0000000069e87246902490b6800f8681.png", width=200)
+            st.success("✅ الصورة ظهرت من الملف المحلي!")
+        except:
+            st.warning("⚠️ الصورة غير موجودة محلياً")
+            
+            # الطريقة الثالثة: عرض النص فقط
+            st.markdown("""
+            <div style="text-align:center">
+                <h1 style="color:#ffd700">𓋹 PHARAOH GOLD 𓋹</h1>
+                <p style="color:#888">Gold Analysis Dashboard</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+st.markdown("---")
 
 # ==========================================
-# الهيدر الرئيسي (نفس نظام الصورة)
-# ==========================================
-st.markdown("""
-<div class="main-header">
-    <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT Analysis | Real-time Trading Signals</div>
-</div>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# بطاقات الإحصائيات (زي الصورة)
-# ==========================================
-st.markdown("""
-<div class="stats-container">
-    <div class="stat-card">
-        <div class="stat-number">$253M+</div>
-        <div class="stat-label">Rewards Distributed</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-number">3M+</div>
-        <div class="stat-label">Traders Worldwide</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-number">195+</div>
-        <div class="stat-label">Countries Serviced</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# جلب سعر الذهب الفوري
+# باقي الكود (جلب البيانات والتحليل)
 # ==========================================
 GOLD_API_KEY = "goldapi-2e91d85dc02f06984d99b2cb3dd9066c-io"
 
@@ -260,9 +85,6 @@ if real_price and real_price > 0:
 else:
     current_price = df['close'].iloc[-1]
 
-# ==========================================
-# حساب المؤشرات
-# ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -289,9 +111,6 @@ df['atr'] = calc_atr(df)
 current_rsi = df['rsi'].iloc[-1]
 current_atr = df['atr'].iloc[-1]
 
-# ==========================================
-# إشارات SMC
-# ==========================================
 recent_lows = df['low'].iloc[-20:].values
 recent_highs = df['high'].iloc[-20:].values
 liquidity_sweep_bullish = df['low'].iloc[-1] < min(recent_lows[:-1])
@@ -301,19 +120,16 @@ bos_bearish = current_price < df['low'].iloc[-6:-1].min()
 resistance = np.percentile(df['high'].iloc[-30:], 75)
 support = np.percentile(df['low'].iloc[-30:], 25)
 
-# ==========================================
-# نظام التسجيل
-# ==========================================
 bullish = 0
 bearish = 0
 signals = []
 
 if current_rsi < 45:
     bullish += 3
-    signals.append(f"✅ RSI: {current_rsi:.1f} (BUY ZONE)")
+    signals.append(f"✅ RSI: {current_rsi:.1f} (BUY)")
 elif current_rsi > 65:
     bearish += 3
-    signals.append(f"⚠️ RSI: {current_rsi:.1f} (SELL ZONE)")
+    signals.append(f"⚠️ RSI: {current_rsi:.1f} (SELL)")
 else:
     signals.append(f"📊 RSI: {current_rsi:.1f} (NEUTRAL)")
 
@@ -348,34 +164,26 @@ if current_price >= resistance - 5:
 net = bullish - bearish
 
 if net >= 8:
-    signal_type = "STRONG BUY"
+    signal_type = "🔴🔴 STRONG BUY 🔴🔴"
     signal_action = "BUY"
     confidence = 90
-    signal_color = "#00ff88"
 elif net >= 4:
-    signal_type = "BUY"
+    signal_type = "🟢 BUY 🟢"
     signal_action = "BUY"
     confidence = 75
-    signal_color = "#00ff88"
 elif net <= -8:
-    signal_type = "STRONG SELL"
+    signal_type = "🔴🔴 STRONG SELL 🔴🔴"
     signal_action = "SELL"
     confidence = 90
-    signal_color = "#ff4444"
 elif net <= -4:
-    signal_type = "SELL"
+    signal_type = "🔴 SELL 🔴"
     signal_action = "SELL"
     confidence = 75
-    signal_color = "#ff4444"
 else:
-    signal_type = "WAIT"
+    signal_type = "🟡 WAIT 🟡"
     signal_action = "NEUTRAL"
     confidence = 50
-    signal_color = "#ffaa00"
 
-# ==========================================
-# خطة التداول
-# ==========================================
 if signal_action == "BUY":
     entry = current_price
     stop_loss = support - (current_atr * 0.5)
@@ -390,160 +198,35 @@ else:
     targets = []
 
 # ==========================================
-# عرض السعر الرئيسي (نفس نظام الصورة)
+# عرض البيانات
 # ==========================================
-change = real_price - (df['close'].iloc[-2] if len(df) > 1 else real_price) if real_price else 0
-change_percent = (change / (df['close'].iloc[-2] if len(df) > 1 else real_price)) * 100 if real_price else 0
-change_color = "#00ff88" if change >= 0 else "#ff4444"
-change_sign = "+" if change >= 0 else ""
-
 st.markdown(f"""
-<div class="price-card">
-    <div class="price-label">𓋹 REAL TIME GOLD PRICE 𓋹</div>
-    <div class="price-value">${current_price:,.2f}</div>
-    <div class="price-change" style="color:{change_color}">{change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)</div>
+<div style="background:linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding:25px; border-radius:15px; margin-bottom:20px; text-align:center">
+    <h2 style="color:#ffd700; margin:0">𓋹 REAL TIME GOLD PRICE 𓋹</h2>
+    <h1 style="color:#ffffff; font-size:3rem; margin:10px 0">${current_price:.2f}</h1>
 </div>
 """, unsafe_allow_html=True)
-
-# ==========================================
-# بطاقات المؤشرات
-# ==========================================
-st.markdown("### 📊 Market Indicators")
 
 col1, col2, col3, col4 = st.columns(4)
+col1.metric("📈 RSI", f"{current_rsi:.1f}")
+col2.metric("🎯 Signal", signal_type, delta=f"{confidence}%")
+col3.metric("📊 Net Score", f"{net:+d}")
+col4.metric("📐 ATR", f"${current_atr:.2f}")
 
-with col1:
-    st.markdown(f"""
-    <div class="indicator-card">
-        <div class="indicator-value" style="color:#ffd700">{current_rsi:.1f}</div>
-        <div class="indicator-label">RSI (14)</div>
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown("---")
 
-with col2:
-    st.markdown(f"""
-    <div class="indicator-card">
-        <div class="indicator-value" style="color:#ffd700">${current_atr:.2f}</div>
-        <div class="indicator-label">ATR</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    st.markdown(f"""
-    <div class="indicator-card">
-        <div class="indicator-value" style="color:#ffd700">{bullish} / {bearish}</div>
-        <div class="indicator-label">Bullish / Bearish</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col4:
-    st.markdown(f"""
-    <div class="indicator-card">
-        <div class="indicator-value" style="color:#ffd700">{net:+d}</div>
-        <div class="indicator-label">Net Score</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ==========================================
-# إشارة التداول (نفس نظام الصورة)
-# ==========================================
-signal_class = "signal-buy" if signal_action == "BUY" else "signal-sell" if signal_action == "SELL" else "signal-neutral"
-
-st.markdown(f"""
-<div class="signal-card {signal_class}">
-    <div class="signal-title" style="color:{signal_color}">{signal_type} SIGNAL</div>
-    <div class="signal-confidence">Confidence: {confidence}% | Score: {net:+d}</div>
-</div>
-""", unsafe_allow_html=True)
-
-# ==========================================
 # الشارت
-# ==========================================
-st.markdown("### 📈 Price Chart")
-
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Gold', line=dict(color='#ffd700', width=2)))
 fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], mode='lines', name='EMA 20', line=dict(color='#ff9f4a')))
 fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], mode='lines', name='EMA 50', line=dict(color='#4a9eff')))
-fig.add_hline(y=resistance, line_dash="dash", line_color="#ff4444", annotation_text="Resistance")
-fig.add_hline(y=support, line_dash="dash", line_color="#00ff88", annotation_text="Support")
-fig.add_hline(y=current_price, line_dash="dot", line_color="white", annotation_text=f"Current: ${current_price:.2f}")
+fig.add_hline(y=resistance, line_dash="dash", line_color="red", annotation_text="Resistance")
+fig.add_hline(y=support, line_dash="dash", line_color="green", annotation_text="Support")
 fig.update_layout(template="plotly_dark", height=400)
 st.plotly_chart(fig, use_container_width=True)
 
-# ==========================================
-# جدول الأهداف (نفس نظام الصورة)
-# ==========================================
-if signal_action != "NEUTRAL":
-    st.markdown("### 🎯 Trading Plan & Targets")
-    
-    st.markdown(f"""
-    <div class="targets-table">
-        <div class="target-row">
-            <span class="target-label">📍 Entry Price</span>
-            <span class="target-value">${entry:.2f}</span>
-        </div>
-        <div class="target-row">
-            <span class="target-label">🛑 Stop Loss</span>
-            <span class="target-value">${stop_loss:.2f}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("#### 🎯 Take Profit Targets")
-    
-    col1, col2, col3 = st.columns(3)
-    targets_data = [
-        {"level": "Target 1", "price": targets[0], "reward": f"{(targets[0]-entry):+.2f}" if signal_action=="BUY" else f"{(entry-targets[0]):+.2f}"},
-        {"level": "Target 2", "price": targets[1], "reward": f"{(targets[1]-entry):+.2f}" if signal_action=="BUY" else f"{(entry-targets[1]):+.2f}"},
-        {"level": "Target 3", "price": targets[2], "reward": f"{(targets[2]-entry):+.2f}" if signal_action=="BUY" else f"{(entry-targets[2]):+.2f}"},
-    ]
-    
-    with col1:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#00ff88">${targets[0]:.2f}</div>
-            <div class="indicator-label">🎯 Target 1</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffaa00">${targets[1]:.2f}</div>
-            <div class="indicator-label">🎯 Target 2</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class="indicator-card">
-            <div class="indicator-value" style="color:#ffd700">${targets[2]:.2f}</div>
-            <div class="indicator-label">🎯 Target 3</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # نسبة المخاطرة/العائد
-    if signal_action == "BUY":
-        rr_ratio = (targets[0] - entry) / (entry - stop_loss)
-    else:
-        rr_ratio = (entry - targets[0]) / (stop_loss - entry)
-    
-    st.markdown(f"""
-    <div class="stats-container" style="margin-top:20px">
-        <div class="stat-card">
-            <div class="stat-number" style="font-size:1.2rem">Risk/Reward</div>
-            <div class="stat-label">1 : {rr_ratio:.2f}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number" style="font-size:1.2rem">Risk Amount</div>
-            <div class="stat-label">2% of capital</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ==========================================
-# المؤشرات الفنية
-# ==========================================
-with st.expander("📊 Technical Indicators Details"):
+# المؤشرات
+with st.expander("📊 Technical Indicators"):
     for s in signals:
         if "✅" in s or "📈" in s:
             st.success(s)
@@ -552,25 +235,15 @@ with st.expander("📊 Technical Indicators Details"):
         else:
             st.info(s)
 
-# ==========================================
-# شارة التقييم (نفس نظام الصورة)
-# ==========================================
-st.markdown("""
-<div style="display: flex; justify-content: center; margin: 30px 0">
-    <div class="rating-badge">
-        <span style="color:#ffd700; font-weight:bold">★★★★★</span>
-        <span>Excellent</span>
-        <span style="color:#888">| 4.8 ★ Trustpilot</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# خطة التداول
+if signal_action != "NEUTRAL":
+    st.markdown("---")
+    st.subheader("🎯 Trading Plan")
+    st.markdown(f"**Entry:** ${entry:.2f}")
+    st.markdown(f"**Stop Loss:** ${stop_loss:.2f}")
+    st.markdown(f"**Target 1:** ${targets[0]:.2f}")
+    st.markdown(f"**Target 2:** ${targets[1]:.2f}")
+    st.markdown(f"**Target 3:** ${targets[2]:.2f}")
 
-# ==========================================
-# الفوتر
-# ==========================================
-st.markdown(f"""
-<div class="footer">
-    𓋹 Powered by GoldAPI.io + Yahoo Finance | SMC + ICT Analysis | Real-time Data 𓋹<br>
-    Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-</div>
-""", unsafe_allow_html=True)
+st.markdown("---")
+st.caption(f"Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
