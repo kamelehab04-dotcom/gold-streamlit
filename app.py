@@ -34,6 +34,23 @@ st.markdown("""
         color: #aaa;
         margin-top: 10px;
     }
+    .telegram-btn {
+        display: inline-block;
+        background: linear-gradient(135deg, #0088cc 0%, #006699 100%);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 30px;
+        text-decoration: none;
+        font-weight: bold;
+        margin: 10px;
+        transition: transform 0.3s;
+        border: none;
+        cursor: pointer;
+    }
+    .telegram-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,136,204,0.4);
+    }
     .stats-container {
         display: flex;
         justify-content: space-between;
@@ -197,6 +214,19 @@ st.markdown("""
     <div class="main-subtitle">بوت تحليل الذهب الفرعوني | SMC + ICT | REAL-TIME SPOT PRICE (XAU/USD)</div>
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# زر الاشتراك في التليجرام
+# ==========================================
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.markdown("""
+    <div style="text-align: center; margin: 10px 0 20px 0;">
+        <a href="https://t.me/Ehabka2002" target="_blank" class="telegram-btn">
+            📱 اشترك في قناة التليجرام للحصول على الإشارات اليومية
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ==========================================
 # بطاقات الإحصائيات
@@ -399,7 +429,7 @@ with tab1:
         stop_loss = None
         targets = []
     
-    # حساب التغير (من البيانات التاريخية)
+    # حساب التغير
     if len(df) > 1:
         prev_price = df['close'].iloc[-2]
         change = current_price - prev_price
@@ -622,6 +652,8 @@ with tab2:
 st.markdown(f"""
 <div class="footer">
     𓋹 Powered by GoldAPI.io (Spot Price) | SMC + ICT Analysis | Real-time Live Data 𓋹<br>
+    <br>
+    <a href="https://t.me/Ehabka2002" target="_blank" style="color:#0088cc; text-decoration:none;">📱 اشترك في قناة التليجرام للإشارات اليومية</a><br>
     Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
