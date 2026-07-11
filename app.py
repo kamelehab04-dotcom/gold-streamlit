@@ -12,118 +12,32 @@ import os
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق
+# CSS للتنسيق (نفس السابق)
 # ==========================================
 st.markdown("""
 <style>
-    .main-header {
-        text-align: center;
-        padding: 20px;
-        background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
-        border-radius: 15px;
-        margin-bottom: 20px;
-        border: 1px solid #ffd70033;
-    }
-    .main-title {
-        font-size: 2rem;
-        color: #ffd700;
-        font-weight: bold;
-        letter-spacing: 2px;
-    }
-    .main-subtitle {
-        font-size: 0.9rem;
-        color: #aaa;
-    }
-    .price-card {
-        background: #1a1a2e;
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        border: 1px solid #ffd70033;
-        margin: 10px 0;
-    }
-    .price-value {
-        font-size: 3.5rem;
-        font-weight: bold;
-        color: #fff;
-    }
-    .price-change {
-        font-size: 1.2rem;
-    }
-    .signal-box {
-        background: #1a1a2e;
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        border: 2px solid #ffd700;
-        margin: 15px 0;
-    }
-    .signal-text {
-        font-size: 2.5rem;
-        font-weight: bold;
-    }
-    .signal-confidence {
-        font-size: 1rem;
-        color: #aaa;
-    }
-    .explanation-box {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 15px;
-        margin: 10px 0;
-        border: 1px solid #ffd70033;
-        text-align: left;
-        white-space: pre-wrap;
-    }
-    .currency-card {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 10px 15px;
-        text-align: center;
-        border: 1px solid #ffd70033;
-        margin: 5px 0;
-    }
+    .main-header { text-align: center; padding: 20px; background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%); border-radius: 15px; margin-bottom: 20px; border: 1px solid #ffd70033; }
+    .main-title { font-size: 2rem; color: #ffd700; font-weight: bold; letter-spacing: 2px; }
+    .main-subtitle { font-size: 0.9rem; color: #aaa; }
+    .price-card { background: #1a1a2e; border-radius: 15px; padding: 20px; text-align: center; border: 1px solid #ffd70033; margin: 10px 0; }
+    .price-value { font-size: 3.5rem; font-weight: bold; color: #fff; }
+    .price-change { font-size: 1.2rem; }
+    .signal-box { background: #1a1a2e; border-radius: 15px; padding: 20px; text-align: center; border: 2px solid #ffd700; margin: 15px 0; }
+    .signal-text { font-size: 2.5rem; font-weight: bold; }
+    .signal-confidence { font-size: 1rem; color: #aaa; }
+    .explanation-box { background: #1a1a2e; border-radius: 10px; padding: 15px; margin: 10px 0; border: 1px solid #ffd70033; text-align: left; white-space: pre-wrap; }
+    .currency-card { background: #1a1a2e; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #ffd70033; margin: 5px 0; }
     .currency-symbol { font-size: 0.8rem; color: #888; }
     .currency-price { font-size: 1.2rem; font-weight: bold; color: #fff; }
     .currency-change { font-size: 0.9rem; }
-    .trade-row {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 10px;
-        margin: 5px 0;
-        border-left: 4px solid #ffd700;
-    }
-    .footer {
-        text-align: center;
-        padding: 15px;
-        color: #666;
-        font-size: 0.8rem;
-        border-top: 1px solid #333;
-        margin-top: 30px;
-    }
-    .stButton button {
-        background: #ffd700;
-        color: #000;
-        font-weight: bold;
-        border-radius: 10px;
-        width: 100%;
-    }
-    .news-card {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 10px;
-        margin: 5px 0;
-        border-left: 3px solid #ffd700;
-    }
+    .trade-row { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
+    .footer { text-align: center; padding: 15px; color: #666; font-size: 0.8rem; border-top: 1px solid #333; margin-top: 30px; }
+    .stButton button { background: #ffd700; color: #000; font-weight: bold; border-radius: 10px; width: 100%; }
+    .news-card { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 3px solid #ffd700; }
     .news-title { color: #fff; font-weight: bold; }
     .news-date { color: #888; font-size: 0.8rem; }
-    .suggested-trade {
-        background: #1a1a2e;
-        border-radius: 15px;
-        padding: 15px;
-        border: 2px solid #00ff88;
-        margin: 15px 0;
-    }
+    .suggested-trade { background: #1a1a2e; border-radius: 15px; padding: 15px; border: 2px solid #00ff88; margin: 15px 0; }
+    .pattern-badge { display: inline-block; background: #ffd70033; border: 1px solid #ffd700; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ffd700; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,7 +47,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Core Indicators: RSI + MACD + BB + ADX + VWAP + Ichimoku</div>
+    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + MTF</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -141,7 +55,7 @@ st.markdown("""
 # إعدادات API
 # ==========================================
 GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # احصل على مفتاح مجاني من newsapi.org
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # استبدل بمفتاحك
 
 # ==========================================
 # قائمة الأزواج
@@ -157,7 +71,7 @@ PAIRS = {
 }
 
 # ==========================================
-# دوال جلب البيانات
+# دوال جلب البيانات (نفس السابق)
 # ==========================================
 @st.cache_data(ttl=10)
 def get_spot_price(symbol="GC=F"):
@@ -220,9 +134,6 @@ def get_all_forex():
             results[name] = {'price': 0, 'change': 0}
     return results
 
-# ==========================================
-# جلب الأخبار الاقتصادية
-# ==========================================
 @st.cache_data(ttl=600)
 def get_economic_news():
     try:
@@ -245,7 +156,7 @@ def get_economic_news():
     return []
 
 # ==========================================
-# المؤشرات الفنية الأساسية
+# المؤشرات الأساسية (نفس السابق)
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -302,96 +213,278 @@ def calc_ichimoku(df):
     return tenkan, kijun, senkou_a, senkou_b, chikou
 
 def calc_vwap(df):
-    """VWAP محسوب يدوياً"""
     return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
 
 # ==========================================
-# نظام تسجيل النقاط – يعتمد على المؤشرات الأساسية فقط
+# تحليل SMC/ICT
+# ==========================================
+def analyze_smc_ict(df):
+    """إضافة أعمدة SMC/ICT إلى DataFrame"""
+    df = df.copy()
+    # تهيئة الأعمدة
+    df['order_block_bullish'] = False
+    df['order_block_bearish'] = False
+    df['fvg_bullish'] = False
+    df['fvg_bearish'] = False
+    df['liquidity_sweep_bullish'] = False
+    df['liquidity_sweep_bearish'] = False
+    df['bos_bullish'] = False
+    df['bos_bearish'] = False
+    df['mss_bullish'] = False
+    df['mss_bearish'] = False
+    df['in_discount'] = False
+    df['in_premium'] = False
+
+    # 1. Order Blocks
+    for i in range(3, len(df)):
+        if df['close'].iloc[i] > df['open'].iloc[i]:
+            body = df['close'].iloc[i] - df['open'].iloc[i]
+            avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
+            if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
+                df.loc[df.index[i-1], 'order_block_bullish'] = True
+        if df['close'].iloc[i] < df['open'].iloc[i]:
+            body = df['open'].iloc[i] - df['close'].iloc[i]
+            avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
+            if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
+                df.loc[df.index[i-1], 'order_block_bearish'] = True
+
+    # 2. Fair Value Gaps (FVG)
+    for i in range(2, len(df)):
+        if df['low'].iloc[i] > df['high'].iloc[i-2]:
+            df.loc[df.index[i], 'fvg_bullish'] = True
+        if df['high'].iloc[i] < df['low'].iloc[i-2]:
+            df.loc[df.index[i], 'fvg_bearish'] = True
+
+    # 3. Liquidity Sweeps
+    for i in range(10, len(df)):
+        recent_lows = df['low'].iloc[i-10:i].tolist()
+        if df['low'].iloc[i] < min(recent_lows[:-1]):
+            df.loc[df.index[i], 'liquidity_sweep_bullish'] = True
+        recent_highs = df['high'].iloc[i-10:i].tolist()
+        if df['high'].iloc[i] > max(recent_highs[:-1]):
+            df.loc[df.index[i], 'liquidity_sweep_bearish'] = True
+
+    # 4. Break of Structure (BOS)
+    for i in range(5, len(df)):
+        if df['close'].iloc[i] > df['high'].iloc[i-5:i].max():
+            df.loc[df.index[i], 'bos_bullish'] = True
+        if df['close'].iloc[i] < df['low'].iloc[i-5:i].min():
+            df.loc[df.index[i], 'bos_bearish'] = True
+
+    # 5. Market Structure Shift (MSS)
+    for i in range(3, len(df)):
+        if df['bos_bearish'].iloc[i-1] and df['close'].iloc[i] > df['high'].iloc[i-2:i].max():
+            df.loc[df.index[i], 'mss_bullish'] = True
+        if df['bos_bullish'].iloc[i-1] and df['close'].iloc[i] < df['low'].iloc[i-2:i].min():
+            df.loc[df.index[i], 'mss_bearish'] = True
+
+    # 6. Premium / Discount Zones (Fibonacci 38.2% و 61.8%)
+    for i in range(50, len(df)):
+        range_high = df['high'].iloc[i-50:i].max()
+        range_low = df['low'].iloc[i-50:i].min()
+        if range_high != range_low:
+            discount = range_low + (range_high - range_low) * 0.382
+            premium = range_high - (range_high - range_low) * 0.382
+            if df['close'].iloc[i] <= discount:
+                df.loc[df.index[i], 'in_discount'] = True
+            if df['close'].iloc[i] >= premium:
+                df.loc[df.index[i], 'in_premium'] = True
+
+    return df
+
+# ==========================================
+# اكتشاف النماذج الفنية (Patterns)
+# ==========================================
+def find_peaks_troughs(series, order=5):
+    peaks = []
+    troughs = []
+    for i in range(order, len(series) - order):
+        if all(series[i] > series[i-j] for j in range(1, order+1)) and all(series[i] > series[i+j] for j in range(1, order+1)):
+            peaks.append((i, series[i]))
+        if all(series[i] < series[i-j] for j in range(1, order+1)) and all(series[i] < series[i+j] for j in range(1, order+1)):
+            troughs.append((i, series[i]))
+    return peaks, troughs
+
+def detect_head_shoulders(df, lookback=50):
+    if len(df) < lookback:
+        return None, 0
+    recent_highs = df['high'].iloc[-lookback:].values
+    peaks, _ = find_peaks_troughs(recent_highs, order=3)
+    if len(peaks) >= 3:
+        head_idx = np.argmax([p[1] for p in peaks])
+        if head_idx > 0 and head_idx < len(peaks) - 1:
+            left_shoulder = peaks[head_idx - 1][1]
+            head = peaks[head_idx][1]
+            right_shoulder = peaks[head_idx + 1][1]
+            if head > left_shoulder and head > right_shoulder:
+                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
+                    return "HEAD_AND_SHOULDERS", 5
+    return None, 0
+
+def detect_double_top_bottom(df, lookback=50):
+    if len(df) < lookback:
+        return None, 0
+    recent_highs = df['high'].iloc[-lookback:].values
+    recent_lows = df['low'].iloc[-lookback:].values
+    peaks, _ = find_peaks_troughs(recent_highs, order=3)
+    _, troughs = find_peaks_troughs(recent_lows, order=3)
+    if len(peaks) >= 2:
+        last_two_peaks = sorted(peaks[-2:], key=lambda x: x[0])
+        if abs(last_two_peaks[-1][1] - last_two_peaks[-2][1]) / last_two_peaks[-2][1] < 0.03:
+            return "DOUBLE_TOP", 4
+    if len(troughs) >= 2:
+        last_two_troughs = sorted(troughs[-2:], key=lambda x: x[0])
+        if abs(last_two_troughs[-1][1] - last_two_troughs[-2][1]) / last_two_troughs[-2][1] < 0.03:
+            return "DOUBLE_BOTTOM", 4
+    return None, 0
+
+def detect_triangle_pattern(df, lookback=40):
+    if len(df) < lookback:
+        return None, 0
+    recent_data = df.iloc[-lookback:]
+    highs = recent_data['high'].values
+    lows = recent_data['low'].values
+    x = np.arange(len(highs))
+    slope_highs = np.polyfit(x, highs, 1)[0]
+    slope_lows = np.polyfit(x, lows, 1)[0]
+    if slope_lows > 0.01 and abs(slope_highs) < 0.005:
+        return "ASCENDING_TRIANGLE", 3
+    if slope_highs < -0.01 and abs(slope_lows) < 0.005:
+        return "DESCENDING_TRIANGLE", 3
+    return None, 0
+
+def analyze_chart_patterns(df):
+    patterns = []
+    total_score = 0
+    pattern, score = detect_head_shoulders(df)
+    if pattern:
+        patterns.append({"pattern": pattern, "score": score, "direction": "BEARISH"})
+        total_score += score
+    pattern, score = detect_double_top_bottom(df)
+    if pattern:
+        direction = "BEARISH" if "DOUBLE_TOP" in pattern else "BULLISH"
+        patterns.append({"pattern": pattern, "score": score, "direction": direction})
+        total_score += score
+    pattern, score = detect_triangle_pattern(df)
+    if pattern:
+        direction = "BULLISH" if "ASCENDING" in pattern else "BEARISH"
+        patterns.append({"pattern": pattern, "score": score, "direction": direction})
+        total_score += score
+    return patterns, total_score
+
+# ==========================================
+# نظام التسجيل المتكامل (Indicators + SMC + Patterns)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
-        return "WAIT", 50, 0, {}
+        return "WAIT", 50, 0, {}, []
+
+    # تحليل SMC والأنماط
+    df_smc = analyze_smc_ict(df)
+    last_smc = df_smc.iloc[-1]
+    patterns, _ = analyze_chart_patterns(df)
 
     last = df.iloc[-1]
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
     weights = {
-        'rsi': 3,
-        'macd': 2,
-        'bb': 2,
-        'vwap': 1,
-        'adx': 1,
-        'ichimoku': 3
+        'rsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3,
+        'smc': 3, 'patterns': 4
     }
 
-    # 1. RSI
+    # ===== المؤشرات الكلاسيكية =====
+    # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
-            scores['BUY'] += weights['rsi']
-            details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
+            scores['BUY'] += weights['rsi']; details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
         elif rsi > 70:
-            scores['SELL'] += weights['rsi']
-            details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
+            scores['SELL'] += weights['rsi']; details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
-    # 2. MACD
+    # MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
-            scores['BUY'] += weights['macd']
-            details['MACD'] = f"إيجابي +{weights['macd']}"
+            scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
         elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
-            scores['SELL'] += weights['macd']
-            details['MACD'] = f"سلبي +{weights['macd']}"
+            scores['SELL'] += weights['macd']; details['MACD'] = f"سلبي +{weights['macd']}"
         else:
             details['MACD'] = "محايد"
 
-    # 3. Bollinger Bands
+    # BB
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
-            scores['BUY'] += weights['bb']
-            details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
+            scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
         elif current_price >= last['bb_upper'] * 0.995:
-            scores['SELL'] += weights['bb']
-            details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
+            scores['SELL'] += weights['bb']; details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
         else:
             details['BB'] = "وسط النطاق"
 
-    # 4. VWAP
+    # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
-            scores['BUY'] += weights['vwap']
-            details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
+            scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
-            scores['SELL'] += weights['vwap']
-            details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
+            scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
-    # 5. ADX (قوة الاتجاه)
+    # ADX
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
-            # اتجاه قوي، نعزز الإشارة حسب اتجاه السعر الأخير
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
-                scores['BUY'] += 1
-                details['ADX'] = f"اتجاه قوي صاعد +1"
+                scores['BUY'] += 1; details['ADX'] = f"اتجاه قوي صاعد +1"
             else:
-                scores['SELL'] += 1
-                details['ADX'] = f"اتجاه قوي هابط +1"
+                scores['SELL'] += 1; details['ADX'] = f"اتجاه قوي هابط +1"
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
-    # 6. Ichimoku
+    # Ichimoku
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
-                scores['BUY'] += weights['ichimoku']
-                details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
+                scores['BUY'] += weights['ichimoku']; details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
             elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
-                scores['SELL'] += weights['ichimoku']
-                details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
+                scores['SELL'] += weights['ichimoku']; details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
+    # ===== SMC/ICT =====
+    if last_smc.get('order_block_bullish', False):
+        scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
+    elif last_smc.get('order_block_bearish', False):
+        scores['SELL'] += weights['smc']; details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
+    elif last_smc.get('fvg_bullish', False):
+        scores['BUY'] += weights['smc']//2; details['SMC'] = f"FVG شراء +{weights['smc']//2}"
+    elif last_smc.get('fvg_bearish', False):
+        scores['SELL'] += weights['smc']//2; details['SMC'] = f"FVG بيع +{weights['smc']//2}"
+    elif last_smc.get('liquidity_sweep_bullish', False):
+        scores['BUY'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
+    elif last_smc.get('liquidity_sweep_bearish', False):
+        scores['SELL'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
+    elif last_smc.get('mss_bullish', False):
+        scores['BUY'] += weights['smc']; details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
+    elif last_smc.get('mss_bearish', False):
+        scores['SELL'] += weights['smc']; details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
+    elif last_smc.get('in_discount', False):
+        scores['BUY'] += weights['smc']//2; details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
+    elif last_smc.get('in_premium', False):
+        scores['SELL'] += weights['smc']//2; details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
+    else:
+        details['SMC'] = "لا توجد إشارة SMC"
+
+    # ===== النماذج الفنية =====
+    if patterns:
+        for p in patterns:
+            if p['direction'] == 'BULLISH':
+                scores['BUY'] += weights['patterns']
+                details['Pattern'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
+            else:
+                scores['SELL'] += weights['patterns']
+                details['Pattern'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
+    else:
+        details['Pattern'] = "لا توجد نماذج"
+
+    # حساب النتيجة النهائية
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     if net_score >= 5:
@@ -405,40 +498,38 @@ def generate_advanced_signal(df, current_price, symbol=""):
         confidence = 50 + (net_score / total_weight) * 50
 
     confidence = max(0, min(100, confidence))
-    return signal, confidence, net_score, details
+    return signal, confidence, net_score, details, patterns
 
 # ==========================================
-# شرح القرار
+# شرح القرار (معدل ليشمل SMC والنماذج)
 # ==========================================
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count):
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns):
     explanation = ""
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
-        buy_points = [f"- {k}: {v}" for k, v in details.items() if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي"])]
-        if buy_points:
-            explanation += "\n".join(buy_points) + "\n"
-        else:
-            explanation += "- لم تسجل أي نقطة شراء قوية، لكن الاتجاه العام صاعد.\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (يجب أن تكون ≥ 5 للشراء)\n"
-        explanation += f"📈 **الثقة**: {confidence:.0f}%"
+        for k, v in details.items():
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم"]):
+                explanation += f"- {k}: {v}\n"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
-        sell_points = [f"- {k}: {v}" for k, v in details.items() if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء"])]
-        if sell_points:
-            explanation += "\n".join(sell_points) + "\n"
-        else:
-            explanation += "- لم تسجل أي نقطة بيع قوية، لكن الاتجاه العام هابط.\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (يجب أن تكون ≤ -5 للبيع)\n"
-        explanation += f"📉 **الثقة**: {confidence:.0f}%"
-    else:  # WAIT
+        for k, v in details.items():
+            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط"]):
+                explanation += f"- {k}: {v}\n"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
+    else:
         explanation = "⏳ **قرار الانتظار** بسبب:\n"
-        explanation += f"- النتيجة الصافية {net_score} تقع بين -5 و +5، مما يعني عدم وجود إجماع قوي.\n"
-        explanation += "- تفاصيل النقاط:\n"
+        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع).\n- تفاصيل النقاط:\n"
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
-        explanation += f"💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
-    # إضافة معلومات MTF
+        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
+    # إضافة MTF
     explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
+    # عرض النماذج المكتشفة
+    if patterns:
+        explanation += "\n\n📐 **النماذج المكتشفة:**\n"
+        for p in patterns:
+            explanation += f"- {p['pattern']} ({p['direction']}) - قوة: {p['score']}/5\n"
     return explanation
 
 # ==========================================
@@ -467,7 +558,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات المتقدمة مع الوقف المتحرك
+# إدارة الصفقات (نفس السابق)
 # ==========================================
 class AdvancedTradeManager:
     def __init__(self):
@@ -582,7 +673,7 @@ if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
 
-# حساب المؤشرات الأساسية
+# حساب المؤشرات
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['rsi'] = calc_rsi(df['close'])
@@ -592,14 +683,10 @@ df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close
 df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
 df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
-df['tenkan'] = tenkan
-df['kijun'] = kijun
-df['senkou_a'] = senkou_a
-df['senkou_b'] = senkou_b
-df['chikou'] = chikou
+df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 
-# توليد الإشارة
-signal, confidence, net_score, details = generate_advanced_signal(df, current_price, selected_symbol)
+# توليد الإشارة المتكاملة (مع SMC والنماذج)
+signal, confidence, net_score, details, patterns = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # عرض السعر
@@ -614,7 +701,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# مؤشرات السوق – فقط الأساسية
+# مؤشرات السوق
 st.markdown("### 📊 مؤشرات السوق")
 cols = st.columns(4)
 last = df.iloc[-1]
@@ -623,9 +710,15 @@ cols[1].metric("ATR", f"${last['atr']:.2f}")
 cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 
+# عرض النماذج المكتشفة
+if patterns:
+    st.markdown("#### 📐 النماذج المكتشفة")
+    pattern_html = " ".join([f'<span class="pattern-badge">{p["pattern"]} ({p["direction"]})</span>' for p in patterns])
+    st.markdown(pattern_html, unsafe_allow_html=True)
+
 # الإشارة
 st.markdown("---")
-st.markdown("### 🧠 إشارة التداول")
+st.markdown("### 🧠 إشارة التداول المتكاملة")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
 st.markdown(f"""
 <div class="signal-box">
@@ -639,7 +732,7 @@ st.markdown(f"""
 
 # شرح القرار
 with st.expander("📝 شرح القرار", expanded=True):
-    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count)
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
@@ -699,7 +792,6 @@ st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
 trade_manager = AdvancedTradeManager()
 
-# تحديث الوقف المتحرك للصفقات المفتوحة
 for trade in trade_manager.open_trades:
     if trade["status"] == "open" and trade["trailing_enabled"]:
         trade_manager.update_trailing_stop(trade["id"], current_price)
@@ -728,7 +820,6 @@ if trade_manager.open_trades:
 else:
     st.write("لا توجد صفقات مفتوحة")
 
-# إحصائيات الصفقات المغلقة
 if trade_manager.closed_trades:
     profits = [t.get('profit', 0) for t in trade_manager.closed_trades if 'profit' in t]
     if profits:
@@ -768,7 +859,11 @@ st.markdown("""
 # الرسم البياني
 # ==========================================
 st.markdown("---")
-st.markdown("### 📈 Price Chart with Indicators")
+st.markdown("### 📈 Price Chart with Indicators + SMC Levels")
+
+# نحتاج df_smc للرسم لإظهار مناطق السيولة
+df_smc = analyze_smc_ict(df)
+
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
                     row_heights=[0.6, 0.2, 0.2])
 fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
@@ -778,6 +873,12 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dic
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
+
+# إضافة نقاط SMC على الشارت (بسيطة)
+if df_smc['order_block_bullish'].iloc[-1]:
+    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
+if df_smc['order_block_bearish'].iloc[-1]:
+    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
 
 fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
@@ -800,7 +901,6 @@ if selected_symbol == "GC=F":
     if df_dxy is not None and not df_dxy.empty:
         df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
         df_dxy_aligned = df_dxy_aligned.ffill()
-
         fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
         fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD', line=dict(color='gold')), secondary_y=False)
         fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY', line=dict(color='cyan')), secondary_y=True)
@@ -808,7 +908,6 @@ if selected_symbol == "GC=F":
         fig_corr.update_yaxes(title_text="Gold", secondary_y=False)
         fig_corr.update_yaxes(title_text="DXY", secondary_y=True)
         st.plotly_chart(fig_corr, use_container_width=True)
-
         if len(df) > 10:
             corr = df['close'].corr(df_dxy_aligned['close'])
             st.metric("معامل الارتباط", f"{corr:.3f}")
@@ -820,7 +919,7 @@ if selected_symbol == "GC=F":
 # ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | RSI + MACD + BB + ADX + VWAP + Ichimoku + MTF<br>
-    نسخة مبسطة – بدون مؤشرات مكررة
+    GoldAPI.io | Indicators + SMC/ICT + Patterns + MTF<br>
+    نسخة متكاملة مع تحليل السوق المتقدم
 </div>
 """, unsafe_allow_html=True)
