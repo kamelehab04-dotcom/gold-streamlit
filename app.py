@@ -12,7 +12,7 @@ import os
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق
+# CSS للتنسيق (نفس السابق)
 # ==========================================
 st.markdown("""
 <style>
@@ -126,27 +126,6 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 5px 15px rgba(0,136,204,0.4);
     }
-    .risk-card {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        border: 1px solid #ffd70033;
-    }
-    .risk-warning {
-        background: #ff444420;
-        border-left: 4px solid #ff4444;
-        padding: 10px;
-        border-radius: 5px;
-        margin: 5px 0;
-    }
-    .risk-success {
-        background: #00ff8820;
-        border-left: 4px solid #00ff88;
-        padding: 10px;
-        border-radius: 5px;
-        margin: 5px 0;
-    }
     .currency-card {
         background: #1a1a2e;
         border-radius: 10px;
@@ -195,24 +174,53 @@ st.markdown("""
 GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
 
 # ==========================================
+# 🆕 قائمة الأزواج المدعومة
+# ==========================================
+PAIRS = {
+    "XAU/USD (Gold)": "GC=F",
+    "DXY (Dollar Index)": "DX-Y.NYB",
+    "EUR/USD": "EURUSD=X",
+    "GBP/USD": "GBPUSD=X",
+    "USD/JPY": "USDJPY=X",
+    "BTC/USD (Bitcoin)": "BTC-USD",
+    "ETH/USD (Ethereum)": "ETH-USD"
+}
+
+# ==========================================
 # دوال جلب البيانات
 # ==========================================
 
 @st.cache_data(ttl=10)
-def get_spot_price():
+def get_spot_price(symbol="GC=F"):
+    """جلب السعر الفوري للرمز المطلوب"""
     try:
-        url = "https://www.goldapi.io/api/XAU/USD"
-        headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return float(data.get('price', 0)), float(data.get('change', 0))
-        return None, None
+        # إذا كان الذهب، استخدم GoldAPI
+        if symbol == "GC=F":
+            url = "https://www.goldapi.io/api/XAU/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return float(data.get('price', 0)), float(data.get('change', 0))
     except:
-        return None, None
+        pass
+    
+    # البديل: استخدام yfinance لأي رمز
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d", interval="5m")
+        if not data.empty:
+            last = data.iloc[-1]
+            first = data.iloc[0]
+            change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+            return float(last['Close']), float(change)
+    except:
+        pass
+    return None, None
 
 @st.cache_data(ttl=300)
-def get_historical_data(symbol="GC=F", period="1mo", interval="1h"):
+def get_historical_data(symbol, period="1mo", interval="1h"):
+    """جلب البيانات التاريخية لأي رمز"""
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
@@ -224,8 +232,8 @@ def get_historical_data(symbol="GC=F", period="1mo", interval="1h"):
         return None
 
 @st.cache_data(ttl=60)
-def get_current_forex():
-    """جلب أسعار العملات الحالية"""
+def get_all_forex():
+    """جلب أسعار جميع الأزواج المعروضة في البطاقات"""
     symbols = {
         "DXY": "DX-Y.NYB",
         "EURUSD": "EURUSD=X",
@@ -241,7 +249,7 @@ def get_current_forex():
             if not data.empty:
                 last = data.iloc[-1]
                 first = data.iloc[0]
-                change = ((last['Close'] - first['Close']) / first['Close']) * 100
+                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
                 results[name] = {
                     'price': float(last['Close']),
                     'change': float(change)
@@ -306,6 +314,8 @@ def calc_adx(df, period=14):
 
 def calc_fibonacci_levels(high, low, current_price):
     diff = high - low
+    if diff == 0:
+        return {}
     return {
         'fib_236': high - diff * 0.236,
         'fib_382': high - diff * 0.382,
@@ -381,14 +391,140 @@ def generate_scored_signal(df, current_price):
     return signal, confidence, net_score, details
 
 # ==========================================
-# جلب البيانات الرئيسية
+# 🆕 اختيار الزوج المراد تحليله
 # ==========================================
-current_price, change = get_spot_price()
-df = get_historical_data("GC=F", "1mo", "1h")
-forex_data = get_current_forex()
+
+st.markdown("### 🔍 اختر الزوج للتحليل")
+
+selected_pair_name = st.selectbox(
+    "اختر الزوج / الأداة المالية",
+    list(PAIRS.keys()),
+    index=0
+)
+
+selected_symbol = PAIRS[selected_pair_name]
+
+# عرض البطاقات السريعة لجميع الأزواج (معلومات فقط)
+st.markdown("### 💱 نظرة سريعة على جميع الأزواج")
+forex_data = get_all_forex()
+
+if forex_data:
+    col_dxy, col_eur, col_gbp, col_jpy, col_btc = st.columns(5)
+    
+    # DXY
+    if "DXY" in forex_data and forex_data["DXY"]['price'] > 0:
+        dxy_price = forex_data["DXY"]['price']
+        dxy_change = forex_data["DXY"]['change']
+        dxy_color = "#00ff88" if dxy_change >= 0 else "#ff4444"
+        col_dxy.markdown(f"""
+        <div class="currency-card">
+            <div class="currency-symbol">🇺🇸 DXY</div>
+            <div class="currency-price">{dxy_price:.2f}</div>
+            <div class="currency-change" style="color: {dxy_color};">{dxy_change:+.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        col_dxy.markdown("""
+        <div class="currency-card">
+            <div class="currency-symbol">🇺🇸 DXY</div>
+            <div class="currency-price">⏳</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # EURUSD
+    if "EURUSD" in forex_data and forex_data["EURUSD"]['price'] > 0:
+        eur_price = forex_data["EURUSD"]['price']
+        eur_change = forex_data["EURUSD"]['change']
+        eur_color = "#00ff88" if eur_change >= 0 else "#ff4444"
+        col_eur.markdown(f"""
+        <div class="currency-card">
+            <div class="currency-symbol">🇪🇺 EURUSD</div>
+            <div class="currency-price">{eur_price:.4f}</div>
+            <div class="currency-change" style="color: {eur_color};">{eur_change:+.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        col_eur.markdown("""
+        <div class="currency-card">
+            <div class="currency-symbol">🇪🇺 EURUSD</div>
+            <div class="currency-price">⏳</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # GBPUSD
+    if "GBPUSD" in forex_data and forex_data["GBPUSD"]['price'] > 0:
+        gbp_price = forex_data["GBPUSD"]['price']
+        gbp_change = forex_data["GBPUSD"]['change']
+        gbp_color = "#00ff88" if gbp_change >= 0 else "#ff4444"
+        col_gbp.markdown(f"""
+        <div class="currency-card">
+            <div class="currency-symbol">🇬🇧 GBPUSD</div>
+            <div class="currency-price">{gbp_price:.4f}</div>
+            <div class="currency-change" style="color: {gbp_color};">{gbp_change:+.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        col_gbp.markdown("""
+        <div class="currency-card">
+            <div class="currency-symbol">🇬🇧 GBPUSD</div>
+            <div class="currency-price">⏳</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # USDJPY
+    if "USDJPY" in forex_data and forex_data["USDJPY"]['price'] > 0:
+        jpy_price = forex_data["USDJPY"]['price']
+        jpy_change = forex_data["USDJPY"]['change']
+        jpy_color = "#00ff88" if jpy_change >= 0 else "#ff4444"
+        col_jpy.markdown(f"""
+        <div class="currency-card">
+            <div class="currency-symbol">🇯🇵 USDJPY</div>
+            <div class="currency-price">{jpy_price:.2f}</div>
+            <div class="currency-change" style="color: {jpy_color};">{jpy_change:+.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        col_jpy.markdown("""
+        <div class="currency-card">
+            <div class="currency-symbol">🇯🇵 USDJPY</div>
+            <div class="currency-price">⏳</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # BTCUSD
+    if "BTCUSD" in forex_data and forex_data["BTCUSD"]['price'] > 0:
+        btc_price = forex_data["BTCUSD"]['price']
+        btc_change = forex_data["BTCUSD"]['change']
+        btc_color = "#00ff88" if btc_change >= 0 else "#ff4444"
+        col_btc.markdown(f"""
+        <div class="currency-card">
+            <div class="currency-symbol">₿ BTCUSD</div>
+            <div class="currency-price">${btc_price:,.2f}</div>
+            <div class="currency-change" style="color: {btc_color};">{btc_change:+.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        col_btc.markdown("""
+        <div class="currency-card">
+            <div class="currency-symbol">₿ BTCUSD</div>
+            <div class="currency-price">⏳</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ==========================================
+# تحليل الزوج المختار
+# ==========================================
+
+st.markdown(f"### 📊 تحليل {selected_pair_name}")
+
+# جلب البيانات للزوج المختار
+current_price, change = get_spot_price(selected_symbol)
+df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 
 if df is None:
-    st.error("Error loading historical data")
+    st.error(f"❌ تعذر تحميل بيانات {selected_pair_name}. حاول مرة أخرى لاحقاً.")
     st.stop()
 
 if current_price is None and df is not None:
@@ -396,12 +532,10 @@ if current_price is None and df is not None:
     change = 0
 
 if current_price is None:
-    st.error("Unable to fetch gold spot price")
+    st.error(f"❌ تعذر جلب سعر {selected_pair_name}.")
     st.stop()
 
-# ==========================================
-# حساب المؤشرات للذهب
-# ==========================================
+# حساب المؤشرات
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['rsi'] = calc_rsi(df['close'])
@@ -416,134 +550,20 @@ recent_low = df['low'].iloc[-50:].min()
 fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
 
 # ==========================================
-# عرض الأقسام
+# عرض السعر والمؤشرات
 # ==========================================
 
-# ----- السعر الفوري للذهب -----
+price_format = "${:,.2f}" if "BTC" in selected_pair_name or "Gold" in selected_pair_name else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
-    <div style="font-size:1rem; color:#888;">XAU/USD (GOLDAPI.IO)</div>
-    <div class="price-value">${current_price:,.2f}</div>
+    <div style="font-size:1rem; color:#888;">{selected_pair_name} (Live)</div>
+    <div class="price-value">{price_format.format(current_price)}</div>
     <div class="price-change" style="color: {'#00ff88' if change >= 0 else '#ff4444'};">
-        {change:+.2f}% ({current_price - current_price/(1+change/100) if change != 0 else 0:+.2f})
+        {change:+.2f}%
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# 🆕 صف مؤشر الدولار وسلة العملات والبتكوين
-# ==========================================
-
-st.markdown("### 💱 مؤشر الدولار وسلة العملات والبتكوين")
-
-# صف المؤشرات (5 أعمدة)
-col_dxy, col_eur, col_gbp, col_jpy, col_btc = st.columns(5)
-
-# مؤشر الدولار DXY
-if "DXY" in forex_data and forex_data["DXY"]['price'] > 0:
-    dxy_price = forex_data["DXY"]['price']
-    dxy_change = forex_data["DXY"]['change']
-    dxy_color = "#00ff88" if dxy_change >= 0 else "#ff4444"
-    col_dxy.markdown(f"""
-    <div class="currency-card">
-        <div class="currency-symbol">🇺🇸 DXY</div>
-        <div class="currency-price">{dxy_price:.2f}</div>
-        <div class="currency-change" style="color: {dxy_color};">{dxy_change:+.2f}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    col_dxy.markdown("""
-    <div class="currency-card">
-        <div class="currency-symbol">🇺🇸 DXY</div>
-        <div class="currency-price">⏳</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# EURUSD
-if "EURUSD" in forex_data and forex_data["EURUSD"]['price'] > 0:
-    eur_price = forex_data["EURUSD"]['price']
-    eur_change = forex_data["EURUSD"]['change']
-    eur_color = "#00ff88" if eur_change >= 0 else "#ff4444"
-    col_eur.markdown(f"""
-    <div class="currency-card">
-        <div class="currency-symbol">🇪🇺 EURUSD</div>
-        <div class="currency-price">{eur_price:.4f}</div>
-        <div class="currency-change" style="color: {eur_color};">{eur_change:+.2f}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    col_eur.markdown("""
-    <div class="currency-card">
-        <div class="currency-symbol">🇪🇺 EURUSD</div>
-        <div class="currency-price">⏳</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# GBPUSD
-if "GBPUSD" in forex_data and forex_data["GBPUSD"]['price'] > 0:
-    gbp_price = forex_data["GBPUSD"]['price']
-    gbp_change = forex_data["GBPUSD"]['change']
-    gbp_color = "#00ff88" if gbp_change >= 0 else "#ff4444"
-    col_gbp.markdown(f"""
-    <div class="currency-card">
-        <div class="currency-symbol">🇬🇧 GBPUSD</div>
-        <div class="currency-price">{gbp_price:.4f}</div>
-        <div class="currency-change" style="color: {gbp_color};">{gbp_change:+.2f}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    col_gbp.markdown("""
-    <div class="currency-card">
-        <div class="currency-symbol">🇬🇧 GBPUSD</div>
-        <div class="currency-price">⏳</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# USDJPY
-if "USDJPY" in forex_data and forex_data["USDJPY"]['price'] > 0:
-    jpy_price = forex_data["USDJPY"]['price']
-    jpy_change = forex_data["USDJPY"]['change']
-    jpy_color = "#00ff88" if jpy_change >= 0 else "#ff4444"
-    col_jpy.markdown(f"""
-    <div class="currency-card">
-        <div class="currency-symbol">🇯🇵 USDJPY</div>
-        <div class="currency-price">{jpy_price:.2f}</div>
-        <div class="currency-change" style="color: {jpy_color};">{jpy_change:+.2f}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    col_jpy.markdown("""
-    <div class="currency-card">
-        <div class="currency-symbol">🇯🇵 USDJPY</div>
-        <div class="currency-price">⏳</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# BTCUSD (البتكوين)
-if "BTCUSD" in forex_data and forex_data["BTCUSD"]['price'] > 0:
-    btc_price = forex_data["BTCUSD"]['price']
-    btc_change = forex_data["BTCUSD"]['change']
-    btc_color = "#00ff88" if btc_change >= 0 else "#ff4444"
-    col_btc.markdown(f"""
-    <div class="currency-card">
-        <div class="currency-symbol">₿ BTCUSD</div>
-        <div class="currency-price">${btc_price:,.2f}</div>
-        <div class="currency-change" style="color: {btc_color};">{btc_change:+.2f}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    col_btc.markdown("""
-    <div class="currency-card">
-        <div class="currency-symbol">₿ BTCUSD</div>
-        <div class="currency-price">⏳</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ==========================================
-# مؤشرات السوق للذهب
-# ==========================================
 last = df.iloc[-1]
 rsi_val = last['rsi'] if not pd.isna(last['rsi']) else 0
 atr_val = last['atr'] if not pd.isna(last['atr']) else 0
@@ -558,9 +578,6 @@ col_atr.metric("ATR", f"${atr_val:.2f}")
 col_adx.metric("ADX (Trend Strength)", f"{adx_val:.1f}")
 col_score.metric("Net Score", f"{net_score}")
 
-# ==========================================
-# الإشارة
-# ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
@@ -571,16 +588,19 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# الرسم البياني
-# ==========================================
+# عرض تفاصيل النقاط
+if details:
+    st.write("**تفاصيل التسجيل:**")
+    for key, value in details.items():
+        st.write(f"- {key}: {value}")
+
 st.markdown("---")
-st.markdown("### 📈 Price Chart with EMA & Bollinger Bands")
+st.markdown("### 📈 Price Chart")
 
 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
                     row_heights=[0.7, 0.3])
 
-fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD', line=dict(color='gold', width=1.5)), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['close'], name=selected_pair_name, line=dict(color='gold', width=1.5)), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA 20', line=dict(color='orange', dash='dash')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA 50', line=dict(color='red', dash='dash')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dot')), row=1, col=1)
@@ -605,39 +625,34 @@ fig.update_yaxes(title_text="RSI / MACD", row=2, col=1)
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# تحليل الارتباط بين الذهب ومؤشر الدولار (🆕)
+# تحليل الارتباط إذا كان الزوج هو الذهب
 # ==========================================
-st.markdown("---")
-st.markdown("### 🔗 تحليل الارتباط: الذهب vs مؤشر الدولار")
-
-# جلب بيانات DXY التاريخية
-df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
-if df_dxy is not None and not df_dxy.empty:
-    # محاذاة البيانات
-    df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
-    df_dxy_aligned = df_dxy_aligned.fillna(method='ffill')
+if selected_symbol == "GC=F":
+    st.markdown("---")
+    st.markdown("### 🔗 تحليل الارتباط: الذهب vs مؤشر الدولار")
     
-    fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD (Gold)', line=dict(color='gold', width=2)), secondary_y=False)
-    fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY (Dollar Index)', line=dict(color='cyan', width=2)), secondary_y=True)
-    
-    fig_corr.update_layout(height=400, template='plotly_dark', title="Gold vs DXY - العلاقة العكسية عادةً")
-    fig_corr.update_yaxes(title_text="Gold Price", secondary_y=False)
-    fig_corr.update_yaxes(title_text="DXY", secondary_y=True)
-    
-    st.plotly_chart(fig_corr, use_container_width=True)
-    
-    # حساب معامل الارتباط
-    common_idx = df.index.intersection(df_dxy_aligned.index)
-    if len(common_idx) > 10:
-        gold_prices = df.loc[common_idx, 'close']
-        dxy_prices = df_dxy_aligned.loc[common_idx, 'close']
-        correlation = gold_prices.corr(dxy_prices)
-        st.metric("معامل الارتباط (Correlation)", f"{correlation:.3f}", 
-                  delta="علاقة عكسية قوية" if correlation < -0.5 else "علاقة طردية" if correlation > 0.5 else "علاقة ضعيفة")
-else:
-    st.info("تعذر جلب بيانات مؤشر الدولار (DXY)")
+    df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
+    if df_dxy is not None and not df_dxy.empty:
+        df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
+        df_dxy_aligned = df_dxy_aligned.fillna(method='ffill')
+        
+        fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD (Gold)', line=dict(color='gold', width=2)), secondary_y=False)
+        fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY (Dollar Index)', line=dict(color='cyan', width=2)), secondary_y=True)
+        fig_corr.update_layout(height=400, template='plotly_dark', title="Gold vs DXY - العلاقة العكسية عادةً")
+        fig_corr.update_yaxes(title_text="Gold Price", secondary_y=False)
+        fig_corr.update_yaxes(title_text="DXY", secondary_y=True)
+        st.plotly_chart(fig_corr, use_container_width=True)
+        
+        common_idx = df.index.intersection(df_dxy_aligned.index)
+        if len(common_idx) > 10:
+            gold_prices = df.loc[common_idx, 'close']
+            dxy_prices = df_dxy_aligned.loc[common_idx, 'close']
+            correlation = gold_prices.corr(dxy_prices)
+            st.metric("معامل الارتباط (Correlation)", f"{correlation:.3f}", 
+                      delta="علاقة عكسية قوية" if correlation < -0.5 else "علاقة طردية" if correlation > 0.5 else "علاقة ضعيفة")
+    else:
+        st.info("تعذر جلب بيانات مؤشر الدولار (DXY)")
 
 # ==========================================
 # تذييل
@@ -645,6 +660,6 @@ else:
 st.markdown("""
 <div class="footer">
     GoldAPI.io | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci | Advanced Analysis<br>
-    استرداد قناة التداول | تحديث لحظي | DXY + Forex + BTC
+    استرداد قناة التداول | تحديث لحظي | تحليل ديناميكي لجميع الأزواج
 </div>
 """, unsafe_allow_html=True)
