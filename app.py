@@ -92,6 +92,13 @@ st.markdown("""
         border-top: 1px solid #333;
         margin-top: 30px;
     }
+    .stButton button {
+        background: #ffd700;
+        color: #000;
+        font-weight: bold;
+        border-radius: 10px;
+        width: 100%;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,7 +108,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Advanced Analysis | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci + ML</div>
+    <div class="main-subtitle">Advanced Analysis | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci + Ichimoku + MTF</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -466,7 +473,7 @@ class AdvancedTradeManager:
 # الواجهة الرئيسية
 # ==========================================
 st.markdown("### 🔍 اختر الزوج للتحليل المتقدم")
-selected_pair_name = st.selectbox("", list(PAIRS.keys()), index=0)
+selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
 selected_symbol = PAIRS[selected_pair_name]
 
 # عرض البطاقات السريعة
@@ -476,10 +483,15 @@ if forex_data:
     for i, (name, data) in enumerate(forex_data.items()):
         if data['price'] > 0:
             color = "#00ff88" if data['change'] >= 0 else "#ff4444"
+            # تحديد التنسيق حسب الاسم
+            if 'USD' in name:
+                price_str = f"{data['price']:.4f}"
+            else:
+                price_str = f"{data['price']:.2f}"
             cols[i].markdown(f"""
             <div class="currency-card">
                 <div class="currency-symbol">{name}</div>
-                <div class="currency-price">{data['price']:.4f if 'USD' in name else data['price']:.2f}</div>
+                <div class="currency-price">{price_str}</div>
                 <div class="currency-change" style="color:{color};">{data['change']:+.2f}%</div>
             </div>
             """, unsafe_allow_html=True)
@@ -497,6 +509,8 @@ if current_price is None:
     change = 0
 
 # حساب المؤشرات
+df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['rsi'] = calc_rsi(df['close'])
 df['atr'] = calc_atr(df)
 df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
@@ -643,8 +657,8 @@ if selected_symbol == "GC=F":
     df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
     if df_dxy is not None and not df_dxy.empty:
         df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
-        df_dxy_aligned = df_dxy_aligned.ffill()  # ✅ تم التصحيح هنا
-        
+        df_dxy_aligned = df_dxy_aligned.ffill()  # ✅ التصحيح: استخدام .ffill() بدلاً من fillna(method='ffill')
+
         fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
         fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD', line=dict(color='gold')), secondary_y=False)
         fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY', line=dict(color='cyan')), secondary_y=True)
@@ -652,7 +666,7 @@ if selected_symbol == "GC=F":
         fig_corr.update_yaxes(title_text="Gold", secondary_y=False)
         fig_corr.update_yaxes(title_text="DXY", secondary_y=True)
         st.plotly_chart(fig_corr, use_container_width=True)
-        
+
         if len(df) > 10:
             corr = df['close'].corr(df_dxy_aligned['close'])
             st.metric("معامل الارتباط", f"{corr:.3f}")
