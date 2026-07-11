@@ -8,11 +8,14 @@ import numpy as np
 import requests
 import json
 import os
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق (نفس السابق)
+# CSS للتنسيق
 # ==========================================
 st.markdown("""
 <style>
@@ -50,28 +53,6 @@ st.markdown("""
     .price-change {
         font-size: 1.2rem;
     }
-    .indicator-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 10px;
-        margin: 10px 0;
-    }
-    .indicator-card {
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        border: 1px solid #ffd70033;
-    }
-    .indicator-value {
-        font-size: 1.8rem;
-        font-weight: bold;
-        color: #ffd700;
-    }
-    .indicator-label {
-        font-size: 0.8rem;
-        color: #888;
-    }
     .signal-box {
         background: #1a1a2e;
         border-radius: 15px;
@@ -88,44 +69,6 @@ st.markdown("""
         font-size: 1rem;
         color: #aaa;
     }
-    .footer {
-        text-align: center;
-        padding: 15px;
-        color: #666;
-        font-size: 0.8rem;
-        border-top: 1px solid #333;
-        margin-top: 30px;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #1e1e2e;
-        border-radius: 10px;
-        padding: 8px 20px;
-        border: 1px solid #ffd70033;
-    }
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #ffd70020 0%, #ffaa0020 100%);
-        border-color: #ffd700;
-    }
-    .telegram-btn {
-        display: inline-block;
-        background: linear-gradient(135deg, #0088cc 0%, #006699 100%);
-        color: white;
-        padding: 10px 20px;
-        border-radius: 30px;
-        text-decoration: none;
-        font-weight: bold;
-        margin: 5px;
-        transition: transform 0.3s;
-        border: none;
-        cursor: pointer;
-    }
-    .telegram-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0,136,204,0.4);
-    }
     .currency-card {
         background: #1a1a2e;
         border-radius: 10px;
@@ -134,17 +77,30 @@ st.markdown("""
         border: 1px solid #ffd70033;
         margin: 5px 0;
     }
-    .currency-symbol {
+    .currency-symbol { font-size: 0.8rem; color: #888; }
+    .currency-price { font-size: 1.2rem; font-weight: bold; color: #fff; }
+    .currency-change { font-size: 0.9rem; }
+    .trade-row {
+        background: #1a1a2e;
+        border-radius: 10px;
+        padding: 10px;
+        margin: 5px 0;
+        border-left: 4px solid #ffd700;
+    }
+    .footer {
+        text-align: center;
+        padding: 15px;
+        color: #666;
         font-size: 0.8rem;
-        color: #888;
+        border-top: 1px solid #333;
+        margin-top: 30px;
     }
-    .currency-price {
-        font-size: 1.2rem;
+    .stButton button {
+        background: #ffd700;
+        color: #000;
         font-weight: bold;
-        color: #fff;
-    }
-    .currency-change {
-        font-size: 0.9rem;
+        border-radius: 10px;
+        width: 100%;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -155,16 +111,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Advanced Analysis | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci</div>
-</div>
-""", unsafe_allow_html=True)
-
-# زر التليجرام
-st.markdown("""
-<div style="text-align: center; margin: 10px 0 20px 0;">
-    <a href="https://t.me/Ehabka2002" target="_blank" class="telegram-btn">
-        📱 اشترك في قناة التليجرام للإشارات اليومية
-    </a>
+    <div class="main-subtitle">Advanced Analysis | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci + ML</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -174,7 +121,7 @@ st.markdown("""
 GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
 
 # ==========================================
-# 🆕 قائمة الأزواج المدعومة
+# قائمة الأزواج
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -189,12 +136,9 @@ PAIRS = {
 # ==========================================
 # دوال جلب البيانات
 # ==========================================
-
 @st.cache_data(ttl=10)
 def get_spot_price(symbol="GC=F"):
-    """جلب السعر الفوري للرمز المطلوب"""
     try:
-        # إذا كان الذهب، استخدم GoldAPI
         if symbol == "GC=F":
             url = "https://www.goldapi.io/api/XAU/USD"
             headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
@@ -204,8 +148,6 @@ def get_spot_price(symbol="GC=F"):
                 return float(data.get('price', 0)), float(data.get('change', 0))
     except:
         pass
-    
-    # البديل: استخدام yfinance لأي رمز
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -220,7 +162,6 @@ def get_spot_price(symbol="GC=F"):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="1mo", interval="1h"):
-    """جلب البيانات التاريخية لأي رمز"""
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
@@ -233,7 +174,6 @@ def get_historical_data(symbol, period="1mo", interval="1h"):
 
 @st.cache_data(ttl=60)
 def get_all_forex():
-    """جلب أسعار جميع الأزواج المعروضة في البطاقات"""
     symbols = {
         "DXY": "DX-Y.NYB",
         "EURUSD": "EURUSD=X",
@@ -250,10 +190,7 @@ def get_all_forex():
                 last = data.iloc[-1]
                 first = data.iloc[0]
                 change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                results[name] = {
-                    'price': float(last['Close']),
-                    'change': float(change)
-                }
+                results[name] = {'price': float(last['Close']), 'change': float(change)}
             else:
                 results[name] = {'price': 0, 'change': 0}
         except:
@@ -261,7 +198,7 @@ def get_all_forex():
     return results
 
 # ==========================================
-# دوال التحليل الفني (نفس السابق)
+# المؤشرات الفنية المتقدمة
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -272,9 +209,7 @@ def calc_rsi(data, period=14):
     return rsi
 
 def calc_atr(df, period=14):
-    high = df['high']
-    low = df['low']
-    close = df['close']
+    high = df['high']; low = df['low']; close = df['close']
     tr1 = high - low
     tr2 = abs(high - close.shift())
     tr3 = abs(low - close.shift())
@@ -297,9 +232,7 @@ def calc_bollinger_bands(data, period=20, std_dev=2):
     return upper, sma, lower
 
 def calc_adx(df, period=14):
-    high = df['high']
-    low = df['low']
-    close = df['close']
+    high = df['high']; low = df['low']; close = df['close']
     plus_dm = high.diff()
     minus_dm = low.diff()
     plus_dm[plus_dm < 0] = 0
@@ -312,247 +245,401 @@ def calc_adx(df, period=14):
     adx = dx.rolling(window=period).mean()
     return adx, plus_di, minus_di
 
-def calc_fibonacci_levels(high, low, current_price):
-    diff = high - low
-    if diff == 0:
-        return {}
-    return {
-        'fib_236': high - diff * 0.236,
-        'fib_382': high - diff * 0.382,
-        'fib_500': high - diff * 0.5,
-        'fib_618': high - diff * 0.618,
-        'fib_786': high - diff * 0.786
-    }
+def calc_stochastic(high, low, close, k_period=14, d_period=3):
+    low_min = low.rolling(window=k_period).min()
+    high_max = high.rolling(window=k_period).max()
+    k = 100 * ((close - low_min) / (high_max - low_min))
+    d = k.rolling(window=d_period).mean()
+    return k, d
 
-def generate_scored_signal(df, current_price):
-    if df is None or len(df) < 50:
+def calc_mfi(df, period=14):
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    money_flow = typical_price * df['volume']
+    positive_flow = money_flow.where(typical_price > typical_price.shift(), 0).rolling(window=period).sum()
+    negative_flow = money_flow.where(typical_price < typical_price.shift(), 0).rolling(window=period).sum()
+    mfi = 100 - (100 / (1 + positive_flow / negative_flow))
+    return mfi
+
+def calc_cci(high, low, close, period=20):
+    tp = (high + low + close) / 3
+    sma_tp = tp.rolling(window=period).mean()
+    mad = tp.rolling(window=period).apply(lambda x: np.abs(x - x.mean()).mean())
+    cci = (tp - sma_tp) / (0.015 * mad)
+    return cci
+
+def calc_obv(df):
+    obv = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
+    return obv
+
+def calc_ichimoku(df):
+    high = df['high']; low = df['low']; close = df['close']
+    # Tenkan-sen (Conversion Line): (9-period high + 9-period low)/2
+    tenkan = (high.rolling(window=9).max() + low.rolling(window=9).min()) / 2
+    # Kijun-sen (Base Line): (26-period high + 26-period low)/2
+    kijun = (high.rolling(window=26).max() + low.rolling(window=26).min()) / 2
+    # Senkou Span A (Leading Span A): (Tenkan + Kijun)/2, shifted forward 26 periods
+    senkou_a = ((tenkan + kijun) / 2).shift(26)
+    # Senkou Span B (Leading Span B): (52-period high + 52-period low)/2, shifted forward 26 periods
+    senkou_b = ((high.rolling(window=52).max() + low.rolling(window=52).min()) / 2).shift(26)
+    # Chikou Span (Lagging Span): closing price shifted back 26 periods
+    chikou = close.shift(-26)
+    return tenkan, kijun, senkou_a, senkou_b, chikou
+
+# ==========================================
+# نظام تسجيل النقاط المتقدم مع الترجيح
+# ==========================================
+def generate_advanced_signal(df, current_price, symbol=""):
+    if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}
-    
+
     last = df.iloc[-1]
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
+    weights = {
+        'rsi': 3,
+        'macd': 2,
+        'bb': 2,
+        'vwap': 1,
+        'adx': 1,
+        'stoch': 2,
+        'mfi': 2,
+        'cci': 2,
+        'ichimoku': 3,
+        'obv': 1,
+        'ml': 3
+    }
 
+    # 1. RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
-            scores['BUY'] += 3
-            details['RSI'] = f"مفرط البيع ({rsi:.1f}) +3"
+            scores['BUY'] += weights['rsi']; details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
         elif rsi > 70:
-            scores['SELL'] += 3
-            details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +3"
+            scores['SELL'] += weights['rsi']; details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
+    # 2. MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
-            scores['BUY'] += 2
-            details['MACD'] = "إيجابي +2"
+            scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
         elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
-            scores['SELL'] += 2
-            details['MACD'] = "سلبي +2"
+            scores['SELL'] += weights['macd']; details['MACD'] = f"سلبي +{weights['macd']}"
         else:
             details['MACD'] = "محايد"
 
+    # 3. Bollinger Bands
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
-            scores['BUY'] += 2
-            details['BB'] = "قرب الحد السفلي +2"
+            scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
         elif current_price >= last['bb_upper'] * 0.995:
-            scores['SELL'] += 2
-            details['BB'] = "قرب الحد الأعلى +2"
+            scores['SELL'] += weights['bb']; details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
         else:
             details['BB'] = "وسط النطاق"
 
+    # 4. VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
-            scores['BUY'] += 1
-            details['VWAP'] = "فوق VWAP +1"
+            scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
-            scores['SELL'] += 1
-            details['VWAP'] = "تحت VWAP +1"
+            scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
+    # 5. ADX (قوة الاتجاه)
     if 'adx' in df.columns and not pd.isna(last['adx']):
+        details['ADX'] = f"اتجاه {'قوي' if last['adx'] > 25 else 'ضعيف'} ({last['adx']:.1f})"
         if last['adx'] > 25:
-            details['ADX'] = f"اتجاه قوي ({last['adx']:.1f})"
+            # إذا كان الاتجاه قوياً، نعزز الإشارة حسب اتجاه السعر
+            if df['close'].iloc[-1] > df['close'].iloc[-5]:
+                scores['BUY'] += 1; details['ADX'] += " +1 BUY"
+            else:
+                scores['SELL'] += 1; details['ADX'] += " +1 SELL"
+
+    # 6. Stochastic
+    if 'stoch_k' in df.columns and 'stoch_d' in df.columns and not pd.isna(last['stoch_k']):
+        k = last['stoch_k']; d = last['stoch_d']
+        if k < 20 and d < 20 and k > d:
+            scores['BUY'] += weights['stoch']; details['Stoch'] = f"تشبع بيعي صاعد +{weights['stoch']}"
+        elif k > 80 and d > 80 and k < d:
+            scores['SELL'] += weights['stoch']; details['Stoch'] = f"تشبع شرائي هابط +{weights['stoch']}"
         else:
-            details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
+            details['Stoch'] = "محايد"
+
+    # 7. MFI (Money Flow Index)
+    if 'mfi' in df.columns and not pd.isna(last['mfi']):
+        mfi = last['mfi']
+        if mfi < 20:
+            scores['BUY'] += weights['mfi']; details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
+        elif mfi > 80:
+            scores['SELL'] += weights['mfi']; details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
+        else:
+            details['MFI'] = f"محايد ({mfi:.1f})"
+
+    # 8. CCI
+    if 'cci' in df.columns and not pd.isna(last['cci']):
+        cci = last['cci']
+        if cci < -100:
+            scores['BUY'] += weights['cci']; details['CCI'] = f"مفرط البيع ({cci:.1f}) +{weights['cci']}"
+        elif cci > 100:
+            scores['SELL'] += weights['cci']; details['CCI'] = f"مفرط الشراء ({cci:.1f}) +{weights['cci']}"
+        else:
+            details['CCI'] = f"محايد ({cci:.1f})"
+
+    # 9. Ichimoku
+    if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
+        if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
+            if current_price > last['senkou_a'] and current_price > last['senkou_b']:
+                scores['BUY'] += weights['ichimoku']; details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
+            elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
+                scores['SELL'] += weights['ichimoku']; details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
+            else:
+                details['Ichimoku'] = "داخل السحابة"
+
+    # 10. OBV (On-Balance Volume)
+    if 'obv' in df.columns and len(df) > 10:
+        obv_trend = df['obv'].iloc[-1] - df['obv'].iloc[-10]
+        if obv_trend > 0:
+            scores['BUY'] += weights['obv']; details['OBV'] = f"تجميع +{weights['obv']}"
+        else:
+            scores['SELL'] += weights['obv']; details['OBV'] = f"توزيع +{weights['obv']}"
+
+    # 11. ML Prediction (إن وجدت)
+    if 'ml_signal' in df.columns and not pd.isna(last['ml_signal']):
+        if last['ml_signal'] == 1:
+            scores['BUY'] += weights['ml']; details['ML'] = f"توقع صعود +{weights['ml']}"
+        elif last['ml_signal'] == -1:
+            scores['SELL'] += weights['ml']; details['ML'] = f"توقع هبوط +{weights['ml']}"
+        else:
+            details['ML'] = "محايد"
+
+    # 12. تحليل متعدد الأطر الزمنية (إذا توفرت بيانات إضافية)
+    # نضيف هنا تحليل MTF مبسط (يمكن تفعيله بجلب بيانات من أطر زمنية أخرى)
 
     net_score = scores['BUY'] - scores['SELL']
-    if net_score >= 4:
+    total_weight = sum(weights.values())
+    # تطبيع النتيجة
+    if net_score >= 5:
         signal = "BUY"
-        confidence = min(100, 60 + net_score * 5)
-    elif net_score <= -4:
+        confidence = min(100, 60 + (net_score / total_weight) * 100)
+    elif net_score <= -5:
         signal = "SELL"
-        confidence = min(100, 60 + abs(net_score) * 5)
+        confidence = min(100, 60 + (abs(net_score) / total_weight) * 100)
     else:
         signal = "WAIT"
-        confidence = 50 + net_score * 2
+        confidence = 50 + (net_score / total_weight) * 50
+
+    confidence = max(0, min(100, confidence))
 
     return signal, confidence, net_score, details
 
 # ==========================================
-# 🆕 اختيار الزوج المراد تحليله
+# نموذج ML (Random Forest)
 # ==========================================
+def train_ml_model(df):
+    if len(df) < 200:
+        return None, None
+    # إعداد البيانات
+    df_ml = df[['open', 'high', 'low', 'close', 'volume']].copy()
+    # إضافة بعض المؤشرات كخصائص
+    df_ml['rsi'] = calc_rsi(df['close'])
+    df_ml['macd'] = calc_macd(df['close'])[0]
+    df_ml['atr'] = calc_atr(df)
+    df_ml['bb_pos'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+    # الهدف: اتجاه السعر خلال 4 شموع قادمة (1=صعود، -1=هبوط، 0=محايد)
+    future_return = df['close'].shift(-4) / df['close'] - 1
+    df_ml['target'] = np.where(future_return > 0.005, 1, np.where(future_return < -0.005, -1, 0))
+    df_ml = df_ml.dropna()
+    if len(df_ml) < 100:
+        return None, None
+    features = ['rsi', 'macd', 'atr', 'bb_pos', 'volume']
+    X = df_ml[features]
+    y = df_ml['target']
+    # تدريب النموذج
+    model = RandomForestClassifier(n_estimators=50, random_state=42, max_depth=5)
+    model.fit(X, y)
+    return model, features
 
-st.markdown("### 🔍 اختر الزوج للتحليل")
+def predict_ml(model, features, df):
+    if model is None or len(df) < 1:
+        return 0
+    last = df.iloc[-1]
+    # حساب الخصائص
+    rsi = calc_rsi(df['close']).iloc[-1]
+    macd = calc_macd(df['close'])[0].iloc[-1]
+    atr = calc_atr(df).iloc[-1]
+    bb_pos = (last['close'] - df['bb_lower'].iloc[-1]) / (df['bb_upper'].iloc[-1] - df['bb_lower'].iloc[-1])
+    volume = last['volume']
+    X_pred = pd.DataFrame([[rsi, macd, atr, bb_pos, volume]], columns=features)
+    pred = model.predict(X_pred)[0]
+    return int(pred)
 
-selected_pair_name = st.selectbox(
-    "اختر الزوج / الأداة المالية",
-    list(PAIRS.keys()),
-    index=0
-)
+# ==========================================
+# دوال إدارة الصفقات المتقدمة
+# ==========================================
+class AdvancedTradeManager:
+    def __init__(self):
+        self.trades_file = "advanced_trades.json"
+        self.load_trades()
+    def load_trades(self):
+        try:
+            with open(self.trades_file, "r", encoding='utf-8') as f:
+                data = json.load(f)
+                self.open_trades = data.get("open_trades", [])
+                self.closed_trades = data.get("closed_trades", [])
+        except:
+            self.open_trades = []
+            self.closed_trades = []
+    def save_trades(self):
+        with open(self.trades_file, "w", encoding='utf-8') as f:
+            json.dump({"open_trades": self.open_trades, "closed_trades": self.closed_trades}, f, indent=2, ensure_ascii=False)
+    def add_trade(self, trade_data):
+        trade_id = f"T{len(self.open_trades)+len(self.closed_trades)+1:03d}"
+        trade = {
+            "id": trade_id,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "direction": trade_data["direction"],
+            "entry": trade_data["entry"],
+            "lots": trade_data["lots"],
+            "stop_loss": trade_data["stop_loss"],
+            "take_profit": trade_data["take_profit"],
+            "trailing_stop": trade_data.get("trailing_stop", 0),
+            "status": "open",
+            "partial_close": 0,
+            "notes": trade_data.get("notes", "")
+        }
+        self.open_trades.append(trade)
+        self.save_trades()
+        return trade_id
+    def close_trade(self, trade_id, exit_price, partial=False):
+        for i, trade in enumerate(self.open_trades):
+            if trade["id"] == trade_id:
+                if partial:
+                    # جني أرباح جزئي (مثلاً 50%)
+                    trade["partial_close"] = 50
+                    trade["status"] = "partial"
+                    self.save_trades()
+                    return 0
+                else:
+                    trade["exit"] = exit_price
+                    trade["status"] = "closed"
+                    if trade["direction"] == "BUY":
+                        pips = (exit_price - trade["entry"]) * 100
+                    else:
+                        pips = (trade["entry"] - exit_price) * 100
+                    profit = pips * trade["lots"] * 0.1
+                    trade["profit"] = round(profit, 2)
+                    trade["result"] = "win" if profit > 0 else "loss"
+                    trade["close_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.closed_trades.append(trade)
+                    self.open_trades.pop(i)
+                    self.save_trades()
+                    return profit
+        return None
+    def update_trailing_stop(self, trade_id, current_price):
+        for trade in self.open_trades:
+            if trade["id"] == trade_id and trade["status"] == "open":
+                if trade["direction"] == "BUY":
+                    new_stop = current_price - trade["trailing_stop"]
+                    if new_stop > trade["stop_loss"]:
+                        trade["stop_loss"] = new_stop
+                        return True
+                else:
+                    new_stop = current_price + trade["trailing_stop"]
+                    if new_stop < trade["stop_loss"]:
+                        trade["stop_loss"] = new_stop
+                        return True
+        return False
 
+# ==========================================
+# تحليل متعدد الأطر الزمنية
+# ==========================================
+def get_mtf_signal(symbol, current_price):
+    timeframes = ['15m', '1h', '4h']
+    signals = []
+    for tf in timeframes:
+        df = get_historical_data(symbol, period="5d", interval=tf)
+        if df is not None and len(df) > 50:
+            # حساب مؤشرات مبسطة لكل إطار
+            rsi = calc_rsi(df['close']).iloc[-1]
+            if rsi < 30:
+                signals.append(('BUY', tf))
+            elif rsi > 70:
+                signals.append(('SELL', tf))
+            else:
+                signals.append(('NEUTRAL', tf))
+    # حساب الإجماع
+    buy_count = sum(1 for s in signals if s[0] == 'BUY')
+    sell_count = sum(1 for s in signals if s[0] == 'SELL')
+    if buy_count > sell_count:
+        return "BUY", buy_count - sell_count
+    elif sell_count > buy_count:
+        return "SELL", sell_count - buy_count
+    else:
+        return "NEUTRAL", 0
+
+# ==========================================
+# الواجهة الرئيسية
+# ==========================================
+st.markdown("### 🔍 اختر الزوج للتحليل المتقدم")
+selected_pair_name = st.selectbox("", list(PAIRS.keys()), index=0)
 selected_symbol = PAIRS[selected_pair_name]
 
-# عرض البطاقات السريعة لجميع الأزواج (معلومات فقط)
-st.markdown("### 💱 نظرة سريعة على جميع الأزواج")
+# عرض البطاقات السريعة
 forex_data = get_all_forex()
-
 if forex_data:
-    col_dxy, col_eur, col_gbp, col_jpy, col_btc = st.columns(5)
-    
-    # DXY
-    if "DXY" in forex_data and forex_data["DXY"]['price'] > 0:
-        dxy_price = forex_data["DXY"]['price']
-        dxy_change = forex_data["DXY"]['change']
-        dxy_color = "#00ff88" if dxy_change >= 0 else "#ff4444"
-        col_dxy.markdown(f"""
-        <div class="currency-card">
-            <div class="currency-symbol">🇺🇸 DXY</div>
-            <div class="currency-price">{dxy_price:.2f}</div>
-            <div class="currency-change" style="color: {dxy_color};">{dxy_change:+.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        col_dxy.markdown("""
-        <div class="currency-card">
-            <div class="currency-symbol">🇺🇸 DXY</div>
-            <div class="currency-price">⏳</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # EURUSD
-    if "EURUSD" in forex_data and forex_data["EURUSD"]['price'] > 0:
-        eur_price = forex_data["EURUSD"]['price']
-        eur_change = forex_data["EURUSD"]['change']
-        eur_color = "#00ff88" if eur_change >= 0 else "#ff4444"
-        col_eur.markdown(f"""
-        <div class="currency-card">
-            <div class="currency-symbol">🇪🇺 EURUSD</div>
-            <div class="currency-price">{eur_price:.4f}</div>
-            <div class="currency-change" style="color: {eur_color};">{eur_change:+.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        col_eur.markdown("""
-        <div class="currency-card">
-            <div class="currency-symbol">🇪🇺 EURUSD</div>
-            <div class="currency-price">⏳</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # GBPUSD
-    if "GBPUSD" in forex_data and forex_data["GBPUSD"]['price'] > 0:
-        gbp_price = forex_data["GBPUSD"]['price']
-        gbp_change = forex_data["GBPUSD"]['change']
-        gbp_color = "#00ff88" if gbp_change >= 0 else "#ff4444"
-        col_gbp.markdown(f"""
-        <div class="currency-card">
-            <div class="currency-symbol">🇬🇧 GBPUSD</div>
-            <div class="currency-price">{gbp_price:.4f}</div>
-            <div class="currency-change" style="color: {gbp_color};">{gbp_change:+.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        col_gbp.markdown("""
-        <div class="currency-card">
-            <div class="currency-symbol">🇬🇧 GBPUSD</div>
-            <div class="currency-price">⏳</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # USDJPY
-    if "USDJPY" in forex_data and forex_data["USDJPY"]['price'] > 0:
-        jpy_price = forex_data["USDJPY"]['price']
-        jpy_change = forex_data["USDJPY"]['change']
-        jpy_color = "#00ff88" if jpy_change >= 0 else "#ff4444"
-        col_jpy.markdown(f"""
-        <div class="currency-card">
-            <div class="currency-symbol">🇯🇵 USDJPY</div>
-            <div class="currency-price">{jpy_price:.2f}</div>
-            <div class="currency-change" style="color: {jpy_color};">{jpy_change:+.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        col_jpy.markdown("""
-        <div class="currency-card">
-            <div class="currency-symbol">🇯🇵 USDJPY</div>
-            <div class="currency-price">⏳</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # BTCUSD
-    if "BTCUSD" in forex_data and forex_data["BTCUSD"]['price'] > 0:
-        btc_price = forex_data["BTCUSD"]['price']
-        btc_change = forex_data["BTCUSD"]['change']
-        btc_color = "#00ff88" if btc_change >= 0 else "#ff4444"
-        col_btc.markdown(f"""
-        <div class="currency-card">
-            <div class="currency-symbol">₿ BTCUSD</div>
-            <div class="currency-price">${btc_price:,.2f}</div>
-            <div class="currency-change" style="color: {btc_color};">{btc_change:+.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        col_btc.markdown("""
-        <div class="currency-card">
-            <div class="currency-symbol">₿ BTCUSD</div>
-            <div class="currency-price">⏳</div>
-        </div>
-        """, unsafe_allow_html=True)
+    cols = st.columns(5)
+    for i, (name, data) in enumerate(forex_data.items()):
+        if data['price'] > 0:
+            color = "#00ff88" if data['change'] >= 0 else "#ff4444"
+            cols[i].markdown(f"""
+            <div class="currency-card">
+                <div class="currency-symbol">{name}</div>
+                <div class="currency-price">{data['price']:.4f if 'USD' in name else data['price']:.2f}</div>
+                <div class="currency-change" style="color:{color};">{data['change']:+.2f}%</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 st.markdown("---")
 
-# ==========================================
-# تحليل الزوج المختار
-# ==========================================
-
-st.markdown(f"### 📊 تحليل {selected_pair_name}")
-
-# جلب البيانات للزوج المختار
+# جلب البيانات
 current_price, change = get_spot_price(selected_symbol)
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
-
 if df is None:
-    st.error(f"❌ تعذر تحميل بيانات {selected_pair_name}. حاول مرة أخرى لاحقاً.")
+    st.error("تعذر تحميل البيانات")
     st.stop()
-
-if current_price is None and df is not None:
+if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
 
-if current_price is None:
-    st.error(f"❌ تعذر جلب سعر {selected_pair_name}.")
-    st.stop()
-
-# حساب المؤشرات
-df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+# حساب جميع المؤشرات
 df['rsi'] = calc_rsi(df['close'])
 df['atr'] = calc_atr(df)
 df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
 df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
 df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
 df['vwap'] = (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
+df['stoch_k'], df['stoch_d'] = calc_stochastic(df['high'], df['low'], df['close'])
+df['mfi'] = calc_mfi(df)
+df['cci'] = calc_cci(df['high'], df['low'], df['close'])
+df['obv'] = calc_obv(df)
+tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
+df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 
-recent_high = df['high'].iloc[-50:].max()
-recent_low = df['low'].iloc[-50:].min()
-fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
+# تدريب نموذج ML
+model, features = train_ml_model(df)
+if model and features:
+    ml_pred = predict_ml(model, features, df)
+    df['ml_signal'] = 0
+    df.loc[df.index[-1], 'ml_signal'] = ml_pred
+else:
+    df['ml_signal'] = 0
 
-# ==========================================
-# عرض السعر والمؤشرات
-# ==========================================
+# توليد الإشارة المتقدمة
+signal, confidence, net_score, details = generate_advanced_signal(df, current_price, selected_symbol)
 
+# MTF analysis
+mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
+
+# عرض السعر
 price_format = "${:,.2f}" if "BTC" in selected_pair_name or "Gold" in selected_pair_name else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
@@ -564,102 +651,139 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# عرض المؤشرات
+st.markdown("### 📊 مؤشرات السوق المتقدمة")
+cols = st.columns(5)
 last = df.iloc[-1]
-rsi_val = last['rsi'] if not pd.isna(last['rsi']) else 0
-atr_val = last['atr'] if not pd.isna(last['atr']) else 0
-adx_val = last['adx'] if not pd.isna(last['adx']) else 0
+cols[0].metric("RSI", f"{last['rsi']:.1f}")
+cols[1].metric("ATR", f"${last['atr']:.2f}")
+cols[2].metric("ADX", f"{last['adx']:.1f}")
+cols[3].metric("Stoch K", f"{last['stoch_k']:.1f}")
+cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
-signal, confidence, net_score, details = generate_scored_signal(df, current_price)
-
-st.markdown("### 📊 مؤشرات السوق")
-col_rsi, col_atr, col_adx, col_score = st.columns(4)
-col_rsi.metric("RSI (14)", f"{rsi_val:.1f}")
-col_atr.metric("ATR", f"${atr_val:.2f}")
-col_adx.metric("ADX (Trend Strength)", f"{adx_val:.1f}")
-col_score.metric("Net Score", f"{net_score}")
-
+# الإشارة
 st.markdown("---")
-st.markdown("### 🧠 إشارة التداول")
+st.markdown("### 🧠 إشارة التداول المتقدمة")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
 st.markdown(f"""
 <div class="signal-box">
     <div class="signal-text" style="color: {signal_color};">{signal}</div>
-    <div class="signal-confidence">Confidence: {confidence:.0f}% | Score: {net_score}</div>
+    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score}</div>
+    <div style="font-size:0.9rem; color:#aaa; margin-top:10px;">
+        MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-# عرض تفاصيل النقاط
 if details:
-    st.write("**تفاصيل التسجيل:**")
-    for key, value in details.items():
-        st.write(f"- {key}: {value}")
+    with st.expander("تفاصيل التسجيل"):
+        for key, val in details.items():
+            st.write(f"- {key}: {val}")
 
+# الرسم البياني
 st.markdown("---")
-st.markdown("### 📈 Price Chart")
-
-fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                    row_heights=[0.7, 0.3])
-
-fig.add_trace(go.Scatter(x=df.index, y=df['close'], name=selected_pair_name, line=dict(color='gold', width=1.5)), row=1, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA 20', line=dict(color='orange', dash='dash')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA 50', line=dict(color='red', dash='dash')), row=1, col=1)
+st.markdown("### 📈 Price Chart with Indicators")
+fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                    row_heights=[0.6, 0.2, 0.2])
+fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', dash='solid', width=0.8)), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
 
 fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
-fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='blue')), row=2, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], name='Signal', line=dict(color='red')), row=2, col=1)
-fig.add_trace(go.Bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color='gray', opacity=0.3), row=2, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
+fig.add_bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color='gray', opacity=0.3, row=3, col=1)
 
-fig.update_layout(height=700, template='plotly_dark', showlegend=True)
-fig.update_xaxes(title_text="", row=1, col=1)
-fig.update_xaxes(title_text="", row=2, col=1)
-fig.update_yaxes(title_text="Price", row=1, col=1)
-fig.update_yaxes(title_text="RSI / MACD", row=2, col=1)
-
+fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# تحليل الارتباط إذا كان الزوج هو الذهب
+# إدارة الصفقات المتقدمة (نموذج مبسط)
+# ==========================================
+st.markdown("---")
+st.markdown("### 💼 إدارة الصفقات المتقدمة")
+trade_manager = AdvancedTradeManager()
+
+with st.form("add_trade_form"):
+    st.write("إضافة صفقة جديدة")
+    col1, col2, col3 = st.columns(3)
+    direction = col1.selectbox("الاتجاه", ["BUY", "SELL"])
+    entry = col2.number_input("سعر الدخول", value=float(current_price), format="%.2f")
+    lots = col3.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
+    col1, col2, col3 = st.columns(3)
+    stop_loss = col1.number_input("وقف الخسارة", value=float(current_price - 20), format="%.2f")
+    take_profit = col2.number_input("جني الربح", value=float(current_price + 40), format="%.2f")
+    trailing = col3.number_input("وقف متحرك (نقاط)", min_value=0, value=10)
+    submitted = st.form_submit_button("إضافة صفقة")
+    if submitted and entry > 0 and stop_loss > 0:
+        trade_data = {
+            "direction": direction,
+            "entry": entry,
+            "lots": lots,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "trailing_stop": trailing,
+            "notes": f"إشارة من البوت: {signal}"
+        }
+        trade_id = trade_manager.add_trade(trade_data)
+        st.success(f"✅ تم إضافة الصفقة {trade_id}")
+
+# عرض الصفقات المفتوحة
+if trade_manager.open_trades:
+    st.write("**الصفقات المفتوحة:**")
+    for trade in trade_manager.open_trades:
+        st.markdown(f"""
+        <div class="trade-row">
+            <b>{trade['id']}</b> | {trade['direction']} | الدخول: {trade['entry']} | اللوت: {trade['lots']} | الوقف: {trade['stop_loss']} | الهدف: {trade['take_profit']}
+        </div>
+        """, unsafe_allow_html=True)
+        # زر إغلاق الصفقة
+        if st.button(f"إغلاق {trade['id']}", key=f"close_{trade['id']}"):
+            profit = trade_manager.close_trade(trade['id'], current_price)
+            st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
+            st.experimental_rerun()
+
+# عرض إحصائيات الأداء
+if trade_manager.closed_trades:
+    profits = [t.get('profit', 0) for t in trade_manager.closed_trades if 'profit' in t]
+    if profits:
+        win_rate = sum(1 for p in profits if p > 0) / len(profits) * 100
+        total_profit = sum(profits)
+        avg_profit = total_profit / len(profits)
+        st.metric("نسبة الربح", f"{win_rate:.1f}%")
+        st.metric("إجمالي الربح", f"${total_profit:.2f}")
+        st.metric("متوسط الربح", f"${avg_profit:.2f}")
+
+# ==========================================
+# تحليل الارتباط للذهب
 # ==========================================
 if selected_symbol == "GC=F":
     st.markdown("---")
-    st.markdown("### 🔗 تحليل الارتباط: الذهب vs مؤشر الدولار")
-    
+    st.markdown("### 🔗 تحليل الارتباط: الذهب vs الدولار")
     df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
-    if df_dxy is not None and not df_dxy.empty:
-        df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
-        df_dxy_aligned = df_dxy_aligned.fillna(method='ffill')
-        
+    if df_dxy is not None:
+        df_dxy_aligned = df_dxy.reindex(df.index, method='nearest').fillna(method='ffill')
         fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD (Gold)', line=dict(color='gold', width=2)), secondary_y=False)
-        fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY (Dollar Index)', line=dict(color='cyan', width=2)), secondary_y=True)
-        fig_corr.update_layout(height=400, template='plotly_dark', title="Gold vs DXY - العلاقة العكسية عادةً")
-        fig_corr.update_yaxes(title_text="Gold Price", secondary_y=False)
+        fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD', line=dict(color='gold')), secondary_y=False)
+        fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY', line=dict(color='cyan')), secondary_y=True)
+        fig_corr.update_layout(height=400, template='plotly_dark', title="Gold vs DXY")
+        fig_corr.update_yaxes(title_text="Gold", secondary_y=False)
         fig_corr.update_yaxes(title_text="DXY", secondary_y=True)
         st.plotly_chart(fig_corr, use_container_width=True)
-        
-        common_idx = df.index.intersection(df_dxy_aligned.index)
-        if len(common_idx) > 10:
-            gold_prices = df.loc[common_idx, 'close']
-            dxy_prices = df_dxy_aligned.loc[common_idx, 'close']
-            correlation = gold_prices.corr(dxy_prices)
-            st.metric("معامل الارتباط (Correlation)", f"{correlation:.3f}", 
-                      delta="علاقة عكسية قوية" if correlation < -0.5 else "علاقة طردية" if correlation > 0.5 else "علاقة ضعيفة")
-    else:
-        st.info("تعذر جلب بيانات مؤشر الدولار (DXY)")
+        if len(df) > 10:
+            corr = df['close'].corr(df_dxy_aligned['close'])
+            st.metric("معامل الارتباط", f"{corr:.3f}")
 
-# ==========================================
-# تذييل
-# ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci | Advanced Analysis<br>
-    استرداد قناة التداول | تحديث لحظي | تحليل ديناميكي لجميع الأزواج
+    GoldAPI.io | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci + ML + Ichimoku + MTF<br>
+    استرداد قناة التداول | تحديث لحظي | نظام تسجيل متقدم
 </div>
 """, unsafe_allow_html=True)
