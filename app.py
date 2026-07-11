@@ -13,7 +13,7 @@ import os
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق (نفس السابق)
+# CSS للتنسيق
 # ==========================================
 st.markdown("""
 <style>
@@ -41,6 +41,7 @@ st.markdown("""
     .pattern-badge { display: inline-block; background: #ffd70033; border: 1px solid #ffd700; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ffd700; }
     .status-open { color: #00ff88; }
     .status-closed { color: #ff4444; }
+    .tbs-badge { display: inline-block; background: #ff880033; border: 1px solid #ff8800; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ff8800; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -50,7 +51,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + MTF + Market Status</div>
+    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + All Forex</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -64,14 +65,9 @@ NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 # قائمة الأزواج الكاملة (جميع عملات الفوركس)
 # ==========================================
 PAIRS = {
-    # ===== المعادن =====
     "XAU/USD (Gold)": "GC=F",
     "XAG/USD (Silver)": "SI=F",
-
-    # ===== مؤشر الدولار =====
     "DXY (Dollar Index)": "DX-Y.NYB",
-
-    # ===== العملات الرئيسية (Majors) =====
     "EUR/USD": "EURUSD=X",
     "GBP/USD": "GBPUSD=X",
     "USD/JPY": "USDJPY=X",
@@ -79,34 +75,26 @@ PAIRS = {
     "AUD/USD": "AUDUSD=X",
     "NZD/USD": "NZDUSD=X",
     "USD/CAD": "USDCAD=X",
-
-    # ===== العملات المتقاطعة (Crosses) =====
     "EUR/GBP": "EURGBP=X",
     "EUR/JPY": "EURJPY=X",
     "EUR/CHF": "EURCHF=X",
     "EUR/AUD": "EURAUD=X",
     "EUR/NZD": "EURNZD=X",
     "EUR/CAD": "EURCAD=X",
-
     "GBP/JPY": "GBPJPY=X",
     "GBP/CHF": "GBPCHF=X",
     "GBP/AUD": "GBPAUD=X",
     "GBP/NZD": "GBPNZD=X",
     "GBP/CAD": "GBPCAD=X",
-
     "AUD/JPY": "AUDJPY=X",
     "AUD/CHF": "AUDCHF=X",
     "AUD/NZD": "AUDNZD=X",
     "AUD/CAD": "AUDCAD=X",
-
     "NZD/JPY": "NZDJPY=X",
     "NZD/CHF": "NZDCHF=X",
     "NZD/CAD": "NZDCAD=X",
-
     "CAD/JPY": "CADJPY=X",
     "CAD/CHF": "CADCHF=X",
-
-    # ===== العملات النادرة (Exotics) =====
     "USD/TRY": "USDTRY=X",
     "USD/MXN": "USDMXN=X",
     "USD/ZAR": "USDZAR=X",
@@ -119,64 +107,49 @@ PAIRS = {
     "USD/ILS": "USDILS=X",
     "USD/CNH": "USDCNH=X",
     "USD/RUB": "USDRUB=X",
-
-    # ===== العملات الرقمية =====
     "BTC/USD (Bitcoin)": "BTC-USD",
     "ETH/USD (Ethereum)": "ETH-USD"
 }
 
 # ==========================================
-# دوال جلب البيانات وحالة السوق (نفس السابق)
+# دوال جلب البيانات وحالة السوق
 # ==========================================
 def get_market_status():
-    """تحديد حالة السوق (مفتوح/مغلق) وأوقات الافتتاح والإغلاق القادمة"""
     eastern = pytz.timezone('US/Eastern')
     now = datetime.now(eastern)
     weekday = now.weekday()
-
     open_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
     close_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
-
-    if weekday == 5:  # السبت
+    if weekday == 5:
         next_open = open_time + timedelta(days=1)
         return "CLOSED", "عطلة نهاية الأسبوع (السبت)", next_open, close_time
-
-    if weekday == 6:  # الأحد
+    if weekday == 6:
         if now < open_time:
             return "CLOSED", "انتظار افتتاح الأسبوع", open_time, close_time
         else:
             return "OPEN", "السوق مفتوح (الأحد)", close_time, close_time
-
-    if 0 <= weekday <= 3:  # الإثنين – الخميس
+    if 0 <= weekday <= 3:
         if close_time <= now < open_time:
             return "CLOSED", "الاستراحة اليومية (17:00-18:00 ET)", open_time, close_time
         else:
-            if now < close_time:
-                next_close = close_time
-            else:
-                next_close = close_time + timedelta(days=1)
+            next_close = close_time if now < close_time else close_time + timedelta(days=1)
             return "OPEN", "السوق مفتوح", next_close, close_time
-
-    if weekday == 4:  # الجمعة
+    if weekday == 4:
         if now < close_time:
             return "OPEN", "السوق مفتوح (الجمعة)", close_time, close_time
         else:
             next_open = open_time + timedelta(days=2)
             return "CLOSED", "نهاية الأسبوع (إغلاق الجمعة)", next_open, close_time
-
     return "UNKNOWN", "حالة غير معروفة", None, None
 
 def format_time(dt):
-    if dt is None:
-        return "N/A"
+    if dt is None: return "N/A"
     return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 def time_remaining(dt):
-    if dt is None:
-        return "N/A"
+    if dt is None: return "N/A"
     diff = dt - datetime.now(pytz.timezone('US/Eastern'))
-    if diff.total_seconds() < 0:
-        return "انتهى"
+    if diff.total_seconds() < 0: return "انتهى"
     hours = int(diff.total_seconds() // 3600)
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
@@ -210,8 +183,7 @@ def get_historical_data(symbol, period="1mo", interval="1h"):
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
-        if df.empty:
-            return None
+        if df.empty: return None
         df.columns = [col.lower() for col in df.columns]
         return df
     except:
@@ -219,7 +191,6 @@ def get_historical_data(symbol, period="1mo", interval="1h"):
 
 @st.cache_data(ttl=60)
 def get_all_forex():
-    # نختار فقط الأزواج الرئيسية للعرض السريع (لتجنب الزحام)
     main_symbols = {
         "DXY": "DX-Y.NYB",
         "EURUSD": "EURUSD=X",
@@ -268,7 +239,7 @@ def get_economic_news():
     return []
 
 # ==========================================
-# المؤشرات الأساسية و SMC والأنماط (نفس السابق)
+# المؤشرات الأساسية
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -327,6 +298,9 @@ def calc_ichimoku(df):
 def calc_vwap(df):
     return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
 
+# ==========================================
+# تحليل SMC/ICT
+# ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
     df['order_block_bullish'] = False
@@ -341,6 +315,8 @@ def analyze_smc_ict(df):
     df['mss_bearish'] = False
     df['in_discount'] = False
     df['in_premium'] = False
+    df['tbs_bullish'] = False
+    df['tbs_bearish'] = False
 
     for i in range(3, len(df)):
         if df['close'].iloc[i] > df['open'].iloc[i]:
@@ -391,8 +367,38 @@ def analyze_smc_ict(df):
             if df['close'].iloc[i] >= premium:
                 df.loc[df.index[i], 'in_premium'] = True
 
+    # TBS detection
+    tbs_type, _, _, _ = detect_tbs(df)
+    if tbs_type == "BULLISH":
+        df.loc[df.index[-1], 'tbs_bullish'] = True
+    elif tbs_type == "BEARISH":
+        df.loc[df.index[-1], 'tbs_bearish'] = True
+
     return df
 
+# ==========================================
+# استراتيجية TBS (Turtle Body Soup)
+# ==========================================
+def detect_tbs(df, lookback=20, body_multiplier=1.5):
+    if len(df) < lookback + 2:
+        return None, None, None, None
+    last_idx = len(df) - 1
+    current = df.iloc[last_idx]
+    lookback_high = df['high'].iloc[last_idx - lookback:last_idx].max()
+    lookback_low = df['low'].iloc[last_idx - lookback:last_idx].min()
+    avg_body = abs(df['close'] - df['open']).iloc[last_idx - lookback:last_idx].mean()
+    current_body = abs(current['close'] - current['open'])
+    if current_body < avg_body * body_multiplier:
+        return None, None, None, None
+    if current['high'] > lookback_high and current['close'] > lookback_high:
+        return "BEARISH", current['close'], current['low'], lookback_high
+    elif current['low'] < lookback_low and current['close'] < lookback_low:
+        return "BULLISH", current['close'], current['high'], lookback_low
+    return None, None, None, None
+
+# ==========================================
+# اكتشاف النماذج الفنية
+# ==========================================
 def find_peaks_troughs(series, order=5):
     peaks = []
     troughs = []
@@ -404,8 +410,7 @@ def find_peaks_troughs(series, order=5):
     return peaks, troughs
 
 def detect_head_shoulders(df, lookback=50):
-    if len(df) < lookback:
-        return None, 0
+    if len(df) < lookback: return None, 0
     recent_highs = df['high'].iloc[-lookback:].values
     peaks, _ = find_peaks_troughs(recent_highs, order=3)
     if len(peaks) >= 3:
@@ -420,8 +425,7 @@ def detect_head_shoulders(df, lookback=50):
     return None, 0
 
 def detect_double_top_bottom(df, lookback=50):
-    if len(df) < lookback:
-        return None, 0
+    if len(df) < lookback: return None, 0
     recent_highs = df['high'].iloc[-lookback:].values
     recent_lows = df['low'].iloc[-lookback:].values
     peaks, _ = find_peaks_troughs(recent_highs, order=3)
@@ -437,8 +441,7 @@ def detect_double_top_bottom(df, lookback=50):
     return None, 0
 
 def detect_triangle_pattern(df, lookback=40):
-    if len(df) < lookback:
-        return None, 0
+    if len(df) < lookback: return None, 0
     recent_data = df.iloc[-lookback:]
     highs = recent_data['high'].values
     lows = recent_data['low'].values
@@ -470,22 +473,27 @@ def analyze_chart_patterns(df):
         total_score += score
     return patterns, total_score
 
+# ==========================================
+# نظام التسجيل المتكامل (مع TBS)
+# ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
-        return "WAIT", 50, 0, {}, []
+        return "WAIT", 50, 0, {}, [], None
 
     df_smc = analyze_smc_ict(df)
     last_smc = df_smc.iloc[-1]
     patterns, _ = analyze_chart_patterns(df)
+    tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
 
     last = df.iloc[-1]
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
     weights = {
         'rsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3,
-        'smc': 3, 'patterns': 4
+        'smc': 3, 'patterns': 4, 'tbs': 4
     }
 
+    # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -495,6 +503,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
+    # MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
             scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
@@ -503,6 +512,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD'] = "محايد"
 
+    # BB
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
             scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
@@ -511,12 +521,14 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['BB'] = "وسط النطاق"
 
+    # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
             scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
             scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
+    # ADX
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
@@ -526,6 +538,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
+    # Ichimoku
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
@@ -535,6 +548,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
+    # SMC/ICT
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
     elif last_smc.get('order_block_bearish', False):
@@ -558,6 +572,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
+    # Patterns
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
@@ -568,6 +583,16 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 details['Pattern'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
     else:
         details['Pattern'] = "لا توجد نماذج"
+
+    # TBS
+    if tbs_type == "BULLISH":
+        scores['BUY'] += weights['tbs']
+        details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
+    elif tbs_type == "BEARISH":
+        scores['SELL'] += weights['tbs']
+        details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
+    else:
+        details['TBS'] = "لا توجد إشارة TBS"
 
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
@@ -582,20 +607,24 @@ def generate_advanced_signal(df, current_price, symbol=""):
         confidence = 50 + (net_score / total_weight) * 50
 
     confidence = max(0, min(100, confidence))
-    return signal, confidence, net_score, details, patterns
+    tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
+    return signal, confidence, net_score, details, patterns, tbs_info
 
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns):
+# ==========================================
+# شرح القرار (مع TBS)
+# ==========================================
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info):
     explanation = ""
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم"]):
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
-            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط"]):
+            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
@@ -609,8 +638,17 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
         for p in patterns:
             explanation += f"- {p['pattern']} ({p['direction']}) - قوة: {p['score']}/5\n"
+    if tbs_info[0]:
+        tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
+        explanation += f"\n\n🐢 **TBS (Turtle Body Soup) مكتشف:** {tbs_type}\n"
+        explanation += f"   - المستوى القديم المُختَرق: {tbs_level:.4f}\n"
+        explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
+        explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
     return explanation
 
+# ==========================================
+# تحليل متعدد الأطر الزمنية
+# ==========================================
 def get_mtf_signal(symbol, current_price):
     timeframes = ['15m', '1h', '4h']
     signals = []
@@ -633,6 +671,9 @@ def get_mtf_signal(symbol, current_price):
     else:
         return "NEUTRAL", 0
 
+# ==========================================
+# إدارة الصفقات (مع الوقف المتحرك)
+# ==========================================
 class AdvancedTradeManager:
     def __init__(self):
         self.trades_file = "advanced_trades.json"
@@ -712,7 +753,6 @@ class AdvancedTradeManager:
 # الواجهة الرئيسية
 # ==========================================
 
-# عرض حالة السوق في الشريط الجانبي
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
     status, status_text, next_event, close_time = get_market_status()
@@ -724,16 +764,14 @@ with st.sidebar:
         st.markdown(f"🔴 **{status_text}**")
         st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
-
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
     selected_symbol = PAIRS[selected_pair_name]
 
-# عرض البطاقات السريعة (للأزواج الرئيسية فقط)
+# عرض البطاقات السريعة
 forex_data = get_all_forex()
 if forex_data:
-    # نأخذ أول 7 أزواج لعرضها
     items = list(forex_data.items())[:7]
     cols = st.columns(len(items))
     for i, (name, data) in enumerate(items):
@@ -772,9 +810,11 @@ df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
 df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 
-signal, confidence, net_score, details, patterns = generate_advanced_signal(df, current_price, selected_symbol)
+# توليد الإشارة المتكاملة (مع TBS)
+signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
+# عرض السعر
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
@@ -786,6 +826,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# مؤشرات السوق
 st.markdown("### 📊 مؤشرات السوق")
 cols = st.columns(4)
 last = df.iloc[-1]
@@ -794,11 +835,23 @@ cols[1].metric("ATR", f"${last['atr']:.2f}")
 cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 
+# عرض النماذج الفنية
 if patterns:
     st.markdown("#### 📐 النماذج المكتشفة")
     pattern_html = " ".join([f'<span class="pattern-badge">{p["pattern"]} ({p["direction"]})</span>' for p in patterns])
     st.markdown(pattern_html, unsafe_allow_html=True)
 
+# عرض TBS
+tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
+if tbs_type:
+    st.markdown("#### 🐢 TBS (Turtle Body Soup) مكتشف!")
+    if tbs_type == "BULLISH":
+        st.success(f"**إشارة TBS شراء** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
+    else:
+        st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
+    st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
+
+# الإشارة
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
@@ -812,11 +865,14 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# شرح القرار
 with st.expander("📝 شرح القرار", expanded=True):
-    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns)
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
+# ==========================================
 # الصفقة المقترحة
+# ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60:
     st.markdown("---")
     st.markdown("### 💼 الصفقة المقترحة")
@@ -864,7 +920,9 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
             st.experimental_rerun()
 
+# ==========================================
 # إدارة الصفقات
+# ==========================================
 st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
 trade_manager = AdvancedTradeManager()
@@ -906,7 +964,9 @@ if trade_manager.closed_trades:
         st.metric("إجمالي الربح", f"${total_profit:.2f}")
         st.metric("متوسط الربح", f"${avg_profit:.2f}")
 
-# الأخبار
+# ==========================================
+# الأخبار الاقتصادية والتقويم
+# ==========================================
 st.markdown("---")
 st.markdown("### 📰 الأخبار الاقتصادية والتقويم")
 news = get_economic_news()
@@ -921,16 +981,17 @@ if news:
         """, unsafe_allow_html=True)
 else:
     st.info("لا توجد أخبار حالياً (يرجى تفعيل مفتاح NewsAPI في الكود)")
-
 st.write("**📅 التقويم الاقتصادي:**")
 st.markdown("""
 - [Investing.com Economic Calendar](https://www.investing.com/economic-calendar/)
 - [ForexFactory Economic Calendar](https://www.forexfactory.com/calendar)
 """)
 
-# الرسم البياني
+# ==========================================
+# الرسم البياني مع مستويات TBS
+# ==========================================
 st.markdown("---")
-st.markdown("### 📈 Price Chart with Indicators + SMC Levels")
+st.markdown("### 📈 Price Chart with Indicators + SMC + TBS Levels")
 df_smc = analyze_smc_ict(df)
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
                     row_heights=[0.6, 0.2, 0.2])
@@ -942,11 +1003,20 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=d
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
 
+# SMC annotations
 if df_smc['order_block_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
 if df_smc['order_block_bearish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
 
+# TBS Levels
+if tbs_type:
+    fig.add_hline(y=tbs_level, line_dash="dot", line_color="orange", opacity=0.7, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=tbs_level, text=f"TBS Old Level ({tbs_type})", showarrow=True, arrowhead=1, row=1, col=1)
+    fig.add_hline(y=tbs_entry, line_dash="dash", line_color="yellow", opacity=0.5, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=tbs_entry, text="TBS Entry", showarrow=True, arrowhead=1, row=1, col=1)
+
+# RSI and MACD
 fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
@@ -958,7 +1028,9 @@ fig.add_bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color='
 fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
-# تحليل الارتباط للذهب فقط
+# ==========================================
+# تحليل الارتباط للذهب
+# ==========================================
 if selected_symbol == "GC=F":
     st.markdown("---")
     st.markdown("### 🔗 تحليل الارتباط: الذهب vs الدولار")
@@ -979,9 +1051,12 @@ if selected_symbol == "GC=F":
     else:
         st.info("تعذر جلب بيانات مؤشر الدولار")
 
+# ==========================================
+# تذييل
+# ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + MTF + حالة السوق<br>
-    تحديث لحظي | أكثر من 50 زوجاً متاحاً للتحليل
+    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق<br>
+    تحديث لحظي | استراتيجية Turtle Body Soup مدمجة
 </div>
 """, unsafe_allow_html=True)
