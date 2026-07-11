@@ -3,6 +3,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+import pytz
 import pandas as pd
 import numpy as np
 import requests
@@ -12,7 +13,7 @@ import os
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# CSS للتنسيق (نفس السابق)
+# CSS للتنسيق
 # ==========================================
 st.markdown("""
 <style>
@@ -38,6 +39,8 @@ st.markdown("""
     .news-date { color: #888; font-size: 0.8rem; }
     .suggested-trade { background: #1a1a2e; border-radius: 15px; padding: 15px; border: 2px solid #00ff88; margin: 15px 0; }
     .pattern-badge { display: inline-block; background: #ffd70033; border: 1px solid #ffd700; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ffd700; }
+    .status-open { color: #00ff88; }
+    .status-closed { color: #ff4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,7 +50,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + MTF</div>
+    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + MTF + Market Status</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -55,7 +58,7 @@ st.markdown("""
 # إعدادات API
 # ==========================================
 GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # استبدل بمفتاحك
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 # ==========================================
 # قائمة الأزواج
@@ -69,6 +72,68 @@ PAIRS = {
     "BTC/USD (Bitcoin)": "BTC-USD",
     "ETH/USD (Ethereum)": "ETH-USD"
 }
+
+# ==========================================
+# دالة حالة السوق (الجديدة)
+# ==========================================
+def get_market_status():
+    """تحديد حالة السوق (مفتوح/مغلق) وأوقات الافتتاح والإغلاق القادمة"""
+    eastern = pytz.timezone('US/Eastern')
+    now = datetime.now(eastern)
+    weekday = now.weekday()  # 0=الإثنين, 6=الأحد
+
+    # أوقات الافتتاح والإغلاق اليومية (ET)
+    open_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
+    close_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
+
+    # السبت
+    if weekday == 5:
+        next_open = open_time + timedelta(days=1)
+        return "CLOSED", "عطلة نهاية الأسبوع (السبت)", next_open, close_time
+
+    # الأحد
+    if weekday == 6:
+        if now < open_time:
+            return "CLOSED", "انتظار افتتاح الأسبوع", open_time, close_time
+        else:
+            return "OPEN", "السوق مفتوح (الأحد)", close_time, close_time
+
+    # الإثنين – الخميس
+    if 0 <= weekday <= 3:
+        if close_time <= now < open_time:
+            return "CLOSED", "الاستراحة اليومية (17:00-18:00 ET)", open_time, close_time
+        else:
+            # نحدد وقت الإغلاق التالي
+            if now < close_time:
+                next_close = close_time
+            else:
+                next_close = close_time + timedelta(days=1)
+            return "OPEN", "السوق مفتوح", next_close, close_time
+
+    # الجمعة
+    if weekday == 4:
+        if now < close_time:
+            return "OPEN", "السوق مفتوح (الجمعة)", close_time, close_time
+        else:
+            next_open = open_time + timedelta(days=2)
+            return "CLOSED", "نهاية الأسبوع (إغلاق الجمعة)", next_open, close_time
+
+    return "UNKNOWN", "حالة غير معروفة", None, None
+
+def format_time(dt):
+    if dt is None:
+        return "N/A"
+    return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+def time_remaining(dt):
+    if dt is None:
+        return "N/A"
+    diff = dt - datetime.now(pytz.timezone('US/Eastern'))
+    if diff.total_seconds() < 0:
+        return "انتهى"
+    hours = int(diff.total_seconds() // 3600)
+    minutes = int((diff.total_seconds() % 3600) // 60)
+    return f"{hours}h {minutes}m"
 
 # ==========================================
 # دوال جلب البيانات (نفس السابق)
@@ -216,12 +281,10 @@ def calc_vwap(df):
     return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
 
 # ==========================================
-# تحليل SMC/ICT
+# تحليل SMC/ICT (نفس السابق)
 # ==========================================
 def analyze_smc_ict(df):
-    """إضافة أعمدة SMC/ICT إلى DataFrame"""
     df = df.copy()
-    # تهيئة الأعمدة
     df['order_block_bullish'] = False
     df['order_block_bearish'] = False
     df['fvg_bullish'] = False
@@ -235,7 +298,6 @@ def analyze_smc_ict(df):
     df['in_discount'] = False
     df['in_premium'] = False
 
-    # 1. Order Blocks
     for i in range(3, len(df)):
         if df['close'].iloc[i] > df['open'].iloc[i]:
             body = df['close'].iloc[i] - df['open'].iloc[i]
@@ -248,14 +310,12 @@ def analyze_smc_ict(df):
             if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
                 df.loc[df.index[i-1], 'order_block_bearish'] = True
 
-    # 2. Fair Value Gaps (FVG)
     for i in range(2, len(df)):
         if df['low'].iloc[i] > df['high'].iloc[i-2]:
             df.loc[df.index[i], 'fvg_bullish'] = True
         if df['high'].iloc[i] < df['low'].iloc[i-2]:
             df.loc[df.index[i], 'fvg_bearish'] = True
 
-    # 3. Liquidity Sweeps
     for i in range(10, len(df)):
         recent_lows = df['low'].iloc[i-10:i].tolist()
         if df['low'].iloc[i] < min(recent_lows[:-1]):
@@ -264,21 +324,18 @@ def analyze_smc_ict(df):
         if df['high'].iloc[i] > max(recent_highs[:-1]):
             df.loc[df.index[i], 'liquidity_sweep_bearish'] = True
 
-    # 4. Break of Structure (BOS)
     for i in range(5, len(df)):
         if df['close'].iloc[i] > df['high'].iloc[i-5:i].max():
             df.loc[df.index[i], 'bos_bullish'] = True
         if df['close'].iloc[i] < df['low'].iloc[i-5:i].min():
             df.loc[df.index[i], 'bos_bearish'] = True
 
-    # 5. Market Structure Shift (MSS)
     for i in range(3, len(df)):
         if df['bos_bearish'].iloc[i-1] and df['close'].iloc[i] > df['high'].iloc[i-2:i].max():
             df.loc[df.index[i], 'mss_bullish'] = True
         if df['bos_bullish'].iloc[i-1] and df['close'].iloc[i] < df['low'].iloc[i-2:i].min():
             df.loc[df.index[i], 'mss_bearish'] = True
 
-    # 6. Premium / Discount Zones (Fibonacci 38.2% و 61.8%)
     for i in range(50, len(df)):
         range_high = df['high'].iloc[i-50:i].max()
         range_low = df['low'].iloc[i-50:i].min()
@@ -293,7 +350,7 @@ def analyze_smc_ict(df):
     return df
 
 # ==========================================
-# اكتشاف النماذج الفنية (Patterns)
+# اكتشاف النماذج الفنية (نفس السابق)
 # ==========================================
 def find_peaks_troughs(series, order=5):
     peaks = []
@@ -373,13 +430,12 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل (Indicators + SMC + Patterns)
+# نظام التسجيل المتكامل (نفس السابق)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, []
 
-    # تحليل SMC والأنماط
     df_smc = analyze_smc_ict(df)
     last_smc = df_smc.iloc[-1]
     patterns, _ = analyze_chart_patterns(df)
@@ -392,7 +448,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         'smc': 3, 'patterns': 4
     }
 
-    # ===== المؤشرات الكلاسيكية =====
     # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
@@ -448,7 +503,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
-    # ===== SMC/ICT =====
+    # SMC/ICT
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
     elif last_smc.get('order_block_bearish', False):
@@ -472,7 +527,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
-    # ===== النماذج الفنية =====
+    # Patterns
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
@@ -484,7 +539,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['Pattern'] = "لا توجد نماذج"
 
-    # حساب النتيجة النهائية
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     if net_score >= 5:
@@ -501,7 +555,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     return signal, confidence, net_score, details, patterns
 
 # ==========================================
-# شرح القرار (معدل ليشمل SMC والنماذج)
+# شرح القرار (نفس السابق)
 # ==========================================
 def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns):
     explanation = ""
@@ -523,9 +577,7 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
-    # إضافة MTF
     explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
-    # عرض النماذج المكتشفة
     if patterns:
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
         for p in patterns:
@@ -638,9 +690,26 @@ class AdvancedTradeManager:
 # ==========================================
 # الواجهة الرئيسية
 # ==========================================
-st.markdown("### 🔍 اختر الزوج للتحليل المتقدم")
-selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
-selected_symbol = PAIRS[selected_pair_name]
+
+# عرض حالة السوق (جديد) في الشريط الجانبي
+with st.sidebar:
+    st.markdown("### 📊 حالة السوق")
+    status, status_text, next_event, close_time = get_market_status()
+    if status == "OPEN":
+        st.markdown(f"🟢 **{status_text}**")
+        st.markdown(f"⏳ **يغلق في:** {time_remaining(next_event)}")
+        st.markdown(f"🔒 **إغلاق:** {format_time(close_time)}")
+    else:
+        st.markdown(f"🔴 **{status_text}**")
+        st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
+        st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
+
+    st.markdown("---")
+
+    # بقية الإعدادات
+    st.markdown("### 🔍 اختر الزوج للتحليل")
+    selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
+    selected_symbol = PAIRS[selected_pair_name]
 
 # عرض البطاقات السريعة
 forex_data = get_all_forex()
@@ -685,7 +754,7 @@ df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
 df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 
-# توليد الإشارة المتكاملة (مع SMC والنماذج)
+# توليد الإشارة
 signal, confidence, net_score, details, patterns = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
@@ -710,7 +779,7 @@ cols[1].metric("ATR", f"${last['atr']:.2f}")
 cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 
-# عرض النماذج المكتشفة
+# عرض النماذج
 if patterns:
     st.markdown("#### 📐 النماذج المكتشفة")
     pattern_html = " ".join([f'<span class="pattern-badge">{p["pattern"]} ({p["direction"]})</span>' for p in patterns])
@@ -861,7 +930,6 @@ st.markdown("""
 st.markdown("---")
 st.markdown("### 📈 Price Chart with Indicators + SMC Levels")
 
-# نحتاج df_smc للرسم لإظهار مناطق السيولة
 df_smc = analyze_smc_ict(df)
 
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
@@ -874,7 +942,7 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=d
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
 
-# إضافة نقاط SMC على الشارت (بسيطة)
+# إشارات SMC على الشارت
 if df_smc['order_block_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
 if df_smc['order_block_bearish'].iloc[-1]:
@@ -919,7 +987,7 @@ if selected_symbol == "GC=F":
 # ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | Indicators + SMC/ICT + Patterns + MTF<br>
-    نسخة متكاملة مع تحليل السوق المتقدم
+    GoldAPI.io | Indicators + SMC/ICT + Patterns + MTF + Market Status<br>
+    تحديث لحظي | حالة السوق بناءً على توقيت نيويورك (ET)
 </div>
 """, unsafe_allow_html=True)
