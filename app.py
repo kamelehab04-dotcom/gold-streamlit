@@ -66,6 +66,19 @@ st.markdown("""
         font-size: 1rem;
         color: #aaa;
     }
+    .explanation-box {
+        background: #1a1a2e;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        border: 1px solid #ffd70033;
+        text-align: left;
+    }
+    .explanation-title {
+        color: #ffd700;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
     .currency-card {
         background: #1a1a2e;
         border-radius: 10px;
@@ -99,6 +112,28 @@ st.markdown("""
         border-radius: 10px;
         width: 100%;
     }
+    .news-card {
+        background: #1a1a2e;
+        border-radius: 10px;
+        padding: 10px;
+        margin: 5px 0;
+        border-left: 3px solid #ffd700;
+    }
+    .news-title {
+        color: #fff;
+        font-weight: bold;
+    }
+    .news-date {
+        color: #888;
+        font-size: 0.8rem;
+    }
+    .suggested-trade {
+        background: #1a1a2e;
+        border-radius: 15px;
+        padding: 15px;
+        border: 2px solid #00ff88;
+        margin: 15px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,6 +151,7 @@ st.markdown("""
 # إعدادات API
 # ==========================================
 GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # احصل على مفتاح مجاني من newsapi.org
 
 # ==========================================
 # قائمة الأزواج
@@ -193,6 +229,30 @@ def get_all_forex():
         except:
             results[name] = {'price': 0, 'change': 0}
     return results
+
+# ==========================================
+# جلب الأخبار الاقتصادية
+# ==========================================
+@st.cache_data(ttl=600)
+def get_economic_news():
+    try:
+        url = f"https://newsapi.org/v2/everything?q=gold OR forex OR economy&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize=5"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            articles = data.get('articles', [])
+            news_list = []
+            for art in articles[:5]:
+                news_list.append({
+                    'title': art.get('title', ''),
+                    'source': art.get('source', {}).get('name', ''),
+                    'publishedAt': art.get('publishedAt', ''),
+                    'url': art.get('url', '')
+                })
+            return news_list
+    except:
+        pass
+    return []
 
 # ==========================================
 # المؤشرات الفنية (جميع الدوال)
@@ -278,7 +338,7 @@ def calc_ichimoku(df):
     return tenkan, kijun, senkou_a, senkou_b, chikou
 
 # ==========================================
-# نظام تسجيل النقاط المتقدم (بدون ML)
+# نظام تسجيل النقاط المتقدم
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -292,6 +352,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         'stoch': 2, 'mfi': 2, 'cci': 2, 'ichimoku': 3, 'obv': 1
     }
 
+    # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -301,6 +362,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
+    # MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
             scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
@@ -309,6 +371,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD'] = "محايد"
 
+    # BB
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
             scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
@@ -317,12 +380,14 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['BB'] = "وسط النطاق"
 
+    # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
             scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
             scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
+    # ADX
     if 'adx' in df.columns and not pd.isna(last['adx']):
         details['ADX'] = f"اتجاه {'قوي' if last['adx'] > 25 else 'ضعيف'} ({last['adx']:.1f})"
         if last['adx'] > 25:
@@ -331,6 +396,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 scores['SELL'] += 1; details['ADX'] += " +1 SELL"
 
+    # Stochastic
     if 'stoch_k' in df.columns and 'stoch_d' in df.columns and not pd.isna(last['stoch_k']):
         k = last['stoch_k']; d = last['stoch_d']
         if k < 20 and d < 20 and k > d:
@@ -340,6 +406,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['Stoch'] = "محايد"
 
+    # MFI
     if 'mfi' in df.columns and not pd.isna(last['mfi']):
         mfi = last['mfi']
         if mfi < 20:
@@ -349,6 +416,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
+    # CCI
     if 'cci' in df.columns and not pd.isna(last['cci']):
         cci = last['cci']
         if cci < -100:
@@ -358,6 +426,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['CCI'] = f"محايد ({cci:.1f})"
 
+    # Ichimoku
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
@@ -367,6 +436,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
+    # OBV
     if 'obv' in df.columns and len(df) > 10:
         obv_trend = df['obv'].iloc[-1] - df['obv'].iloc[-10]
         if obv_trend > 0:
@@ -388,6 +458,41 @@ def generate_advanced_signal(df, current_price, symbol=""):
 
     confidence = max(0, min(100, confidence))
     return signal, confidence, net_score, details
+
+# ==========================================
+# شرح القرار
+# ==========================================
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count):
+    explanation = ""
+    if signal == "BUY":
+        explanation = "🔹 **قرار الشراء** بناءً على:\n"
+        # أضف النقاط التي ساهمت في الشراء
+        buy_points = [f"- {k}: {v}" for k, v in details.items() if "+" in v and "BUY" in v or any(word in v for word in ["شراء", "صاعد", "تجميع", "فوق", "قرب الحد السفلي", "مفرط البيع"])]
+        if buy_points:
+            explanation += "\n".join(buy_points) + "\n"
+        else:
+            explanation += "- لم تسجل أي نقطة شراء قوية، لكن الاتجاه العام صاعد.\n"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (يجب أن تكون ≥ 5 للشراء)\n"
+        explanation += f"📈 **الثقة**: {confidence:.0f}%"
+    elif signal == "SELL":
+        explanation = "🔻 **قرار البيع** بناءً على:\n"
+        sell_points = [f"- {k}: {v}" for k, v in details.items() if "-" in v or "SELL" in v or any(word in v for word in ["بيع", "هابط", "توزيع", "تحت", "قرب الحد الأعلى", "مفرط الشراء"])]
+        if sell_points:
+            explanation += "\n".join(sell_points) + "\n"
+        else:
+            explanation += "- لم تسجل أي نقطة بيع قوية، لكن الاتجاه العام هابط.\n"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (يجب أن تكون ≤ -5 للبيع)\n"
+        explanation += f"📉 **الثقة**: {confidence:.0f}%"
+    else:  # WAIT
+        explanation = "⏳ **قرار الانتظار** بسبب:\n"
+        explanation += f"- النتيجة الصافية {net_score} تقع بين -5 و +5، مما يعني عدم وجود إجماع قوي.\n"
+        explanation += "- تفاصيل النقاط:\n"
+        for k, v in details.items():
+            explanation += f"  - {k}: {v}\n"
+        explanation += f"💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
+    # إضافة معلومات MTF
+    explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
+    return explanation
 
 # ==========================================
 # تحليل متعدد الأطر الزمنية
@@ -415,7 +520,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات (مبسطة)
+# إدارة الصفقات المتقدمة مع الوقف المتحرك
 # ==========================================
 class AdvancedTradeManager:
     def __init__(self):
@@ -443,13 +548,38 @@ class AdvancedTradeManager:
             "lots": trade_data["lots"],
             "stop_loss": trade_data["stop_loss"],
             "take_profit": trade_data["take_profit"],
-            "trailing_stop": trade_data.get("trailing_stop", 0),
+            "trailing_enabled": trade_data.get("trailing_enabled", False),
+            "trailing_distance": trade_data.get("trailing_distance", 0),
+            "highest_price": trade_data["entry"],  # لتتبع أعلى سعر (للشراء)
+            "lowest_price": trade_data["entry"],   # لتتبع أدنى سعر (للبيع)
             "status": "open",
             "notes": trade_data.get("notes", "")
         }
         self.open_trades.append(trade)
         self.save_trades()
         return trade_id
+    def update_trailing_stop(self, trade_id, current_price):
+        for trade in self.open_trades:
+            if trade["id"] == trade_id and trade["status"] == "open" and trade["trailing_enabled"]:
+                if trade["direction"] == "BUY":
+                    # تحديث أعلى سعر
+                    if current_price > trade["highest_price"]:
+                        trade["highest_price"] = current_price
+                    # حساب الوقف المتحرك
+                    new_stop = trade["highest_price"] - trade["trailing_distance"]
+                    if new_stop > trade["stop_loss"]:
+                        trade["stop_loss"] = new_stop
+                        self.save_trades()
+                        return True
+                else:  # SELL
+                    if current_price < trade["lowest_price"]:
+                        trade["lowest_price"] = current_price
+                    new_stop = trade["lowest_price"] + trade["trailing_distance"]
+                    if new_stop < trade["stop_loss"]:
+                        trade["stop_loss"] = new_stop
+                        self.save_trades()
+                        return True
+        return False
     def close_trade(self, trade_id, exit_price):
         for i, trade in enumerate(self.open_trades):
             if trade["id"] == trade_id:
@@ -483,7 +613,6 @@ if forex_data:
     for i, (name, data) in enumerate(forex_data.items()):
         if data['price'] > 0:
             color = "#00ff88" if data['change'] >= 0 else "#ff4444"
-            # تحديد التنسيق حسب الاسم
             if 'USD' in name:
                 price_str = f"{data['price']:.4f}"
             else:
@@ -564,12 +693,145 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-if details:
-    with st.expander("تفاصيل التسجيل"):
-        for key, val in details.items():
-            st.write(f"- {key}: {val}")
+# ==========================================
+# شرح القرار
+# ==========================================
+with st.expander("📝 شرح القرار", expanded=True):
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count)
+    st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
+# ==========================================
+# الصفقة المقترحة (إذا كانت الإشارة قوية)
+# ==========================================
+if signal in ["BUY", "SELL"] and confidence >= 60:
+    st.markdown("---")
+    st.markdown("### 💼 الصفقة المقترحة")
+    # حساب مستويات الدعم والمقاومة البسيطة
+    recent_high = df['high'].iloc[-20:].max()
+    recent_low = df['low'].iloc[-20:].min()
+    if signal == "BUY":
+        entry = current_price
+        stop_loss = recent_low - (recent_high - recent_low) * 0.1  # وقف ثابت
+        take_profit = recent_high + (recent_high - recent_low) * 0.5
+        direction_text = "شراء (BUY)"
+    else:
+        entry = current_price
+        stop_loss = recent_high + (recent_high - recent_low) * 0.1
+        take_profit = recent_low - (recent_high - recent_low) * 0.5
+        direction_text = "بيع (SELL)"
+    st.markdown(f"""
+    <div class="suggested-trade">
+        <b>الاتجاه:</b> {direction_text}<br>
+        <b>سعر الدخول:</b> {price_format.format(entry)}<br>
+        <b>وقف الخسارة الثابت:</b> {price_format.format(stop_loss)}<br>
+        <b>جني الربح:</b> {price_format.format(take_profit)}
+    </div>
+    """, unsafe_allow_html=True)
+
+    # نموذج لإضافة الصفقة مع تفعيل الوقف المتحرك
+    with st.form("suggested_trade_form"):
+        st.write("إضافة هذه الصفقة إلى إدارة الصفقات مع تفعيل الوقف المتحرك؟")
+        col1, col2 = st.columns(2)
+        enable_trailing = col1.checkbox("تفعيل الوقف المتحرك", value=True)
+        trail_distance = col2.number_input("مسافة التحرك (نقاط)", min_value=5, value=20, step=5)
+        lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
+        submitted = st.form_submit_button("إضافة الصفقة")
+        if submitted:
+            trade_manager = AdvancedTradeManager()
+            trade_data = {
+                "direction": signal,
+                "entry": entry,
+                "lots": lots,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "trailing_enabled": enable_trailing,
+                "trailing_distance": trail_distance / 100,  # تحويل النقاط إلى دولار (مثال: 20 نقطة = 0.20 دولار)
+                "notes": f"مقترحة من البوت (الثقة {confidence:.0f}%)"
+            }
+            trade_id = trade_manager.add_trade(trade_data)
+            st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
+            st.experimental_rerun()
+
+# ==========================================
+# إدارة الصفقات المتقدمة
+# ==========================================
+st.markdown("---")
+st.markdown("### 💼 إدارة الصفقات المتقدمة")
+trade_manager = AdvancedTradeManager()
+
+# تحديث الوقف المتحرك للصفقات المفتوحة (يتم عند تحميل الصفحة)
+for trade in trade_manager.open_trades:
+    if trade["status"] == "open" and trade["trailing_enabled"]:
+        trade_manager.update_trailing_stop(trade["id"], current_price)
+
+# عرض الصفقات المفتوحة
+if trade_manager.open_trades:
+    st.write("**الصفقات المفتوحة:**")
+    for trade in trade_manager.open_trades:
+        # تحديث الوقف المتحرك بشكل تفاعلي
+        st.markdown(f"""
+        <div class="trade-row">
+            <b>{trade['id']}</b> | {trade['direction']} | الدخول: {trade['entry']} | اللوت: {trade['lots']} | 
+            الوقف الحالي: {trade['stop_loss']} | الهدف: {trade['take_profit']}
+            {" | 🔄 وقف متحرك مفعّل (مسافة: " + str(trade['trailing_distance']) + ")" if trade['trailing_enabled'] else ""}
+        </div>
+        """, unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        if col1.button(f"تحديث الوقف المتحرك {trade['id']}", key=f"update_{trade['id']}"):
+            if trade_manager.update_trailing_stop(trade['id'], current_price):
+                st.success("تم تحديث الوقف المتحرك!")
+                st.experimental_rerun()
+            else:
+                st.info("لم يتغير الوقف (السعر لم يتحرك بما يكفي)")
+        if col2.button(f"إغلاق {trade['id']}", key=f"close_{trade['id']}"):
+            profit = trade_manager.close_trade(trade['id'], current_price)
+            st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
+            st.experimental_rerun()
+else:
+    st.write("لا توجد صفقات مفتوحة")
+
+# عرض الصفقات المغلقة والإحصائيات
+if trade_manager.closed_trades:
+    profits = [t.get('profit', 0) for t in trade_manager.closed_trades if 'profit' in t]
+    if profits:
+        win_rate = sum(1 for p in profits if p > 0) / len(profits) * 100
+        total_profit = sum(profits)
+        avg_profit = total_profit / len(profits)
+        st.metric("نسبة الربح", f"{win_rate:.1f}%")
+        st.metric("إجمالي الربح", f"${total_profit:.2f}")
+        st.metric("متوسط الربح", f"${avg_profit:.2f}")
+
+# ==========================================
+# ركن الأخبار الاقتصادية والتقويم
+# ==========================================
+st.markdown("---")
+st.markdown("### 📰 الأخبار الاقتصادية والتقويم")
+
+# عرض الأخبار
+news = get_economic_news()
+if news:
+    st.write("**آخر الأخبار:**")
+    for item in news:
+        st.markdown(f"""
+        <div class="news-card">
+            <div class="news-title"><a href="{item['url']}" target="_blank">{item['title']}</a></div>
+            <div class="news-date">{item['source']} - {item['publishedAt'][:10]}</div>
+        </div>
+        """, unsafe_allow_html=True)
+else:
+    st.info("لا توجد أخبار حالياً (يرجى تفعيل مفتاح NewsAPI في الكود)")
+
+# تقويم اقتصادي مبسط (رابط خارجي)
+st.write("**📅 التقويم الاقتصادي:**")
+st.markdown("""
+- يمكنك متابعة الأحداث الاقتصادية الهامة عبر الرابط التالي:
+- [Investing.com Economic Calendar](https://www.investing.com/economic-calendar/)
+- [ForexFactory Economic Calendar](https://www.forexfactory.com/calendar)
+""")
+
+# ==========================================
 # الرسم البياني
+# ==========================================
 st.markdown("---")
 st.markdown("### 📈 Price Chart with Indicators")
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
@@ -594,61 +856,6 @@ fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# إدارة الصفقات
-# ==========================================
-st.markdown("---")
-st.markdown("### 💼 إدارة الصفقات المتقدمة")
-trade_manager = AdvancedTradeManager()
-
-with st.form("add_trade_form"):
-    st.write("إضافة صفقة جديدة")
-    col1, col2, col3 = st.columns(3)
-    direction = col1.selectbox("الاتجاه", ["BUY", "SELL"])
-    entry = col2.number_input("سعر الدخول", value=float(current_price), format="%.2f")
-    lots = col3.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
-    col1, col2, col3 = st.columns(3)
-    stop_loss = col1.number_input("وقف الخسارة", value=float(current_price - 20), format="%.2f")
-    take_profit = col2.number_input("جني الربح", value=float(current_price + 40), format="%.2f")
-    trailing = col3.number_input("وقف متحرك (نقاط)", min_value=0, value=10)
-    submitted = st.form_submit_button("إضافة صفقة")
-    if submitted and entry > 0 and stop_loss > 0:
-        trade_data = {
-            "direction": direction,
-            "entry": entry,
-            "lots": lots,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "trailing_stop": trailing,
-            "notes": f"إشارة من البوت: {signal}"
-        }
-        trade_id = trade_manager.add_trade(trade_data)
-        st.success(f"✅ تم إضافة الصفقة {trade_id}")
-
-# عرض الصفقات المفتوحة
-if trade_manager.open_trades:
-    st.write("**الصفقات المفتوحة:**")
-    for trade in trade_manager.open_trades:
-        st.markdown(f"""
-        <div class="trade-row">
-            <b>{trade['id']}</b> | {trade['direction']} | الدخول: {trade['entry']} | اللوت: {trade['lots']} | الوقف: {trade['stop_loss']} | الهدف: {trade['take_profit']}
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button(f"إغلاق {trade['id']}", key=f"close_{trade['id']}"):
-            profit = trade_manager.close_trade(trade['id'], current_price)
-            st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
-            st.experimental_rerun()
-
-if trade_manager.closed_trades:
-    profits = [t.get('profit', 0) for t in trade_manager.closed_trades if 'profit' in t]
-    if profits:
-        win_rate = sum(1 for p in profits if p > 0) / len(profits) * 100
-        total_profit = sum(profits)
-        avg_profit = total_profit / len(profits)
-        st.metric("نسبة الربح", f"{win_rate:.1f}%")
-        st.metric("إجمالي الربح", f"${total_profit:.2f}")
-        st.metric("متوسط الربح", f"${avg_profit:.2f}")
-
-# ==========================================
 # تحليل الارتباط للذهب
 # ==========================================
 if selected_symbol == "GC=F":
@@ -657,7 +864,7 @@ if selected_symbol == "GC=F":
     df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
     if df_dxy is not None and not df_dxy.empty:
         df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
-        df_dxy_aligned = df_dxy_aligned.ffill()  # ✅ التصحيح: استخدام .ffill() بدلاً من fillna(method='ffill')
+        df_dxy_aligned = df_dxy_aligned.ffill()
 
         fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
         fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD', line=dict(color='gold')), secondary_y=False)
@@ -679,6 +886,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | SMC + ICT + MACD + BB + ADX + VWAP + Fibonacci + Ichimoku + MTF<br>
-    استرداد قناة التداول | تحديث لحظي | نظام تسجيل متقدم
+    استرداد قناة التداول | تحديث لحظي | نظام تسجيل متقدم مع شرح القرار
 </div>
 """, unsafe_allow_html=True)
