@@ -130,8 +130,6 @@ if "daily_pnl" not in st.session_state:
     st.session_state.daily_pnl = 0
 if "daily_trades" not in st.session_state:
     st.session_state.daily_trades = 0
-if "rerun_needed" not in st.session_state:
-    st.session_state.rerun_needed = False
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -165,13 +163,16 @@ def get_market_status():
     return "UNKNOWN", "حالة غير معروفة", None, None
 
 def format_time(dt):
-    if dt is None: return "N/A"
+    if dt is None:
+        return "N/A"
     return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 def time_remaining(dt):
-    if dt is None: return "N/A"
+    if dt is None:
+        return "N/A"
     diff = dt - datetime.now(pytz.timezone('US/Eastern'))
-    if diff.total_seconds() < 0: return "انتهى"
+    if diff.total_seconds() < 0:
+        return "انتهى"
     hours = int(diff.total_seconds() // 3600)
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
@@ -205,7 +206,8 @@ def get_historical_data(symbol, period="1mo", interval="1h"):
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
-        if df.empty: return None
+        if df.empty:
+            return None
         df.columns = [col.lower() for col in df.columns]
         return df
     except:
@@ -272,7 +274,9 @@ def calc_rsi(data, period=14):
     return rsi
 
 def calc_atr(df, period=14):
-    high = df['high']; low = df['low']; close = df['close']
+    high = df['high']
+    low = df['low']
+    close = df['close']
     tr1 = high - low
     tr2 = abs(high - close.shift())
     tr3 = abs(low - close.shift())
@@ -295,7 +299,9 @@ def calc_bollinger_bands(data, period=20, std_dev=2):
     return upper, sma, lower
 
 def calc_adx(df, period=14):
-    high = df['high']; low = df['low']; close = df['close']
+    high = df['high']
+    low = df['low']
+    close = df['close']
     plus_dm = high.diff()
     minus_dm = low.diff()
     plus_dm[plus_dm < 0] = 0
@@ -309,7 +315,9 @@ def calc_adx(df, period=14):
     return adx, plus_di, minus_di
 
 def calc_ichimoku(df):
-    high = df['high']; low = df['low']; close = df['close']
+    high = df['high']
+    low = df['low']
+    close = df['close']
     tenkan = (high.rolling(window=9).max() + low.rolling(window=9).min()) / 2
     kijun = (high.rolling(window=26).max() + low.rolling(window=26).min()) / 2
     senkou_a = ((tenkan + kijun) / 2).shift(26)
@@ -389,7 +397,7 @@ class SmartTradePlanner:
                 'high': zone2_high,
                 'description': f"اختراق القمة السابقة ({zone2_low:.2f} - {zone2_high:.2f})"
             }
-        else:
+        else:  # SELL
             fib_500 = self.fib.get('fib_500', self.current_price)
             fib_618 = self.fib.get('fib_618', self.current_price)
             zone1_low = min(fib_500, fib_618) - self.atr * 0.3
@@ -552,7 +560,8 @@ def find_peaks_troughs(series, order=5):
     return peaks, troughs
 
 def detect_head_shoulders(df, lookback=50):
-    if len(df) < lookback: return None, 0
+    if len(df) < lookback:
+        return None, 0
     recent_highs = df['high'].iloc[-lookback:].values
     peaks, _ = find_peaks_troughs(recent_highs, order=3)
     if len(peaks) >= 3:
@@ -567,7 +576,8 @@ def detect_head_shoulders(df, lookback=50):
     return None, 0
 
 def detect_double_top_bottom(df, lookback=50):
-    if len(df) < lookback: return None, 0
+    if len(df) < lookback:
+        return None, 0
     recent_highs = df['high'].iloc[-lookback:].values
     recent_lows = df['low'].iloc[-lookback:].values
     peaks, _ = find_peaks_troughs(recent_highs, order=3)
@@ -583,7 +593,8 @@ def detect_double_top_bottom(df, lookback=50):
     return None, 0
 
 def detect_triangle_pattern(df, lookback=40):
-    if len(df) < lookback: return None, 0
+    if len(df) < lookback:
+        return None, 0
     recent_data = df.iloc[-lookback:]
     highs = recent_data['high'].values
     lows = recent_data['low'].values
@@ -616,7 +627,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل (مع MFI + Fibonacci + ATR Filter)
+# نظام التسجيل المتكامل
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -638,72 +649,94 @@ def generate_advanced_signal(df, current_price, symbol=""):
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
-            scores['BUY'] += weights['rsi']; details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
+            scores['BUY'] += weights['rsi']
+            details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
         elif rsi > 70:
-            scores['SELL'] += weights['rsi']; details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
+            scores['SELL'] += weights['rsi']
+            details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
-            scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
+            scores['BUY'] += weights['macd']
+            details['MACD'] = f"إيجابي +{weights['macd']}"
         elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
-            scores['SELL'] += weights['macd']; details['MACD'] = f"سلبي +{weights['macd']}"
+            scores['SELL'] += weights['macd']
+            details['MACD'] = f"سلبي +{weights['macd']}"
         else:
             details['MACD'] = "محايد"
 
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
-            scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
+            scores['BUY'] += weights['bb']
+            details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
         elif current_price >= last['bb_upper'] * 0.995:
-            scores['SELL'] += weights['bb']; details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
+            scores['SELL'] += weights['bb']
+            details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
         else:
             details['BB'] = "وسط النطاق"
 
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
-            scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
+            scores['BUY'] += weights['vwap']
+            details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
-            scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
+            scores['SELL'] += weights['vwap']
+            details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
-                scores['BUY'] += 1; details['ADX'] = f"اتجاه قوي صاعد +1"
+                scores['BUY'] += 1
+                details['ADX'] = f"اتجاه قوي صاعد +1"
             else:
-                scores['SELL'] += 1; details['ADX'] = f"اتجاه قوي هابط +1"
+                scores['SELL'] += 1
+                details['ADX'] = f"اتجاه قوي هابط +1"
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
-                scores['BUY'] += weights['ichimoku']; details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
+                scores['BUY'] += weights['ichimoku']
+                details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
             elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
-                scores['SELL'] += weights['ichimoku']; details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
+                scores['SELL'] += weights['ichimoku']
+                details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
     if last_smc.get('order_block_bullish', False):
-        scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
+        scores['BUY'] += weights['smc']
+        details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
     elif last_smc.get('order_block_bearish', False):
-        scores['SELL'] += weights['smc']; details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
+        scores['SELL'] += weights['smc']
+        details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
     elif last_smc.get('fvg_bullish', False):
-        scores['BUY'] += weights['smc']//2; details['SMC'] = f"FVG شراء +{weights['smc']//2}"
+        scores['BUY'] += weights['smc']//2
+        details['SMC'] = f"FVG شراء +{weights['smc']//2}"
     elif last_smc.get('fvg_bearish', False):
-        scores['SELL'] += weights['smc']//2; details['SMC'] = f"FVG بيع +{weights['smc']//2}"
+        scores['SELL'] += weights['smc']//2
+        details['SMC'] = f"FVG بيع +{weights['smc']//2}"
     elif last_smc.get('liquidity_sweep_bullish', False):
-        scores['BUY'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
+        scores['BUY'] += weights['smc']//2
+        details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
     elif last_smc.get('liquidity_sweep_bearish', False):
-        scores['SELL'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
+        scores['SELL'] += weights['smc']//2
+        details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
     elif last_smc.get('mss_bullish', False):
-        scores['BUY'] += weights['smc']; details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
+        scores['BUY'] += weights['smc']
+        details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
     elif last_smc.get('mss_bearish', False):
-        scores['SELL'] += weights['smc']; details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
+        scores['SELL'] += weights['smc']
+        details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
     elif last_smc.get('in_discount', False):
-        scores['BUY'] += weights['smc']//2; details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
+        scores['BUY'] += weights['smc']//2
+        details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
     elif last_smc.get('in_premium', False):
-        scores['SELL'] += weights['smc']//2; details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
+        scores['SELL'] += weights['smc']//2
+        details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
@@ -776,7 +809,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     return signal, confidence, net_score, details, patterns, tbs_info
 
 # ==========================================
-# شرح القرار (مع Fibonacci)
+# شرح القرار
 # ==========================================
 def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price):
     explanation = ""
@@ -849,7 +882,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات اليدوية
+# إدارة الصفقات
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -949,7 +982,7 @@ with st.sidebar:
     st.markdown("### 📋 إدارة الصفقات اليدوية")
     if st.button("➕ صفقة جديدة", use_container_width=True):
         st.session_state.show_form = not st.session_state.show_form
-        st.experimental_rerun()
+        st.rerun()
 
 # عرض البطاقات السريعة
 forex_data = get_all_forex()
@@ -993,7 +1026,11 @@ df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close
 df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
 df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
-df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
+df['tenkan'] = tenkan
+df['kijun'] = kijun
+df['senkou_a'] = senkou_a
+df['senkou_b'] = senkou_b
+df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
 # توليد الإشارة
@@ -1047,6 +1084,7 @@ if entry_zones and direction != "NEUTRAL":
             </div>
             """, unsafe_allow_html=True)
     
+    # تعريف entry_price في كلتا الحالتين
     if direction == "BUY":
         entry_price = (entry_zones['zone1']['low'] + entry_zones['zone1']['high']) / 2
     else:
@@ -1116,7 +1154,7 @@ if entry_zones and direction != "NEUTRAL":
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
-        st.experimental_rerun()
+        st.rerun()
 
 else:
     st.info("ℹ️ السوق في حالة عرضية – انتظر تأكيد الاتجاه")
@@ -1204,16 +1242,16 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             }
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
-            st.experimental_rerun()
+            st.rerun()
 
 # ==========================================
-# إدارة الصفقات اليدوية
+# إدارة الصفقات
 # ==========================================
 st.markdown("---")
-st.markdown("### 💼 إدارة الصفقات اليدوية")
+st.markdown("### 💼 إدارة الصفقات")
 trade_manager = TradeManager()
 
-# تحديث الوقف المتحرك (بدون إعادة تحميل)
+# تحديث الوقف المتحرك
 for trade in trade_manager.open_trades:
     if trade["status"] == "open" and trade["trailing_enabled"]:
         trade_manager.update_trailing_stop(trade["id"], current_price)
@@ -1237,7 +1275,7 @@ if trade_manager.open_trades:
         if col2.button(f"إغلاق {trade['id']}", key=f"close_{trade['id']}"):
             profit = trade_manager.close_trade(trade['id'], current_price)
             st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
-            st.experimental_rerun()
+            st.rerun()
 else:
     st.write("لا توجد صفقات مفتوحة")
 
@@ -1276,7 +1314,7 @@ if st.session_state.show_form:
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id}")
             st.session_state.show_form = False
-            st.experimental_rerun()
+            st.rerun()
 
 # ==========================================
 # الأخبار الاقتصادية والتقويم
