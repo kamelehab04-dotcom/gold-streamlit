@@ -126,11 +126,12 @@ if "price_data" not in st.session_state:
     st.session_state.price_data = None
 if "show_form" not in st.session_state:
     st.session_state.show_form = False
-# إدارة المخاطر اليومية
 if "daily_pnl" not in st.session_state:
     st.session_state.daily_pnl = 0
 if "daily_trades" not in st.session_state:
     st.session_state.daily_trades = 0
+if "rerun_needed" not in st.session_state:
+    st.session_state.rerun_needed = False
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -340,7 +341,7 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# 🆕 نظام تحديد مناطق الدخول والأهداف اليومية
+# نظام تخطيط الصفقات الذكي
 # ==========================================
 class SmartTradePlanner:
     def __init__(self, df, current_price, atr_value):
@@ -353,7 +354,6 @@ class SmartTradePlanner:
         self.direction = self._determine_direction()
     
     def _determine_direction(self):
-        """تحديد الاتجاه العام بناءً على EMA50 و ADX"""
         if len(self.df) < 50:
             return "NEUTRAL"
         ema50 = self.df['ema50'].iloc[-1]
@@ -364,14 +364,12 @@ class SmartTradePlanner:
         return "NEUTRAL"
     
     def get_entry_zones(self):
-        """مناطق الدخول - مستويين"""
         if self.direction == "NEUTRAL":
             return None, None
         
         entry_zones = {}
         
         if self.direction == "BUY":
-            # منطقة الدخول الأولى: عند التصحيح (فيبوناتشي 0.382 - 0.5)
             fib_382 = self.fib.get('fib_382', self.current_price)
             fib_500 = self.fib.get('fib_500', self.current_price)
             zone1_low = min(fib_382, fib_500) - self.atr * 0.3
@@ -382,8 +380,6 @@ class SmartTradePlanner:
                 'high': zone1_high,
                 'description': f"التصحيح إلى فيبوناتشي 0.382-0.5 ({zone1_low:.2f} - {zone1_high:.2f})"
             }
-            
-            # منطقة الدخول الثانية: عند الاختراق (قمة الموجة السابقة + ATR)
             recent_peak = self.recent_high
             zone2_low = recent_peak
             zone2_high = recent_peak + self.atr * 0.5
@@ -393,8 +389,7 @@ class SmartTradePlanner:
                 'high': zone2_high,
                 'description': f"اختراق القمة السابقة ({zone2_low:.2f} - {zone2_high:.2f})"
             }
-        else:  # SELL
-            # منطقة البيع الأولى: عند التصحيح (فيبوناتشي 0.618 - 0.5)
+        else:
             fib_500 = self.fib.get('fib_500', self.current_price)
             fib_618 = self.fib.get('fib_618', self.current_price)
             zone1_low = min(fib_500, fib_618) - self.atr * 0.3
@@ -405,8 +400,6 @@ class SmartTradePlanner:
                 'high': zone1_high,
                 'description': f"التصحيح إلى فيبوناتشي 0.5-0.618 ({zone1_low:.2f} - {zone1_high:.2f})"
             }
-            
-            # منطقة البيع الثانية: عند الاختراق (قاع الموجة السابقة - ATR)
             recent_trough = self.recent_low
             zone2_low = recent_trough - self.atr * 0.5
             zone2_high = recent_trough
@@ -420,31 +413,25 @@ class SmartTradePlanner:
         return entry_zones, self.direction
     
     def get_stop_loss(self, entry_price, direction):
-        """حساب وقف الخسارة الديناميكي"""
         if direction == "BUY":
-            # وقف الخسارة = أدنى قاع خلال 20 شمعة أو ATR * 1.5
             support = self.df['low'].iloc[-20:].min()
             sl = min(support, entry_price - self.atr * 1.5)
             return sl
         else:
-            # وقف الخسارة = أعلى قمة خلال 20 شمعة أو ATR * 1.5
             resistance = self.df['high'].iloc[-20:].max()
             sl = max(resistance, entry_price + self.atr * 1.5)
             return sl
     
     def get_daily_targets(self, entry_price, stop_loss, direction):
-        """الأهداف اليومية - 3 مستويات"""
         risk = abs(entry_price - stop_loss)
-        
         if direction == "BUY":
-            target1 = entry_price + risk * 1.0  # 1:1
-            target2 = entry_price + risk * 1.5  # 1:1.5
-            target3 = entry_price + risk * 2.0  # 1:2
+            target1 = entry_price + risk * 1.0
+            target2 = entry_price + risk * 1.5
+            target3 = entry_price + risk * 2.0
         else:
             target1 = entry_price - risk * 1.0
             target2 = entry_price - risk * 1.5
             target3 = entry_price - risk * 2.0
-        
         return {
             'target1': target1,
             'target2': target2,
@@ -962,6 +949,7 @@ with st.sidebar:
     st.markdown("### 📋 إدارة الصفقات اليدوية")
     if st.button("➕ صفقة جديدة", use_container_width=True):
         st.session_state.show_form = not st.session_state.show_form
+        st.experimental_rerun()
 
 # عرض البطاقات السريعة
 forex_data = get_all_forex()
@@ -1035,22 +1023,18 @@ cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
 # ==========================================
-# 🆕 عرض مناطق الدخول والأهداف اليومية
+# عرض مناطق الدخول والأهداف اليومية
 # ==========================================
 st.markdown("---")
 st.markdown("### 🎯 مناطق الدخول والأهداف اليومية")
 
-# حساب ATR
 atr_value = last['atr'] if not pd.isna(last['atr']) else 10
-
-# إنشاء مخطط الصفقات
 planner = SmartTradePlanner(df, current_price, atr_value)
 entry_zones, direction = planner.get_entry_zones()
 
 if entry_zones and direction != "NEUTRAL":
     st.markdown(f"**الاتجاه المتوقع:** {'🟢 شراء' if direction == 'BUY' else '🔴 بيع'}")
     
-    # عرض مناطق الدخول
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### 📍 مناطق الدخول")
@@ -1063,16 +1047,12 @@ if entry_zones and direction != "NEUTRAL":
             </div>
             """, unsafe_allow_html=True)
     
-    # اختيار نقطة دخول وسيطة للعرض
     if direction == "BUY":
         entry_price = (entry_zones['zone1']['low'] + entry_zones['zone1']['high']) / 2
     else:
         entry_price = (entry_zones['zone1']['low'] + entry_zones['zone1']['high']) / 2
     
-    # حساب Stop Loss
     stop_loss = planner.get_stop_loss(entry_price, direction)
-    
-    # حساب الأهداف
     targets = planner.get_daily_targets(entry_price, stop_loss, direction)
     
     with col2:
@@ -1098,25 +1078,21 @@ if entry_zones and direction != "NEUTRAL":
         </div>
         """, unsafe_allow_html=True)
     
-    # عرض نسبة المخاطرة/المكافأة
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
     st.success(f"📈 **نسبة المخاطرة/المكافأة القصوى:** {risk_reward}")
     
-    # إدارة المخاطر اليومية
     st.markdown("---")
     st.markdown("#### 🛡️ إدارة المخاطر اليومية")
     
-    # إعدادات رأس المال (افتراضية)
-    account_balance = 100000  # يمكن تعديلها
+    account_balance = 100000
     max_daily_loss_pct = 5
     max_daily_loss = account_balance * (max_daily_loss_pct / 100)
     risk_per_trade_pct = 2
     risk_per_trade = account_balance * (risk_per_trade_pct / 100)
     
-    # حساب حجم اللوت
     risk_amount = abs(entry_price - stop_loss)
     if risk_amount > 0:
-        lot_size = risk_per_trade / (risk_amount * 100)  # 100 نقطة = 1 دولار
+        lot_size = risk_per_trade / (risk_amount * 100)
         lot_size = round(lot_size, 2)
     else:
         lot_size = 0.01
@@ -1126,7 +1102,6 @@ if entry_zones and direction != "NEUTRAL":
     col2.metric("📉 الخسارة اليومية القصوى", f"${max_daily_loss:,.0f} ({max_daily_loss_pct}%)")
     col3.metric("📊 حجم اللوت الموصى به", f"{lot_size:.2f}")
     
-    # زر إضافة الصفقة المقترحة
     if st.button("➕ إضافة هذه الصفقة المقترحة", use_container_width=True):
         trade_manager = TradeManager()
         trade_data = {
@@ -1134,14 +1109,14 @@ if entry_zones and direction != "NEUTRAL":
             "entry": entry_price,
             "lots": lot_size,
             "stop_loss": stop_loss,
-            "take_profit": targets['target2'],  # نأخذ الهدف المتوسط
+            "take_profit": targets['target2'],
             "trailing_enabled": True,
-            "trailing_distance": 20 / 100,  # 20 نقطة
+            "trailing_distance": 20 / 100,
             "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%)"
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
-        st.rerun()
+        st.experimental_rerun()
 
 else:
     st.info("ℹ️ السوق في حالة عرضية – انتظر تأكيد الاتجاه")
@@ -1229,7 +1204,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             }
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
-            st.rerun()
+            st.experimental_rerun()
 
 # ==========================================
 # إدارة الصفقات اليدوية
@@ -1238,6 +1213,7 @@ st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات اليدوية")
 trade_manager = TradeManager()
 
+# تحديث الوقف المتحرك (بدون إعادة تحميل)
 for trade in trade_manager.open_trades:
     if trade["status"] == "open" and trade["trailing_enabled"]:
         trade_manager.update_trailing_stop(trade["id"], current_price)
@@ -1256,13 +1232,12 @@ if trade_manager.open_trades:
         if col1.button(f"تحديث الوقف المتحرك {trade['id']}", key=f"update_{trade['id']}"):
             if trade_manager.update_trailing_stop(trade['id'], current_price):
                 st.success("تم تحديث الوقف المتحرك!")
-                st.rerun()
             else:
                 st.info("لم يتغير الوقف (السعر لم يتحرك بما يكفي)")
         if col2.button(f"إغلاق {trade['id']}", key=f"close_{trade['id']}"):
             profit = trade_manager.close_trade(trade['id'], current_price)
             st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
-            st.rerun()
+            st.experimental_rerun()
 else:
     st.write("لا توجد صفقات مفتوحة")
 
@@ -1301,7 +1276,7 @@ if st.session_state.show_form:
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id}")
             st.session_state.show_form = False
-            st.rerun()
+            st.experimental_rerun()
 
 # ==========================================
 # الأخبار الاقتصادية والتقويم
@@ -1353,7 +1328,6 @@ if tbs_type:
     fig.add_hline(y=tbs_entry, line_dash="dash", line_color="yellow", opacity=0.5, row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=tbs_entry, text="TBS Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
-# إضافة مناطق الدخول على الشارت
 if entry_zones and direction != "NEUTRAL":
     for zone_name, zone in entry_zones.items():
         fig.add_hrect(y0=zone['low'], y1=zone['high'], line_width=0, fillcolor="rgba(0,255,136,0.1)", row=1, col=1)
