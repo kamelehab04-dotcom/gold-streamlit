@@ -10,6 +10,12 @@ import requests
 import json
 import os
 
+# ==========================================
+# استيراد MT5 وملفات التداول الآلي
+# ==========================================
+from trading_engine import TradingEngine
+from config import MT5Config
+
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
@@ -42,6 +48,8 @@ st.markdown("""
     .status-open { color: #00ff88; }
     .status-closed { color: #ff4444; }
     .tbs-badge { display: inline-block; background: #ff880033; border: 1px solid #ff8800; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ff8800; font-weight: bold; }
+    .mt5-connected { color: #00ff88; }
+    .mt5-disconnected { color: #ff4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -51,7 +59,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + All Forex</div>
+    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + MT5 Auto Trading</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -110,6 +118,28 @@ PAIRS = {
     "BTC/USD (Bitcoin)": "BTC-USD",
     "ETH/USD (Ethereum)": "ETH-USD"
 }
+
+# ==========================================
+# تهيئة حالة الجلسة
+# ==========================================
+if "df" not in st.session_state:
+    st.session_state.df = None
+if "current_trade" not in st.session_state:
+    st.session_state.current_trade = None
+if "trades" not in st.session_state:
+    st.session_state.trades = []
+if "price_data" not in st.session_state:
+    st.session_state.price_data = None
+if "show_form" not in st.session_state:
+    st.session_state.show_form = False
+
+# MT5 Session State
+if "trading_engine" not in st.session_state:
+    st.session_state.trading_engine = None
+if "mt5_connected" not in st.session_state:
+    st.session_state.mt5_connected = False
+if "engine_running" not in st.session_state:
+    st.session_state.engine_running = False
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -367,7 +397,6 @@ def analyze_smc_ict(df):
             if df['close'].iloc[i] >= premium:
                 df.loc[df.index[i], 'in_premium'] = True
 
-    # TBS detection
     tbs_type, _, _, _ = detect_tbs(df)
     if tbs_type == "BULLISH":
         df.loc[df.index[-1], 'tbs_bullish'] = True
@@ -493,7 +522,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         'smc': 3, 'patterns': 4, 'tbs': 4
     }
 
-    # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -503,7 +531,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
-    # MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
             scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
@@ -512,7 +539,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD'] = "محايد"
 
-    # BB
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
             scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
@@ -521,14 +547,12 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['BB'] = "وسط النطاق"
 
-    # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
             scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
             scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
-    # ADX
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
@@ -538,7 +562,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
-    # Ichimoku
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
@@ -548,7 +571,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
-    # SMC/ICT
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
     elif last_smc.get('order_block_bearish', False):
@@ -572,7 +594,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
-    # Patterns
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
@@ -584,7 +605,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['Pattern'] = "لا توجد نماذج"
 
-    # TBS
     if tbs_type == "BULLISH":
         scores['BUY'] += weights['tbs']
         details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
@@ -611,7 +631,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     return signal, confidence, net_score, details, patterns, tbs_info
 
 # ==========================================
-# شرح القرار (مع TBS)
+# شرح القرار
 # ==========================================
 def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info):
     explanation = ""
@@ -672,7 +692,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات (مع الوقف المتحرك)
+# إدارة الصفقات (يدوية)
 # ==========================================
 class AdvancedTradeManager:
     def __init__(self):
@@ -753,6 +773,7 @@ class AdvancedTradeManager:
 # الواجهة الرئيسية
 # ==========================================
 
+# ===== الشريط الجانبي =====
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
     status, status_text, next_event, close_time = get_market_status()
@@ -764,12 +785,74 @@ with st.sidebar:
         st.markdown(f"🔴 **{status_text}**")
         st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
+    
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
     selected_symbol = PAIRS[selected_pair_name]
+    
+    st.markdown("---")
+    
+    # ===== قسم MT5 =====
+    st.markdown("### 🤖 التداول الآلي (MT5)")
+    
+    # عرض حالة MT5
+    if st.session_state.mt5_connected:
+        st.success("🟢 MT5 متصل")
+        if st.session_state.trading_engine:
+            engine = st.session_state.trading_engine
+            balance = engine.connector.get_account_balance()
+            free_margin = engine.connector.get_free_margin()
+            positions = engine.connector.get_positions()
+            col1, col2, col3 = st.columns(3)
+            col1.metric("💰 الرصيد", f"${balance:,.2f}")
+            col2.metric("🆓 الهامش", f"${free_margin:,.2f}")
+            col3.metric("📊 الصفقات", len(positions) if positions else 0)
+    else:
+        st.warning("🔴 MT5 غير متصل")
+    
+    # أزرار التحكم
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔗 اتصال MT5", use_container_width=True):
+            if not st.session_state.mt5_connected:
+                engine = TradingEngine()
+                if engine.start():
+                    st.session_state.trading_engine = engine
+                    st.session_state.mt5_connected = True
+                    st.session_state.engine_running = True
+                    st.success("✅ تم الاتصال بـ MT5")
+                    st.experimental_rerun()
+                else:
+                    st.error("❌ فشل الاتصال بـ MT5")
+            else:
+                st.info("ℹ️ MT5 متصل بالفعل")
+    
+    with col2:
+        if st.button("🔌 قطع الاتصال", use_container_width=True):
+            if st.session_state.trading_engine:
+                st.session_state.trading_engine.stop()
+            st.session_state.trading_engine = None
+            st.session_state.mt5_connected = False
+            st.session_state.engine_running = False
+            st.success("✅ تم قطع الاتصال")
+            st.experimental_rerun()
+    
+    # إغلاق جميع الصفقات
+    if st.session_state.mt5_connected:
+        if st.button("❌ إغلاق جميع الصفقات", use_container_width=True):
+            engine = st.session_state.trading_engine
+            if engine:
+                engine.close_all_positions()
+                st.success("✅ تم إغلاق جميع الصفقات")
+                st.experimental_rerun()
+    
+    st.markdown("---")
+    st.markdown("### 📋 إدارة الصفقات اليدوية")
+    if st.button("➕ صفقة جديدة", use_container_width=True):
+        st.session_state.show_form = not st.session_state.show_form
 
-# عرض البطاقات السريعة
+# ===== عرض البطاقات السريعة =====
 forex_data = get_all_forex()
 if forex_data:
     items = list(forex_data.items())[:7]
@@ -788,7 +871,7 @@ if forex_data:
 
 st.markdown("---")
 
-# جلب البيانات
+# ===== جلب البيانات =====
 current_price, change = get_spot_price(selected_symbol)
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 if df is None:
@@ -798,7 +881,7 @@ if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
 
-# حساب المؤشرات
+# ===== حساب المؤشرات =====
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['rsi'] = calc_rsi(df['close'])
@@ -810,11 +893,11 @@ df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
 df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 
-# توليد الإشارة المتكاملة (مع TBS)
+# ===== توليد الإشارة =====
 signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
-# عرض السعر
+# ===== عرض السعر =====
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
@@ -826,7 +909,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# مؤشرات السوق
+# ===== مؤشرات السوق =====
 st.markdown("### 📊 مؤشرات السوق")
 cols = st.columns(4)
 last = df.iloc[-1]
@@ -835,13 +918,13 @@ cols[1].metric("ATR", f"${last['atr']:.2f}")
 cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 
-# عرض النماذج الفنية
+# ===== عرض النماذج =====
 if patterns:
     st.markdown("#### 📐 النماذج المكتشفة")
     pattern_html = " ".join([f'<span class="pattern-badge">{p["pattern"]} ({p["direction"]})</span>' for p in patterns])
     st.markdown(pattern_html, unsafe_allow_html=True)
 
-# عرض TBS
+# ===== عرض TBS =====
 tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
 if tbs_type:
     st.markdown("#### 🐢 TBS (Turtle Body Soup) مكتشف!")
@@ -851,7 +934,7 @@ if tbs_type:
         st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
-# الإشارة
+# ===== الإشارة =====
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
@@ -865,13 +948,13 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# شرح القرار
+# ===== شرح القرار =====
 with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
-# الصفقة المقترحة
+# الصفقة المقترحة + تنفيذ MT5
 # ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60:
     st.markdown("---")
@@ -888,6 +971,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
         stop_loss = recent_high + (recent_high - recent_low) * 0.1
         take_profit = recent_low - (recent_high - recent_low) * 0.5
         direction_text = "بيع (SELL)"
+    
     st.markdown(f"""
     <div class="suggested-trade">
         <b>الاتجاه:</b> {direction_text}<br>
@@ -896,14 +980,15 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
         <b>جني الربح:</b> {price_format.format(take_profit)}
     </div>
     """, unsafe_allow_html=True)
-
+    
+    # ===== نموذج إضافة صفقة يدوية =====
     with st.form("suggested_trade_form"):
         st.write("إضافة هذه الصفقة مع تفعيل الوقف المتحرك؟")
         col1, col2 = st.columns(2)
         enable_trailing = col1.checkbox("تفعيل الوقف المتحرك", value=True)
         trail_distance = col2.number_input("مسافة التحرك (نقاط)", min_value=5, value=20, step=5)
         lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
-        submitted = st.form_submit_button("إضافة الصفقة")
+        submitted = st.form_submit_button("إضافة الصفقة (يدوي)")
         if submitted:
             trade_manager = AdvancedTradeManager()
             trade_data = {
@@ -919,12 +1004,50 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
             st.experimental_rerun()
+    
+    # ===== زر تنفيذ الصفقة على MT5 =====
+    st.markdown("---")
+    st.markdown("### 🤖 تنفيذ الصفقة آلياً على MT5")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🚀 تنفيذ الصفقة على MT5", use_container_width=True):
+            if not st.session_state.mt5_connected:
+                st.error("❌ يرجى الاتصال بـ MT5 أولاً (من الشريط الجانبي)")
+            else:
+                mt5_symbol = MT5Config.get_mt5_symbol(selected_symbol)
+                trade_data = {
+                    'symbol': selected_symbol,
+                    'direction': signal,
+                    'entry_price': entry,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'confidence': confidence,
+                    'signal_type': 'Pharaoh Signal'
+                }
+                engine = st.session_state.trading_engine
+                if engine and engine.execute_signal(trade_data):
+                    st.success(f"✅ تم تنفيذ الصفقة على {mt5_symbol}!")
+                else:
+                    st.error("❌ فشل تنفيذ الصفقة")
+    
+    with col2:
+        if st.button("📊 عرض الصفقات المفتوحة", use_container_width=True):
+            if st.session_state.mt5_connected:
+                engine = st.session_state.trading_engine
+                positions = engine.connector.get_positions_df()
+                if not positions.empty:
+                    st.dataframe(positions[['symbol', 'type', 'volume', 'price_open', 'price_current', 'profit']])
+                else:
+                    st.info("ℹ️ لا توجد صفقات مفتوحة")
+            else:
+                st.warning("⚠️ يرجى الاتصال بـ MT5 أولاً")
 
 # ==========================================
-# إدارة الصفقات
+# إدارة الصفقات اليدوية
 # ==========================================
 st.markdown("---")
-st.markdown("### 💼 إدارة الصفقات")
+st.markdown("### 💼 إدارة الصفقات اليدوية")
 trade_manager = AdvancedTradeManager()
 for trade in trade_manager.open_trades:
     if trade["status"] == "open" and trade["trailing_enabled"]:
@@ -965,6 +1088,35 @@ if trade_manager.closed_trades:
         st.metric("متوسط الربح", f"${avg_profit:.2f}")
 
 # ==========================================
+# نموذج إضافة صفقة يدوية
+# ==========================================
+if st.session_state.show_form:
+    with st.form("new_trade_form"):
+        st.subheader("➕ تفاصيل الصفقة")
+        direction = st.selectbox("الاتجاه", ["BUY", "SELL"])
+        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f")
+        stop = st.number_input("وقف الخسارة", value=float(current_price - 20), format="%.2f")
+        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970")
+        lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
+        submitted = st.form_submit_button("إضافة الصفقة")
+        if submitted and entry > 0 and stop > 0:
+            targets_list = [float(x.strip()) for x in targets_input.split(",") if x.strip()]
+            trade_data = {
+                "direction": direction,
+                "entry": entry,
+                "lots": lots,
+                "stop_loss": stop,
+                "take_profit": targets_list[0] if targets_list else entry + 40,
+                "trailing_enabled": False,
+                "trailing_distance": 0,
+                "notes": "تمت إضافتها يدوياً"
+            }
+            trade_id = trade_manager.add_trade(trade_data)
+            st.success(f"✅ تم إضافة الصفقة {trade_id}")
+            st.session_state.show_form = False
+            st.experimental_rerun()
+
+# ==========================================
 # الأخبار الاقتصادية والتقويم
 # ==========================================
 st.markdown("---")
@@ -1003,20 +1155,17 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=d
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
 
-# SMC annotations
 if df_smc['order_block_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
 if df_smc['order_block_bearish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
 
-# TBS Levels
 if tbs_type:
     fig.add_hline(y=tbs_level, line_dash="dot", line_color="orange", opacity=0.7, row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=tbs_level, text=f"TBS Old Level ({tbs_type})", showarrow=True, arrowhead=1, row=1, col=1)
     fig.add_hline(y=tbs_entry, line_dash="dash", line_color="yellow", opacity=0.5, row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=tbs_entry, text="TBS Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
-# RSI and MACD
 fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
@@ -1056,7 +1205,7 @@ if selected_symbol == "GC=F":
 # ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق<br>
-    تحديث لحظي | استراتيجية Turtle Body Soup مدمجة
+    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MT5 Auto Trading<br>
+    تحديث لحظي | استراتيجية Turtle Body Soup مدمجة | تداول آلي عبر MetaTrader 5
 </div>
 """, unsafe_allow_html=True)
