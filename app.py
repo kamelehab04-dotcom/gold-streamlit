@@ -44,6 +44,21 @@ st.markdown("""
     .tbs-badge { display: inline-block; background: #ff880033; border: 1px solid #ff8800; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ff8800; font-weight: bold; }
     .entry-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #00ff88; }
     .target-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
+    .refresh-btn { 
+        background: linear-gradient(135deg, #ffd700 0%, #ffaa00 100%);
+        color: #000;
+        font-weight: bold;
+        padding: 10px 20px;
+        border-radius: 10px;
+        border: none;
+        cursor: pointer;
+        width: 100%;
+        transition: transform 0.3s;
+    }
+    .refresh-btn:hover {
+        transform: scale(1.02);
+        box-shadow: 0 5px 15px rgba(255,215,0,0.3);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -130,6 +145,10 @@ if "daily_pnl" not in st.session_state:
     st.session_state.daily_pnl = 0
 if "daily_trades" not in st.session_state:
     st.session_state.daily_trades = 0
+if "last_update" not in st.session_state:
+    st.session_state.last_update = datetime.now()
+if "refresh_trigger" not in st.session_state:
+    st.session_state.refresh_trigger = False
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -1037,7 +1056,9 @@ df['mfi'] = calc_mfi(df)
 signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
-# عرض السعر
+# ==========================================
+# عرض السعر مع زر التحديث
+# ==========================================
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
@@ -1049,7 +1070,24 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ==========================================
+# زر تحديث البيانات
+# ==========================================
+col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
+with col_refresh2:
+    if st.button("🔄 تحديث البيانات", use_container_width=True):
+        st.session_state.refresh_trigger = not st.session_state.refresh_trigger
+        st.session_state.last_update = datetime.now()
+        st.cache_data.clear()
+        st.success("✅ تم تحديث البيانات بنجاح!")
+        st.rerun()
+
+# عرض وقت آخر تحديث
+st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+
+# ==========================================
 # عرض المؤشرات
+# ==========================================
 st.markdown("### 📊 مؤشرات السوق")
 cols = st.columns(5)
 last = df.iloc[-1]
