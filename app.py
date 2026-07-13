@@ -253,7 +253,7 @@ def get_economic_news():
     return []
 
 # ==========================================
-# المؤشرات الأساسية + MFI + فيبوناتشي
+# المؤشرات الأساسية
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -311,30 +311,6 @@ def calc_ichimoku(df):
 
 def calc_vwap(df):
     return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
-
-# ===== NEW: MFI =====
-def calc_mfi(df, period=14):
-    """حساب مؤشر التدفق النقدي (Money Flow Index)"""
-    typical_price = (df['high'] + df['low'] + df['close']) / 3
-    money_flow = typical_price * df['volume']
-    positive_flow = money_flow.where(typical_price > typical_price.shift(), 0).rolling(window=period).sum()
-    negative_flow = money_flow.where(typical_price < typical_price.shift(), 0).rolling(window=period).sum()
-    mfi = 100 - (100 / (1 + positive_flow / negative_flow))
-    return mfi
-
-# ===== NEW: Fibonacci =====
-def calc_fibonacci_levels(high, low, current_price):
-    """حساب مستويات فيبوناتشي بناءً على آخر موجة"""
-    diff = high - low
-    if diff == 0:
-        return {}
-    return {
-        'fib_236': high - diff * 0.236,
-        'fib_382': high - diff * 0.382,
-        'fib_500': high - diff * 0.5,
-        'fib_618': high - diff * 0.618,
-        'fib_786': high - diff * 0.786
-    }
 
 # ==========================================
 # تحليل SMC/ICT
@@ -511,7 +487,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل (مع MFI + Fibonacci + ATR Filter)
+# نظام التسجيل المتكامل (مع TBS)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -527,7 +503,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     details = {}
     weights = {
         'rsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3,
-        'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3  # NEW: MFI
+        'smc': 3, 'patterns': 4, 'tbs': 4
     }
 
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
@@ -622,32 +598,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['TBS'] = "لا توجد إشارة TBS"
 
-    # ===== NEW: MFI =====
-    if 'mfi' in df.columns and not pd.isna(last['mfi']):
-        mfi = last['mfi']
-        if mfi < 20:
-            scores['BUY'] += weights['mfi']
-            details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
-        elif mfi > 80:
-            scores['SELL'] += weights['mfi']
-            details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
-        else:
-            details['MFI'] = f"محايد ({mfi:.1f})"
-
-    # ===== NEW: Fibonacci =====
-    recent_high = df['high'].iloc[-50:].max()
-    recent_low = df['low'].iloc[-50:].min()
-    fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
-    if fib_levels:
-        if current_price > fib_levels.get('fib_618', current_price):
-            scores['BUY'] += 2
-            details['Fibonacci'] = f"فوق 0.618 +2 BUY"
-        elif current_price < fib_levels.get('fib_382', current_price):
-            scores['SELL'] += 2
-            details['Fibonacci'] = f"تحت 0.382 +2 SELL"
-        else:
-            details['Fibonacci'] = "منطقة وسط"
-
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     if net_score >= 5:
@@ -660,28 +610,19 @@ def generate_advanced_signal(df, current_price, symbol=""):
         signal = "WAIT"
         confidence = 50 + (net_score / total_weight) * 50
 
-    # ===== NEW: ATR Filter =====
-    if 'atr' in df.columns and len(df) > 50:
-        current_atr = last['atr']
-        avg_atr = df['atr'].iloc[-50:].mean()
-        if not pd.isna(current_atr) and not pd.isna(avg_atr):
-            if current_atr < avg_atr * 0.7:
-                confidence = confidence * 0.6
-                details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة)"
-
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     return signal, confidence, net_score, details, patterns, tbs_info
 
 # ==========================================
-# شرح القرار (مع Fibonacci)
+# شرح القرار
 # ==========================================
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price):
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info):
     explanation = ""
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي"]):
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
@@ -707,19 +648,6 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         explanation += f"   - المستوى القديم المُختَرق: {tbs_level:.4f}\n"
         explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
         explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
-
-    # ===== NEW: Fibonacci levels in explanation =====
-    recent_high = df['high'].iloc[-50:].max()
-    recent_low = df['low'].iloc[-50:].min()
-    fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
-    if fib_levels:
-        explanation += "\n\n📊 **مستويات فيبوناتشي:**\n"
-        explanation += f"   - 0.236: {fib_levels['fib_236']:.4f}\n"
-        explanation += f"   - 0.382: {fib_levels['fib_382']:.4f}\n"
-        explanation += f"   - 0.500: {fib_levels['fib_500']:.4f}\n"
-        explanation += f"   - 0.618: {fib_levels['fib_618']:.4f}\n"
-        explanation += f"   - 0.786: {fib_levels['fib_786']:.4f}\n"
-
     return explanation
 
 # ==========================================
@@ -893,9 +821,6 @@ df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
 df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 
-# ===== NEW: Calculate MFI and Fibonacci =====
-df['mfi'] = calc_mfi(df)
-
 # توليد الإشارة
 signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
@@ -912,15 +837,14 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ===== NEW: عرض المؤشرات (5 أعمدة) =====
+# مؤشرات السوق
 st.markdown("### 📊 مؤشرات السوق")
-cols = st.columns(5)  # تغيرت من 4 إلى 5
+cols = st.columns(4)
 last = df.iloc[-1]
 cols[0].metric("RSI", f"{last['rsi']:.1f}")
 cols[1].metric("ATR", f"${last['atr']:.2f}")
 cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
-cols[4].metric("MFI", f"{last['mfi']:.1f}")  # NEW
 
 # عرض النماذج
 if patterns:
@@ -952,9 +876,9 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# شرح القرار (مع Fibonacci)
+# شرح القرار
 with st.expander("📝 شرح القرار", expanded=True):
-    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price)
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
@@ -1005,7 +929,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             }
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
-            st.rerun()
+            st.rerun()  # استخدم st.rerun بدلاً من experimental_rerun
 
 # ==========================================
 # إدارة الصفقات اليدوية
@@ -1151,7 +1075,7 @@ if selected_symbol == "GC=F":
     df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
     if df_dxy is not None and not df_dxy.empty:
         df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
-        df_dxy_aligned = df_dxy_aligned.ffill()
+        df_dxy_aligned = df_dxy_aligned.ffill()  # بدلاً من fillna(method='ffill')
         fig_corr = make_subplots(specs=[[{"secondary_y": True}]])
         fig_corr.add_trace(go.Scatter(x=df.index, y=df['close'], name='XAU/USD', line=dict(color='gold')), secondary_y=False)
         fig_corr.add_trace(go.Scatter(x=df_dxy_aligned.index, y=df_dxy_aligned['close'], name='DXY', line=dict(color='cyan')), secondary_y=True)
@@ -1170,7 +1094,7 @@ if selected_symbol == "GC=F":
 # ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي<br>
+    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق<br>
     تحديث لحظي | استراتيجية Turtle Body Soup مدمجة
 </div>
 """, unsafe_allow_html=True)
