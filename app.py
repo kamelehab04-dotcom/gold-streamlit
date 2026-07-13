@@ -13,18 +13,6 @@ import os
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
-# معالجة النقر على بطاقات العملات من الرابط
-# ==========================================
-query_params = st.query_params
-if "pair" in query_params:
-    pair_name = query_params["pair"]
-    for full_name, symbol in PAIRS.items():
-        if pair_name in full_name or (pair_name == "DXY" and "DXY" in full_name):
-            st.session_state.selected_pair = full_name
-            st.session_state.selected_symbol = symbol
-            break
-
-# ==========================================
 # CSS للتنسيق
 # ==========================================
 st.markdown("""
@@ -39,16 +27,6 @@ st.markdown("""
     .signal-text { font-size: 2.5rem; font-weight: bold; }
     .signal-confidence { font-size: 1rem; color: #aaa; }
     .explanation-box { background: #1a1a2e; border-radius: 10px; padding: 15px; margin: 10px 0; border: 1px solid #ffd70033; text-align: left; white-space: pre-wrap; }
-    .currency-card { background: #1a1a2e; border-radius: 10px; padding: 12px 15px; text-align: center; border: 1px solid #ffd70033; transition: all 0.3s; min-width: 110px; flex-shrink: 0; }
-    .currency-card:hover { transform: translateY(-5px); border-color: #ffd700; box-shadow: 0 5px 20px rgba(255,215,0,0.2); }
-    .currency-card.active { border-color: #ffd700; background: linear-gradient(135deg, #ffd70020 0%, #ffaa0020 100%); }
-    .currency-symbol { font-size: 0.8rem; color: #888; }
-    .currency-price { font-size: 1.2rem; font-weight: bold; color: #fff; }
-    .currency-change { font-size: 0.9rem; }
-    .currency-scroll { display: flex; overflow-x: auto; gap: 12px; padding: 10px 0; scrollbar-width: thin; scrollbar-color: #ffd700 #1a1a2e; -webkit-overflow-scrolling: touch; }
-    .currency-scroll::-webkit-scrollbar { height: 6px; }
-    .currency-scroll::-webkit-scrollbar-track { background: #1a1a2e; border-radius: 10px; }
-    .currency-scroll::-webkit-scrollbar-thumb { background: #ffd700; border-radius: 10px; }
     .trade-row { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
     .footer { text-align: center; padding: 15px; color: #666; font-size: 0.8rem; border-top: 1px solid #333; margin-top: 30px; }
     .stButton button { background: #ffd700; color: #000; font-weight: bold; border-radius: 10px; width: 100%; }
@@ -65,7 +43,7 @@ st.markdown("""
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
     .refresh-btn { background: linear-gradient(135deg, #ffd700 0%, #ffaa00 100%); color: #000; font-weight: bold; padding: 10px 20px; border-radius: 10px; border: none; cursor: pointer; width: 100%; transition: transform 0.3s; }
     .refresh-btn:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(255,215,0,0.3); }
-    a { text-decoration: none; }
+    .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -75,7 +53,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + Smart Entry Zones + Advanced Stop Loss</div>
+    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + Smart Entry + Reversal Detection</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -156,10 +134,6 @@ if "last_update" not in st.session_state:
     st.session_state.last_update = datetime.now()
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
-if "selected_pair" not in st.session_state:
-    st.session_state.selected_pair = "XAU/USD (Gold)"
-if "selected_symbol" not in st.session_state:
-    st.session_state.selected_symbol = "GC=F"
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -373,7 +347,7 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# نظام تخطيط الصفقات الذكي مع وقف متطور
+# نظام تخطيط الصفقات الذكي مع استوب دقيق جداً
 # ==========================================
 class SmartTradePlanner:
     def __init__(self, df, current_price, atr_value):
@@ -385,7 +359,7 @@ class SmartTradePlanner:
         self.fib = calc_fibonacci_levels(self.recent_high, self.recent_low, current_price)
         self.direction = self._determine_direction()
         
-        # مستويات الدعم والمقاومة المتقدمة
+        # مستويات الدعم والمقاومة القريبة
         self.support_levels = self._find_support_resistance()
         self.order_blocks = self._find_order_blocks()
     
@@ -400,48 +374,43 @@ class SmartTradePlanner:
         return "NEUTRAL"
     
     def _find_support_resistance(self):
-        """استخراج مستويات الدعم والمقاومة الرئيسية"""
+        """استخراج أقرب مستويات الدعم والمقاومة"""
         highs = self.df['high'].iloc[-100:].values
         lows = self.df['low'].iloc[-100:].values
         
-        # قمم محلية (مقاومة)
         resistance = []
         for i in range(5, len(highs)-5):
-            if highs[i] > highs[i-1] and highs[i] > highs[i+1] and highs[i] > highs[i-2] and highs[i] > highs[i+2]:
+            if highs[i] > highs[i-1] and highs[i] > highs[i+1]:
                 resistance.append(highs[i])
         
-        # قيعان محلية (دعم)
         support = []
         for i in range(5, len(lows)-5):
-            if lows[i] < lows[i-1] and lows[i] < lows[i+1] and lows[i] < lows[i-2] and lows[i] < lows[i+2]:
+            if lows[i] < lows[i-1] and lows[i] < lows[i+1]:
                 support.append(lows[i])
         
-        # أقرب الدعم والمقاومة للسعر الحالي
-        nearest_support = max([s for s in support if s < self.current_price], default=self.current_price - self.atr * 2)
-        nearest_resistance = min([r for r in resistance if r > self.current_price], default=self.current_price + self.atr * 2)
+        nearest_support = max([s for s in support if s < self.current_price], default=self.current_price - self.atr * 0.5)
+        nearest_resistance = min([r for r in resistance if r > self.current_price], default=self.current_price + self.atr * 0.5)
         
         return {
-            'support': sorted(support, reverse=True)[:3] if support else [self.current_price - self.atr * 2],
-            'resistance': sorted(resistance)[:3] if resistance else [self.current_price + self.atr * 2],
             'nearest_support': nearest_support,
             'nearest_resistance': nearest_resistance
         }
     
     def _find_order_blocks(self):
-        """استخراج كتل الأوامر (SMC)"""
+        """استخراج كتل الأوامر القريبة"""
         blocks = []
-        for i in range(5, len(self.df)-1):
+        for i in range(3, len(self.df)-1):
             if self.df['close'].iloc[i] > self.df['open'].iloc[i]:
                 body = self.df['close'].iloc[i] - self.df['open'].iloc[i]
-                avg_range = (self.df['high'].iloc[i-5:i].max() - self.df['low'].iloc[i-5:i].min()) / 3
+                avg_range = (self.df['high'].iloc[i-3:i].max() - self.df['low'].iloc[i-3:i].min()) / 3
                 if body > avg_range and self.df['close'].iloc[i-1] < self.df['open'].iloc[i-1]:
                     blocks.append(('bullish', self.df['low'].iloc[i-1], self.df['high'].iloc[i-1]))
             if self.df['close'].iloc[i] < self.df['open'].iloc[i]:
                 body = self.df['open'].iloc[i] - self.df['close'].iloc[i]
-                avg_range = (self.df['high'].iloc[i-5:i].max() - self.df['low'].iloc[i-5:i].min()) / 3
+                avg_range = (self.df['high'].iloc[i-3:i].max() - self.df['low'].iloc[i-3:i].min()) / 3
                 if body > avg_range and self.df['close'].iloc[i-1] > self.df['open'].iloc[i-1]:
                     blocks.append(('bearish', self.df['low'].iloc[i-1], self.df['high'].iloc[i-1]))
-        return blocks[-5:] if blocks else []
+        return blocks[-3:] if blocks else []
     
     def get_entry_zones(self):
         if self.direction == "NEUTRAL":
@@ -452,8 +421,8 @@ class SmartTradePlanner:
         if self.direction == "BUY":
             fib_382 = self.fib.get('fib_382', self.current_price)
             fib_500 = self.fib.get('fib_500', self.current_price)
-            zone1_low = min(fib_382, fib_500) - self.atr * 0.3
-            zone1_high = max(fib_382, fib_500) + self.atr * 0.3
+            zone1_low = min(fib_382, fib_500) - self.atr * 0.2
+            zone1_high = max(fib_382, fib_500) + self.atr * 0.2
             entry_zones['zone1'] = {
                 'type': 'Pullback',
                 'low': zone1_low,
@@ -462,7 +431,7 @@ class SmartTradePlanner:
             }
             recent_peak = self.recent_high
             zone2_low = recent_peak
-            zone2_high = recent_peak + self.atr * 0.5
+            zone2_high = recent_peak + self.atr * 0.3
             entry_zones['zone2'] = {
                 'type': 'Breakout',
                 'low': zone2_low,
@@ -472,8 +441,8 @@ class SmartTradePlanner:
         else:
             fib_500 = self.fib.get('fib_500', self.current_price)
             fib_618 = self.fib.get('fib_618', self.current_price)
-            zone1_low = min(fib_500, fib_618) - self.atr * 0.3
-            zone1_high = max(fib_500, fib_618) + self.atr * 0.3
+            zone1_low = min(fib_500, fib_618) - self.atr * 0.2
+            zone1_high = max(fib_500, fib_618) + self.atr * 0.2
             entry_zones['zone1'] = {
                 'type': 'Pullback',
                 'low': zone1_low,
@@ -481,7 +450,7 @@ class SmartTradePlanner:
                 'description': f"التصحيح إلى فيبوناتشي 0.5-0.618"
             }
             recent_trough = self.recent_low
-            zone2_low = recent_trough - self.atr * 0.5
+            zone2_low = recent_trough - self.atr * 0.3
             zone2_high = recent_trough
             entry_zones['zone2'] = {
                 'type': 'Breakout',
@@ -492,49 +461,56 @@ class SmartTradePlanner:
         
         return entry_zones, self.direction
     
-    # ===== STOP LOSS المتطور =====
-    def get_advanced_stop_loss(self, entry_price, direction):
+    # ===== STOP LOSS دقيق جداً =====
+    def get_precise_stop_loss(self, entry_price, direction):
         """
-        حساب وقف الخسارة المتطور يجمع بين:
-        1. ATR (المدى الحقيقي)
-        2. أقرب دعم/مقاومة
-        3. كتل الأوامر (Order Blocks)
+        حساب وقف الخسارة بدقة شديدة:
+        - للشراء: أسفل أقرب قاع محلي أو أسفل كتلة أوامر شراء
+        - للبيع: أعلى أقرب قمة محلية أو أعلى كتلة أوامر بيع
         """
-        # 1. وقف أساسي = ATR × 1.5
-        base_stop = self.atr * 1.5
-        
         if direction == "BUY":
+            # أقرب قاع محلي (آخر 20 شمعة)
+            recent_low = self.df['low'].iloc[-20:].min()
+            
+            # أقل نقطة في كتل الأوامر الصاعدة القريبة
+            ob_low = min([block[1] for block in self.order_blocks if block[0] == 'bullish'], default=entry_price - self.atr * 0.5)
+            
             # أقرب دعم
             nearest_support = self.support_levels['nearest_support']
-            # أقل نقطة في كتل الأوامر الصاعدة
-            ob_low = min([block[1] for block in self.order_blocks if block[0] == 'bullish'], default=entry_price - base_stop)
             
-            # اختيار أكثر المستويات أماناً (الأبعد عن السعر) مع مراعاة ATR
-            stop_candidates = [entry_price - base_stop, nearest_support, ob_low]
-            sl = min(stop_candidates)  # أبعد وقف (الأكثر أماناً)
+            # اختيار الأقرب للسعر (الأكثر دقة) مع مراعاة ATR*0.8 كحد أدنى
+            candidates = [recent_low, ob_low, nearest_support]
+            # نختار القيمة الأقرب للسعر (الأكثر دقة) ولكن لا تقل عن ATR*0.3
+            sl = max([c for c in candidates if c < entry_price], default=entry_price - self.atr * 0.5)
             
-            # لكن لا نضع الوقف أبعد من ATR × 2.5
-            max_stop = entry_price - self.atr * 2.5
-            sl = max(sl, max_stop)
+            # التأكد من أن الاستوب ليس أبعد من ATR*1.2
+            max_sl = entry_price - self.atr * 1.2
+            sl = max(sl, max_sl)
             
-            # إضافة عامل الأمان: إذا كان الدعم قريباً جداً، نضيف ATR*0.3
-            if entry_price - nearest_support < self.atr * 0.5:
-                sl = sl - self.atr * 0.2
+            # التأكد من أن الاستوب ليس أقرب من ATR*0.2
+            min_sl = entry_price - self.atr * 0.2
+            sl = min(sl, min_sl)
             
             return sl
             
         else:  # SELL
+            # أقرب قمة محلية (آخر 20 شمعة)
+            recent_high = self.df['high'].iloc[-20:].max()
+            
+            # أعلى نقطة في كتل الأوامر البيعية القريبة
+            ob_high = max([block[2] for block in self.order_blocks if block[0] == 'bearish'], default=entry_price + self.atr * 0.5)
+            
+            # أقرب مقاومة
             nearest_resistance = self.support_levels['nearest_resistance']
-            ob_high = max([block[2] for block in self.order_blocks if block[0] == 'bearish'], default=entry_price + base_stop)
             
-            stop_candidates = [entry_price + base_stop, nearest_resistance, ob_high]
-            sl = max(stop_candidates)  # أبعد وقف (الأكثر أماناً)
+            candidates = [recent_high, ob_high, nearest_resistance]
+            sl = min([c for c in candidates if c > entry_price], default=entry_price + self.atr * 0.5)
             
-            max_stop = entry_price + self.atr * 2.5
-            sl = min(sl, max_stop)
+            max_sl = entry_price + self.atr * 1.2
+            sl = min(sl, max_sl)
             
-            if nearest_resistance - entry_price < self.atr * 0.5:
-                sl = sl + self.atr * 0.2
+            min_sl = entry_price + self.atr * 0.2
+            sl = max(sl, min_sl)
             
             return sl
     
@@ -557,6 +533,79 @@ class SmartTradePlanner:
             'risk_reward_3': 2.0,
             'risk': risk
         }
+
+# ==========================================
+# 🔄 خاصية اكتشاف الانعكاسات (Reversal Detection)
+# ==========================================
+def detect_reversal(df, trade):
+    """
+    كشف إشارات الانعكاس للخروج من الصفقة
+    تعتمد على:
+    1. RSI (خروج من مناطق التشبع)
+    2. MACD (تقاطع عكسي)
+    3. نماذج الشموع الانعكاسية
+    4. كسر مستويات الدعم/المقاومة
+    """
+    if df is None or len(df) < 20:
+        return False, "بيانات غير كافية"
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    direction = trade["direction"]
+    entry = trade["entry"]
+    current_price = last['close']
+
+    signals = []
+    
+    # 1. RSI Reversal
+    if 'rsi' in df.columns and not pd.isna(last['rsi']):
+        rsi = last['rsi']
+        if direction == "BUY":
+            if rsi > 70:
+                signals.append("RSI فوق 70 (تشبع شرائي)")
+            elif rsi < 30 and current_price < entry:
+                signals.append("RSI تحت 30 مع هبوط (ضعف)")
+        else:  # SELL
+            if rsi < 30:
+                signals.append("RSI تحت 30 (تشبع بيعي)")
+            elif rsi > 70 and current_price > entry:
+                signals.append("RSI فوق 70 مع صعود (ضعف)")
+
+    # 2. MACD Reversal
+    if 'macd' in df.columns and 'macd_signal' in df.columns:
+        if direction == "BUY":
+            if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
+                signals.append("MACD تقاطع هابط (انعكاس)")
+        else:
+            if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
+                signals.append("MACD تقاطع صاعد (انعكاس)")
+
+    # 3. Price Rejection (شمعة انعكاسية)
+    candle_range = abs(last['high'] - last['low'])
+    if candle_range > 0:
+        if direction == "BUY":
+            upper_wick = last['high'] - max(last['close'], last['open'])
+            if upper_wick > candle_range * 0.5:
+                signals.append("شمعة انعكاس هابط (ذيل علوي طويل)")
+        else:
+            lower_wick = min(last['close'], last['open']) - last['low']
+            if lower_wick > candle_range * 0.5:
+                signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
+
+    # 4. Break of structure (BOS)
+    if direction == "BUY":
+        # كسر أقرب دعم (آخر 10 شموع)
+        recent_low = df['low'].iloc[-10:].min()
+        if current_price < recent_low:
+            signals.append(f"كسر الدعم القريب ({recent_low:.4f})")
+    else:
+        recent_high = df['high'].iloc[-10:].max()
+        if current_price > recent_high:
+            signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
+
+    if signals:
+        return True, " | ".join(signals)
+    return False, ""
 
 # ==========================================
 # تحليل SMC/ICT
@@ -991,7 +1040,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات مع وقف متحرك ذكي
+# إدارة الصفقات مع كشف الانعكاسات
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -1024,7 +1073,7 @@ class TradeManager:
             "highest_price": trade_data["entry"],
             "lowest_price": trade_data["entry"],
             "status": "open",
-            "stage": 0,  # 0=بداية, 1=نقطة تعادل, 2=وقف متحرك
+            "stage": 0,
             "notes": trade_data.get("notes", "")
         }
         self.open_trades.append(trade)
@@ -1032,13 +1081,6 @@ class TradeManager:
         return trade_id
     
     def update_trailing_stop_smart(self, trade_id, current_price, atr_value):
-        """
-        وقف متحرك ذكي بثلاث مراحل:
-        - المرحلة 0: وقف ثابت (بداية)
-        - المرحلة 1: عند تحقيق 1:1 → نقل إلى نقطة التعادل
-        - المرحلة 2: عند تحقيق 1:1.5 → تفعيل الوقف المتحرك
-        - المرحلة 3: عند تحقيق 1:2 → وقف متحرك محكم
-        """
         for trade in self.open_trades:
             if trade["id"] != trade_id or trade["status"] != "open":
                 continue
@@ -1048,11 +1090,9 @@ class TradeManager:
             sl_initial = trade["stop_loss"]
             risk = abs(entry - sl_initial)
             
-            # حساب الربح الحالي
             if direction == "BUY":
                 profit = current_price - entry
                 profit_ratio = profit / risk if risk > 0 else 0
-                # تحديث أعلى سعر
                 if current_price > trade["highest_price"]:
                     trade["highest_price"] = current_price
                 highest = trade["highest_price"]
@@ -1063,30 +1103,24 @@ class TradeManager:
                     trade["lowest_price"] = current_price
                 lowest = trade["lowest_price"]
             
-            # المرحلة 1: إذا وصل الربح إلى 1:1 → نقل إلى نقطة التعادل
             if profit_ratio >= 1.0 and trade["stage"] < 1:
                 trade["stop_loss"] = entry
                 trade["stage"] = 1
                 self.save_trades()
                 return f"✅ تم نقل الوقف إلى نقطة التعادل ({entry:.2f})"
             
-            # المرحلة 2: إذا وصل الربح إلى 1:1.5 → تفعيل الوقف المتحرك
             if profit_ratio >= 1.5 and trade["stage"] < 2 and trade["trailing_enabled"]:
                 trail_distance = trade["trailing_distance"]
                 if direction == "BUY":
                     new_sl = highest - trail_distance
                 else:
                     new_sl = lowest + trail_distance
-                
-                # التأكد من أن الوقف الجديد أفضل من الحالي
-                if (direction == "BUY" and new_sl > trade["stop_loss"]) or \
-                   (direction == "SELL" and new_sl < trade["stop_loss"]):
+                if (direction == "BUY" and new_sl > trade["stop_loss"]) or (direction == "SELL" and new_sl < trade["stop_loss"]):
                     trade["stop_loss"] = new_sl
                     trade["stage"] = 2
                     self.save_trades()
                     return f"✅ تم تفعيل الوقف المتحرك ({new_sl:.2f})"
             
-            # المرحلة 3: تحديث الوقف المتحرك باستمرار (إذا كان مفعّلاً والمرحلة ≥ 2)
             if trade["stage"] >= 2 and trade["trailing_enabled"]:
                 trail_distance = trade["trailing_distance"]
                 if direction == "BUY":
@@ -1101,7 +1135,6 @@ class TradeManager:
                         trade["stop_loss"] = new_sl
                         self.save_trades()
                         return f"🔄 تم تحديث الوقف المتحرك إلى {new_sl:.2f}"
-            
             return None
     
     def close_trade(self, trade_id, exit_price):
@@ -1140,75 +1173,35 @@ with st.sidebar:
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
-    
-    # استخدام session_state للحفاظ على الاختيار
-    selected_pair_name = st.selectbox(
-        "اختر الزوج للتحليل المتقدم",
-        list(PAIRS.keys()),
-        index=list(PAIRS.keys()).index(st.session_state.selected_pair)
-    )
-    st.session_state.selected_pair = selected_pair_name
-    st.session_state.selected_symbol = PAIRS[selected_pair_name]
-    selected_symbol = st.session_state.selected_symbol
-    
+    selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
+    selected_symbol = PAIRS[selected_pair_name]
     st.markdown("---")
     st.markdown("### 📋 إدارة الصفقات اليدوية")
     if st.button("➕ صفقة جديدة", use_container_width=True):
         st.session_state.show_form = not st.session_state.show_form
         st.rerun()
 
-# ==========================================
-# بطاقات العملات المتداولة (مع تمرير أفقي)
-# ==========================================
-st.markdown("### 💱 العملات الرئيسية")
-st.markdown("*(اضغط على أي بطاقة للانتقال إلى تحليلها)*")
-
-# جلب بيانات العملات
+# عرض العملات السريعة (بطاقات بسيطة)
 forex_data = get_all_forex()
+if forex_data:
+    st.markdown("### 💱 نظرة سريعة على العملات")
+    cols = st.columns(len(forex_data))
+    for i, (name, data) in enumerate(forex_data.items()):
+        if data['price'] > 0:
+            color = "#00ff88" if data['change'] >= 0 else "#ff4444"
+            if 'USD' in name:
+                price_str = f"{data['price']:.4f}"
+            else:
+                price_str = f"{data['price']:.2f}"
+            cols[i].markdown(f"""
+            <div style="background: #1a1a2e; border-radius: 10px; padding: 10px; text-align: center; border: 1px solid #ffd70033;">
+                <div style="font-size: 0.8rem; color: #888;">{name}</div>
+                <div style="font-size: 1.2rem; font-weight: bold; color: #fff;">{price_str}</div>
+                <div style="font-size: 0.9rem; color: {color};">{data['change']:+.2f}%</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-# إنشاء HTML مع تمرير أفقي
-cards_html = """
-<div class="currency-scroll">
-"""
-
-for name, data in forex_data.items():
-    if data['price'] <= 0:
-        continue
-    
-    color = "#00ff88" if data['change'] >= 0 else "#ff4444"
-    if 'USD' in name:
-        price_str = f"{data['price']:.4f}"
-    else:
-        price_str = f"{data['price']:.2f}"
-    
-    # تحديد ما إذا كانت هذه البطاقة هي المختارة حالياً
-    is_active = st.session_state.selected_pair.startswith(name.replace("USD", "/USD")) or \
-               (name == "DXY" and st.session_state.selected_pair == "DXY (Dollar Index)")
-    
-    active_class = "active" if is_active else ""
-    
-    # إنشاء بطاقة قابلة للنقر (ترسل طلب GET مع parameter)
-    cards_html += f"""
-    <a href="?pair={name}" style="text-decoration: none; flex-shrink: 0;">
-        <div class="currency-card {active_class}">
-            <div style="font-size: 0.8rem; color: #888;">{name}</div>
-            <div style="font-size: 1.2rem; font-weight: bold; color: #fff;">{price_str}</div>
-            <div style="font-size: 0.9rem; color: {color};">{data['change']:+.2f}%</div>
-        </div>
-    </a>
-    """
-
-cards_html += "</div>"
-
-# عرض البطاقات
-st.markdown(cards_html, unsafe_allow_html=True)
 st.markdown("---")
-
-# ==========================================
-# استخدام الزوج المختار
-# ==========================================
-selected_pair_name = st.session_state.selected_pair
-selected_symbol = st.session_state.selected_symbol
 
 # جلب البيانات
 current_price, change = get_spot_price(selected_symbol)
@@ -1241,9 +1234,7 @@ df['mfi'] = calc_mfi(df)
 signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
-# ==========================================
 # عرض السعر مع زر التحديث
-# ==========================================
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
@@ -1255,9 +1246,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
 # زر تحديث البيانات
-# ==========================================
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
     if st.button("🔄 تحديث البيانات", use_container_width=True):
@@ -1269,9 +1258,7 @@ with col_refresh2:
 
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ==========================================
 # عرض المؤشرات
-# ==========================================
 st.markdown("### 📊 مؤشرات السوق")
 cols = st.columns(5)
 last = df.iloc[-1]
@@ -1282,10 +1269,10 @@ cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
 # ==========================================
-# عرض مناطق الدخول والأهداف مع وقف متطور
+# عرض مناطق الدخول مع استوب دقيق
 # ==========================================
 st.markdown("---")
-st.markdown("### 🎯 مناطق الدخول والأهداف اليومية")
+st.markdown("### 🎯 مناطق الدخول والأهداف (استوب دقيق)")
 
 atr_value = last['atr'] if not pd.isna(last['atr']) else 10
 planner = SmartTradePlanner(df, current_price, atr_value)
@@ -1306,24 +1293,23 @@ if entry_zones and direction != "NEUTRAL":
             </div>
             """, unsafe_allow_html=True)
     
-    # تحديد سعر الدخول
     if direction == "BUY":
         entry_price = (entry_zones['zone1']['low'] + entry_zones['zone1']['high']) / 2
     else:
         entry_price = (entry_zones['zone1']['low'] + entry_zones['zone1']['high']) / 2
     
-    # ===== STOP LOSS المتطور =====
-    stop_loss = planner.get_advanced_stop_loss(entry_price, direction)
+    # ===== STOP LOSS دقيق جداً =====
+    stop_loss = planner.get_precise_stop_loss(entry_price, direction)
     targets = planner.get_daily_targets(entry_price, stop_loss, direction)
     
     with col2:
-        st.markdown("#### 🛑 وقف الخسارة المتطور")
+        st.markdown("#### 🛑 وقف الخسارة (دقيق)")
         st.markdown(f"""
         <div class="stop-loss-level">
             <b>Stop Loss</b><br>
             {price_format.format(stop_loss)}
             <br><span style="color:#aaa;">
-                (ATR: {atr_value:.2f} | دعم/مقاومة + SMC)
+                (المسافة: {abs(entry_price - stop_loss):.2f} نقطة | قريب جداً)
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -1332,15 +1318,15 @@ if entry_zones and direction != "NEUTRAL":
         st.markdown(f"""
         <div class="target-zone">
             <b>🎯 الهدف 1 (1:1)</b> → {price_format.format(targets['target1'])}
-            <br><span style="color:#aaa;">نقل الوقف إلى نقطة التعادل عند الوصول</span>
+            <br><span style="color:#aaa;">نقل الوقف إلى نقطة التعادل</span>
         </div>
         <div class="target-zone" style="border-left-color: #ffaa00;">
             <b>🎯 الهدف 2 (1:1.5)</b> → {price_format.format(targets['target2'])}
-            <br><span style="color:#aaa;">تفعيل الوقف المتحرك عند الوصول</span>
+            <br><span style="color:#aaa;">تفعيل الوقف المتحرك</span>
         </div>
         <div class="target-zone" style="border-left-color: #00ff88;">
             <b>🎯 الهدف 3 (1:2)</b> → {price_format.format(targets['target3'])}
-            <br><span style="color:#aaa;">وقف متحرك محكم لتأمين الأرباح</span>
+            <br><span style="color:#aaa;">وقف محكم لتأمين الأرباح</span>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1369,7 +1355,7 @@ if entry_zones and direction != "NEUTRAL":
     col2.metric("📉 الخسارة اليومية القصوى", f"${max_daily_loss:,.0f} ({max_daily_loss_pct}%)")
     col3.metric("📊 حجم اللوت الموصى به", f"{lot_size:.2f}")
     
-    if st.button("➕ إضافة هذه الصفقة المقترحة (مع وقف متطور)", use_container_width=True):
+    if st.button("➕ إضافة هذه الصفقة المقترحة (استوب دقيق)", use_container_width=True):
         trade_manager = TradeManager()
         trade_data = {
             "direction": direction,
@@ -1378,8 +1364,8 @@ if entry_zones and direction != "NEUTRAL":
             "stop_loss": stop_loss,
             "take_profit": targets['target2'],
             "trailing_enabled": True,
-            "trailing_distance": atr_value * 0.5,
-            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%) | وقف متطور (ATR+SR+SMC)"
+            "trailing_distance": atr_value * 0.3,
+            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%) | استوب دقيق جداً"
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
@@ -1433,12 +1419,12 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
     recent_low = df['low'].iloc[-20:].min()
     if signal == "BUY":
         entry = current_price
-        stop_loss = recent_low - (recent_high - recent_low) * 0.1
+        stop_loss = recent_low - (recent_high - recent_low) * 0.05
         take_profit = recent_high + (recent_high - recent_low) * 0.5
         direction_text = "شراء (BUY)"
     else:
         entry = current_price
-        stop_loss = recent_high + (recent_high - recent_low) * 0.1
+        stop_loss = recent_high + (recent_high - recent_low) * 0.05
         take_profit = recent_low - (recent_high - recent_low) * 0.5
         direction_text = "بيع (SELL)"
     st.markdown(f"""
@@ -1474,23 +1460,41 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             st.rerun()
 
 # ==========================================
-# إدارة الصفقات
+# إدارة الصفقات + كشف الانعكاسات
 # ==========================================
 st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
 trade_manager = TradeManager()
 
 # تحديث الوقف المتحرك الذكي
+reversal_messages = []
 for trade in trade_manager.open_trades:
     if trade["status"] == "open":
+        # كشف الانعكاسات
+        is_reversal, reversal_msg = detect_reversal(df, trade)
+        if is_reversal:
+            reversal_messages.append(f"⚠️ الصفقة {trade['id']}: {reversal_msg}")
+        
+        # تحديث الوقف المتحرك
         result = trade_manager.update_trailing_stop_smart(trade["id"], current_price, atr_value)
         if result:
             st.success(result)
 
+# عرض تنبيهات الانعكاس
+if reversal_messages:
+    st.markdown("---")
+    st.markdown("### 🔄 تنبيهات الانعكاس")
+    for msg in reversal_messages:
+        st.markdown(f"""
+        <div class="reversal-alert">
+            {msg}
+            <br><span style="color:#aaa; font-size:0.8rem;">يُنصح بمراجعة الصفقة أو إغلاقها</span>
+        </div>
+        """, unsafe_allow_html=True)
+
 if trade_manager.open_trades:
     st.write("**الصفقات المفتوحة:**")
     for trade in trade_manager.open_trades:
-        # حساب مرحلة الصفقة
         if trade["stage"] == 0:
             stage_text = "🟡 وقف ثابت"
         elif trade["stage"] == 1:
@@ -1505,15 +1509,21 @@ if trade_manager.open_trades:
             <br><span style="color:#aaa;">المرحلة: {stage_text} {" | 🔄 وقف متحرك مفعّل" if trade['trailing_enabled'] else ""}</span>
         </div>
         """, unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        if col1.button(f"🔄 تحديث الوقف المتحرك {trade['id']}", key=f"update_{trade['id']}"):
+        col1, col2, col3 = st.columns(3)
+        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_{trade['id']}"):
             result = trade_manager.update_trailing_stop_smart(trade["id"], current_price, atr_value)
             if result:
                 st.success(result)
                 st.rerun()
             else:
                 st.info("الوقف في أفضل وضعية حالياً")
-        if col2.button(f"❌ إغلاق {trade['id']}", key=f"close_{trade['id']}"):
+        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"reversal_{trade['id']}"):
+            is_reversal, msg = detect_reversal(df, trade)
+            if is_reversal:
+                st.warning(f"⚠️ انعكاس مكتشف: {msg}")
+            else:
+                st.success("✅ لا توجد إشارة انعكاس حالياً")
+        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_{trade['id']}"):
             profit = trade_manager.close_trade(trade['id'], current_price)
             st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
             st.rerun()
@@ -1653,6 +1663,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | نظام إدارة مخاطر يومي متكامل | وقف متطور (ATR+SR+SMC) | وقف متحرك ذكي بثلاث مراحل
+    تحديث لحظي | استوب دقيق جداً | نظام كشف الانعكاسات والخروج التلقائي
 </div>
 """, unsafe_allow_html=True)
