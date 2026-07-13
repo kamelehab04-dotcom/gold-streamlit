@@ -13,6 +13,18 @@ import os
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
+# معالجة النقر على بطاقات العملات من الرابط
+# ==========================================
+query_params = st.query_params
+if "pair" in query_params:
+    pair_name = query_params["pair"]
+    for full_name, symbol in PAIRS.items():
+        if pair_name in full_name or (pair_name == "DXY" and "DXY" in full_name):
+            st.session_state.selected_pair = full_name
+            st.session_state.selected_symbol = symbol
+            break
+
+# ==========================================
 # CSS للتنسيق
 # ==========================================
 st.markdown("""
@@ -27,13 +39,13 @@ st.markdown("""
     .signal-text { font-size: 2.5rem; font-weight: bold; }
     .signal-confidence { font-size: 1rem; color: #aaa; }
     .explanation-box { background: #1a1a2e; border-radius: 10px; padding: 15px; margin: 10px 0; border: 1px solid #ffd70033; text-align: left; white-space: pre-wrap; }
-    .currency-card { background: #1a1a2e; border-radius: 10px; padding: 10px 15px; text-align: center; border: 1px solid #ffd70033; margin: 5px 0; cursor: pointer; transition: all 0.3s; min-width: 120px; }
+    .currency-card { background: #1a1a2e; border-radius: 10px; padding: 12px 15px; text-align: center; border: 1px solid #ffd70033; transition: all 0.3s; min-width: 110px; flex-shrink: 0; }
     .currency-card:hover { transform: translateY(-5px); border-color: #ffd700; box-shadow: 0 5px 20px rgba(255,215,0,0.2); }
     .currency-card.active { border-color: #ffd700; background: linear-gradient(135deg, #ffd70020 0%, #ffaa0020 100%); }
     .currency-symbol { font-size: 0.8rem; color: #888; }
     .currency-price { font-size: 1.2rem; font-weight: bold; color: #fff; }
     .currency-change { font-size: 0.9rem; }
-    .currency-scroll { display: flex; overflow-x: auto; gap: 10px; padding: 10px 0; scrollbar-width: thin; scrollbar-color: #ffd700 #1a1a2e; }
+    .currency-scroll { display: flex; overflow-x: auto; gap: 12px; padding: 10px 0; scrollbar-width: thin; scrollbar-color: #ffd700 #1a1a2e; -webkit-overflow-scrolling: touch; }
     .currency-scroll::-webkit-scrollbar { height: 6px; }
     .currency-scroll::-webkit-scrollbar-track { background: #1a1a2e; border-radius: 10px; }
     .currency-scroll::-webkit-scrollbar-thumb { background: #ffd700; border-radius: 10px; }
@@ -53,6 +65,7 @@ st.markdown("""
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
     .refresh-btn { background: linear-gradient(135deg, #ffd700 0%, #ffaa00 100%); color: #000; font-weight: bold; padding: 10px 20px; border-radius: 10px; border: none; cursor: pointer; width: 100%; transition: transform 0.3s; }
     .refresh-btn:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(255,215,0,0.3); }
+    a { text-decoration: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1145,45 +1158,50 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# بطاقات العملات المتداولة (قابلة للنقر)
+# بطاقات العملات المتداولة (مع تمرير أفقي)
 # ==========================================
 st.markdown("### 💱 العملات الرئيسية")
 st.markdown("*(اضغط على أي بطاقة للانتقال إلى تحليلها)*")
 
-# جلب بيانات جميع العملات للعرض السريع
+# جلب بيانات العملات
 forex_data = get_all_forex()
 
-# إنشاء شريط أفقي قابل للتمرير
-cols = st.columns(len(forex_data))
-for i, (name, data) in enumerate(forex_data.items()):
-    if data['price'] > 0:
-        color = "#00ff88" if data['change'] >= 0 else "#ff4444"
-        if 'USD' in name:
-            price_str = f"{data['price']:.4f}"
-        else:
-            price_str = f"{data['price']:.2f}"
-        
-        # تحديد ما إذا كانت هذه البطاقة هي المختارة حالياً
-        is_active = st.session_state.selected_pair.startswith(name.replace("USD", "/USD")) or \
-                   (name == "DXY" and st.session_state.selected_pair == "DXY (Dollar Index)")
-        
-        # استخدام زر بدلاً من markdown لجعلها قابلة للنقر
-        btn_label = f"""<div style="text-align:center;">
-            <div style="font-size:0.8rem; color:#aaa;">{name}</div>
-            <div style="font-size:1.2rem; font-weight:bold; color:#fff;">{price_str}</div>
-            <div style="font-size:0.9rem; color:{color};">{data['change']:+.2f}%</div>
-        </div>"""
-        
-        # إنشاء زر لكل بطاقة
-        if cols[i].button(btn_label, key=f"card_{name}", use_container_width=True):
-            # العثور على اسم الزوج الكامل في PAIRS
-            for pair_name, pair_symbol in PAIRS.items():
-                if name in pair_name or (name == "DXY" and "DXY" in pair_name):
-                    st.session_state.selected_pair = pair_name
-                    st.session_state.selected_symbol = pair_symbol
-                    st.rerun()
-                    break
+# إنشاء HTML مع تمرير أفقي
+cards_html = """
+<div class="currency-scroll">
+"""
 
+for name, data in forex_data.items():
+    if data['price'] <= 0:
+        continue
+    
+    color = "#00ff88" if data['change'] >= 0 else "#ff4444"
+    if 'USD' in name:
+        price_str = f"{data['price']:.4f}"
+    else:
+        price_str = f"{data['price']:.2f}"
+    
+    # تحديد ما إذا كانت هذه البطاقة هي المختارة حالياً
+    is_active = st.session_state.selected_pair.startswith(name.replace("USD", "/USD")) or \
+               (name == "DXY" and st.session_state.selected_pair == "DXY (Dollar Index)")
+    
+    active_class = "active" if is_active else ""
+    
+    # إنشاء بطاقة قابلة للنقر (ترسل طلب GET مع parameter)
+    cards_html += f"""
+    <a href="?pair={name}" style="text-decoration: none; flex-shrink: 0;">
+        <div class="currency-card {active_class}">
+            <div style="font-size: 0.8rem; color: #888;">{name}</div>
+            <div style="font-size: 1.2rem; font-weight: bold; color: #fff;">{price_str}</div>
+            <div style="font-size: 0.9rem; color: {color};">{data['change']:+.2f}%</div>
+        </div>
+    </a>
+    """
+
+cards_html += "</div>"
+
+# عرض البطاقات
+st.markdown(cards_html, unsafe_allow_html=True)
 st.markdown("---")
 
 # ==========================================
@@ -1360,7 +1378,7 @@ if entry_zones and direction != "NEUTRAL":
             "stop_loss": stop_loss,
             "take_profit": targets['target2'],
             "trailing_enabled": True,
-            "trailing_distance": atr_value * 0.5,  # نصف ATR كمسافة للوقف المتحرك
+            "trailing_distance": atr_value * 0.5,
             "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%) | وقف متطور (ATR+SR+SMC)"
         }
         trade_id = trade_manager.add_trade(trade_data)
