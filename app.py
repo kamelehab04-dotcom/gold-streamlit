@@ -41,8 +41,9 @@ st.markdown("""
     .entry-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #00ff88; }
     .target-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
-    .filter-badge { display: inline-block; background: #00ff8822; border: 1px solid #00ff88; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #00ff88; }
-    .filter-badge-fail { display: inline-block; background: #ff444422; border: 1px solid #ff4444; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ff4444; }
+    .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
+    .refresh-btn { background: linear-gradient(135deg, #ffd700 0%, #ffaa00 100%); color: #000; font-weight: bold; padding: 10px 20px; border-radius: 10px; border: none; cursor: pointer; width: 100%; transition: transform 0.3s; }
+    .refresh-btn:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(255,215,0,0.3); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -52,7 +53,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Advanced Trading System | Dynamic Weighting | Session Filter | DXY Analysis | Smart Exit</div>
+    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + Smart Entry</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -265,18 +266,6 @@ def get_economic_news():
         pass
     return []
 
-@st.cache_data(ttl=300)
-def get_dxy_data():
-    """جلب بيانات مؤشر الدولار"""
-    try:
-        df = yf.download("DX-Y.NYB", period="1mo", interval="1h")
-        if df.empty:
-            return None
-        df.columns = [col.lower() for col in df.columns]
-        return df
-    except:
-        return None
-
 # ==========================================
 # المؤشرات الأساسية
 # ==========================================
@@ -358,128 +347,7 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# 🆕 1. المستويات الأسبوعية/الشهرية
-# ==========================================
-def get_weekly_monthly_levels(df):
-    """استخراج مستويات الأسبوع والشهر الماضي"""
-    if len(df) < 200:
-        return {}, {}
-    
-    # آخر 7 أيام (أسبوع)
-    weekly_high = df['high'].iloc[-168:].max()  # 168 شمعة ساعة = أسبوع
-    weekly_low = df['low'].iloc[-168:].min()
-    
-    # آخر 30 يوم (شهر)
-    monthly_high = df['high'].iloc[-720:].max()
-    monthly_low = df['low'].iloc[-720:].min()
-    
-    return {
-        'high': weekly_high,
-        'low': weekly_low,
-        'range': weekly_high - weekly_low
-    }, {
-        'high': monthly_high,
-        'low': monthly_low,
-        'range': monthly_high - monthly_low
-    }
-
-# ==========================================
-# 🆕 2. فلتر جلسات التداول
-# ==========================================
-def get_trading_session():
-    """تحديد جلسة التداول الحالية وتأثيرها على الإشارة"""
-    eastern = pytz.timezone('US/Eastern')
-    now = datetime.now(eastern)
-    hour = now.hour
-    
-    # تعريف الجلسات (بتوقيت نيويورك)
-    if 0 <= hour < 8:
-        session = "ASIA"
-        session_weight = 0.6  # سيولة منخفضة
-        session_text = "🌏 آسيا (سيولة منخفضة)"
-    elif 8 <= hour < 13:
-        session = "LONDON_OPEN"
-        session_weight = 1.2  # سيولة متوسطة
-        session_text = "🇬🇧 لندن (سيولة متوسطة)"
-    elif 13 <= hour < 16:
-        session = "NY_OPEN"
-        session_weight = 1.5  # سيولة عالية جداً (تقاطع لندن/نيويورك)
-        session_text = "🇺🇸 نيويورك/لندن (سيولة عالية)"
-    elif 16 <= hour < 18:
-        session = "NY_CLOSE"
-        session_weight = 1.0  # سيولة متوسطة
-        session_text = "🇺🇸 إغلاق نيويورك (سيولة متوسطة)"
-    else:
-        session = "LOW"
-        session_weight = 0.5  # سيولة منخفضة جداً
-        session_text = "🌙 خارج الجلسات (سيولة منخفضة)"
-    
-    return session, session_weight, session_text
-
-# ==========================================
-# 🆕 3. تحليل DXY
-# ==========================================
-def analyze_dxy_correlation(gold_df, dxy_df):
-    """تحليل علاقة الذهب بمؤشر الدولار"""
-    if dxy_df is None or len(dxy_df) < 20:
-        return None, "لا توجد بيانات DXY"
-    
-    # محاذاة البيانات
-    dxy_aligned = dxy_df.reindex(gold_df.index, method='nearest')
-    dxy_aligned = dxy_aligned.fillna(method='ffill')
-    
-    if len(dxy_aligned) < 20:
-        return None, "بيانات غير كافية"
-    
-    # حساب معامل الارتباط
-    gold_returns = gold_df['close'].pct_change().dropna()
-    dxy_returns = dxy_aligned['close'].pct_change().dropna()
-    
-    common_idx = gold_returns.index.intersection(dxy_returns.index)
-    if len(common_idx) < 10:
-        return None, "بيانات غير كافية"
-    
-    correlation = gold_returns.loc[common_idx].corr(dxy_returns.loc[common_idx])
-    
-    # تحليل الاتجاه الأخير
-    dxy_trend = dxy_aligned['close'].iloc[-1] - dxy_aligned['close'].iloc[-10]
-    gold_trend = gold_df['close'].iloc[-1] - gold_df['close'].iloc[-10]
-    
-    return {
-        'correlation': correlation,
-        'dxy_trend': dxy_trend,
-        'gold_trend': gold_trend,
-        'dxy_current': dxy_aligned['close'].iloc[-1],
-        'dxy_change': (dxy_aligned['close'].iloc[-1] / dxy_aligned['close'].iloc[-5] - 1) * 100 if len(dxy_aligned) > 5 else 0
-    }, ""
-
-# ==========================================
-# 🆕 4. إعادة الاختبار (Retest Confirmation)
-# ==========================================
-def check_retest(df, level, direction):
-    """التحقق من إعادة اختبار المستوى"""
-    if len(df) < 5:
-        return False, ""
-    
-    # آخر 5 شموع
-    recent = df.iloc[-5:]
-    
-    if direction == "BUY":
-        # هل اخترق السعر المستوى ثم عاد لاختباره؟
-        broke_above = (recent['high'] > level).any()
-        came_back = (recent['low'] < level).any() and recent['close'].iloc[-1] > level
-        if broke_above and came_back:
-            return True, "✅ تم إعادة اختبار المستوى بنجاح"
-        return False, "⏳ في انتظار إعادة الاختبار"
-    else:
-        broke_below = (recent['low'] < level).any()
-        came_back = (recent['high'] > level).any() and recent['close'].iloc[-1] < level
-        if broke_below and came_back:
-            return True, "✅ تم إعادة اختبار المستوى بنجاح"
-        return False, "⏳ في انتظار إعادة الاختبار"
-
-# ==========================================
-# نظام تخطيط الصفقات الذكي
+# نظام تخطيط الصفقات
 # ==========================================
 class SmartTradePlanner:
     def __init__(self, df, current_price, atr_value):
@@ -506,20 +374,16 @@ class SmartTradePlanner:
     def _find_support_resistance(self):
         highs = self.df['high'].iloc[-100:].values
         lows = self.df['low'].iloc[-100:].values
-        
         resistance = []
         for i in range(5, len(highs)-5):
             if highs[i] > highs[i-1] and highs[i] > highs[i+1]:
                 resistance.append(highs[i])
-        
         support = []
         for i in range(5, len(lows)-5):
             if lows[i] < lows[i-1] and lows[i] < lows[i+1]:
                 support.append(lows[i])
-        
         nearest_support = max([s for s in support if s < self.current_price], default=self.current_price - self.atr * 0.5)
         nearest_resistance = min([r for r in resistance if r > self.current_price], default=self.current_price + self.atr * 0.5)
-        
         return {
             'nearest_support': nearest_support,
             'nearest_resistance': nearest_resistance
@@ -543,9 +407,7 @@ class SmartTradePlanner:
     def get_entry_zones(self):
         if self.direction == "NEUTRAL":
             return None, None
-        
         entry_zones = {}
-        
         if self.direction == "BUY":
             fib_382 = self.fib.get('fib_382', self.current_price)
             fib_500 = self.fib.get('fib_500', self.current_price)
@@ -586,7 +448,6 @@ class SmartTradePlanner:
                 'high': zone2_high,
                 'description': f"اختراق القاع السابق"
             }
-        
         return entry_zones, self.direction
     
     def get_precise_stop_loss(self, entry_price, direction):
@@ -808,11 +669,11 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# 🆕 5. الترجيح الديناميكي + نظام التسجيل المتكامل
+# نظام التسجيل + كشف الانعكاسات
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
-        return "WAIT", 50, 0, {}, [], None, {}
+        return "WAIT", 50, 0, {}, [], None
 
     df_smc = analyze_smc_ict(df)
     last_smc = df_smc.iloc[-1]
@@ -822,26 +683,11 @@ def generate_advanced_signal(df, current_price, symbol=""):
     last = df.iloc[-1]
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
-    filters = {}
-    
-    # ===== الترجيح الديناميكي =====
-    adx_value = last['adx'] if 'adx' in df.columns and not pd.isna(last['adx']) else 20
-    is_trending = adx_value > 25
-    
     weights = {
-        'rsi': 3 if not is_trending else 2,
-        'macd': 2 if not is_trending else 3,
-        'bb': 2 if not is_trending else 1,
-        'vwap': 1,
-        'adx': 2 if is_trending else 1,
-        'ichimoku': 3 if is_trending else 2,
-        'smc': 3,
-        'patterns': 4,
-        'tbs': 4,
-        'mfi': 3 if not is_trending else 1
+        'rsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3,
+        'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3
     }
-    
-    # ===== المؤشرات =====
+
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -884,11 +730,11 @@ def generate_advanced_signal(df, current_price, symbol=""):
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
-                scores['BUY'] += weights['adx']
-                details['ADX'] = f"اتجاه قوي صاعد +{weights['adx']}"
+                scores['BUY'] += 1
+                details['ADX'] = f"اتجاه قوي صاعد +1"
             else:
-                scores['SELL'] += weights['adx']
-                details['ADX'] = f"اتجاه قوي هابط +{weights['adx']}"
+                scores['SELL'] += 1
+                details['ADX'] = f"اتجاه قوي هابط +1"
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
@@ -980,14 +826,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['Fibonacci'] = "منطقة وسط"
 
-    # ===== جلسات التداول =====
-    session, session_weight, session_text = get_trading_session()
-    filters['session'] = {'text': session_text, 'weight': session_weight}
-    if session_weight < 0.7:
-        details['Session'] = f"⚠️ {session_text} (سيولة منخفضة) -0.5"
-        scores['BUY'] = scores['BUY'] * 0.8
-        scores['SELL'] = scores['SELL'] * 0.8
-
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     if net_score >= 5:
@@ -1010,18 +848,72 @@ def generate_advanced_signal(df, current_price, symbol=""):
 
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
+    return signal, confidence, net_score, details, patterns, tbs_info
+
+# ==========================================
+# كشف الانعكاسات
+# ==========================================
+def detect_reversal(df, trade):
+    if df is None or len(df) < 20:
+        return False, "بيانات غير كافية"
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    direction = trade["direction"]
+    entry = trade["entry"]
+    current_price = last['close']
+
+    signals = []
     
-    # ===== مستويات أسبوعية/شهرية =====
-    weekly_levels, monthly_levels = get_weekly_monthly_levels(df)
-    filters['weekly'] = weekly_levels
-    filters['monthly'] = monthly_levels
-    
-    return signal, confidence, net_score, details, patterns, tbs_info, filters
+    if 'rsi' in df.columns and not pd.isna(last['rsi']):
+        rsi = last['rsi']
+        if direction == "BUY":
+            if rsi > 70:
+                signals.append("RSI فوق 70 (تشبع شرائي)")
+            elif rsi < 30 and current_price < entry:
+                signals.append("RSI تحت 30 مع هبوط (ضعف)")
+        else:
+            if rsi < 30:
+                signals.append("RSI تحت 30 (تشبع بيعي)")
+            elif rsi > 70 and current_price > entry:
+                signals.append("RSI فوق 70 مع صعود (ضعف)")
+
+    if 'macd' in df.columns and 'macd_signal' in df.columns:
+        if direction == "BUY":
+            if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
+                signals.append("MACD تقاطع هابط (انعكاس)")
+        else:
+            if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
+                signals.append("MACD تقاطع صاعد (انعكاس)")
+
+    candle_range = abs(last['high'] - last['low'])
+    if candle_range > 0:
+        if direction == "BUY":
+            upper_wick = last['high'] - max(last['close'], last['open'])
+            if upper_wick > candle_range * 0.5:
+                signals.append("شمعة انعكاس هابط (ذيل علوي طويل)")
+        else:
+            lower_wick = min(last['close'], last['open']) - last['low']
+            if lower_wick > candle_range * 0.5:
+                signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
+
+    if direction == "BUY":
+        recent_low = df['low'].iloc[-10:].min()
+        if current_price < recent_low:
+            signals.append(f"كسر الدعم القريب ({recent_low:.4f})")
+    else:
+        recent_high = df['high'].iloc[-10:].max()
+        if current_price > recent_high:
+            signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
+
+    if signals:
+        return True, " | ".join(signals)
+    return False, ""
 
 # ==========================================
 # شرح القرار
 # ==========================================
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, filters):
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price):
     explanation = ""
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
@@ -1041,17 +933,6 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
-    
-    # إضافة الفلاتر
-    if filters:
-        explanation += "\n\n🔍 **الفلاتر:**\n"
-        if 'session' in filters:
-            explanation += f"- جلسة التداول: {filters['session']['text']} (وزن: {filters['session']['weight']})\n"
-        if 'weekly' in filters and filters['weekly']:
-            explanation += f"- المستوى الأسبوعي: أعلى {filters['weekly']['high']:.4f} | أدنى {filters['weekly']['low']:.4f}\n"
-        if 'monthly' in filters and filters['monthly']:
-            explanation += f"- المستوى الشهري: أعلى {filters['monthly']['high']:.4f} | أدنى {filters['monthly']['low']:.4f}\n"
-    
     explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
     if patterns:
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
@@ -1103,7 +984,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات مع خروج مبكر ذكي
+# إدارة الصفقات
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -1137,101 +1018,31 @@ class TradeManager:
             "lowest_price": trade_data["entry"],
             "status": "open",
             "stage": 0,
-            "partial_closed": False,  # هل تم إغلاق 50% من الصفقة؟
             "notes": trade_data.get("notes", "")
         }
         self.open_trades.append(trade)
         self.save_trades()
         return trade_id
-    
-    def update_trailing_stop_smart(self, trade_id, current_price, atr_value, df=None):
-        """خروج مبكر ذكي + وقف متحرك"""
+    def update_trailing_stop(self, trade_id, current_price):
         for trade in self.open_trades:
-            if trade["id"] != trade_id or trade["status"] != "open":
-                continue
-            
-            direction = trade["direction"]
-            entry = trade["entry"]
-            sl_initial = trade["stop_loss"]
-            risk = abs(entry - sl_initial)
-            
-            if direction == "BUY":
-                profit = current_price - entry
-                profit_ratio = profit / risk if risk > 0 else 0
-                if current_price > trade["highest_price"]:
-                    trade["highest_price"] = current_price
-                highest = trade["highest_price"]
-            else:
-                profit = entry - current_price
-                profit_ratio = profit / risk if risk > 0 else 0
-                if current_price < trade["lowest_price"]:
-                    trade["lowest_price"] = current_price
-                lowest = trade["lowest_price"]
-            
-            # ===== الخروج المبكر (إغلاق 50% عند الهدف الأول) =====
-            if profit_ratio >= 1.0 and not trade["partial_closed"]:
-                # إغلاق 50% من الصفقة
-                trade["partial_closed"] = True
-                trade["lots"] = trade["lots"] / 2
-                self.save_trades()
-                return f"💰 تم إغلاق 50% من الصفقة عند الهدف الأول (ربح {profit_ratio:.1f}R)"
-            
-            # ===== المرحلة 1: نقل إلى نقطة التعادل =====
-            if profit_ratio >= 1.0 and trade["stage"] < 1:
-                trade["stop_loss"] = entry
-                trade["stage"] = 1
-                self.save_trades()
-                return f"✅ تم نقل الوقف إلى نقطة التعادل ({entry:.2f})"
-            
-            # ===== كشف الانعكاس المبكر (RSI أو MACD) =====
-            if df is not None and len(df) > 5:
-                last = df.iloc[-1]
-                if direction == "BUY":
-                    if 'rsi' in df.columns and not pd.isna(last['rsi']):
-                        if last['rsi'] > 70 and profit_ratio > 0.5:
-                            return f"⚠️ RSI في منطقة تشبع شرائي ({last['rsi']:.1f}) – فكر في الخروج"
-                    if 'macd' in df.columns and 'macd_signal' in df.columns:
-                        if last['macd'] < last['macd_signal'] and profit_ratio > 0.3:
-                            return f"⚠️ تقاطع MACD هابط – فكر في الخروج"
-                else:
-                    if 'rsi' in df.columns and not pd.isna(last['rsi']):
-                        if last['rsi'] < 30 and profit_ratio > 0.5:
-                            return f"⚠️ RSI في منطقة تشبع بيعي ({last['rsi']:.1f}) – فكر في الخروج"
-                    if 'macd' in df.columns and 'macd_signal' in df.columns:
-                        if last['macd'] > last['macd_signal'] and profit_ratio > 0.3:
-                            return f"⚠️ تقاطع MACD صاعد – فكر في الخروج"
-            
-            # ===== المرحلة 2: تفعيل الوقف المتحرك =====
-            if profit_ratio >= 1.5 and trade["stage"] < 2 and trade["trailing_enabled"]:
-                trail_distance = trade["trailing_distance"]
-                if direction == "BUY":
-                    new_sl = highest - trail_distance
-                else:
-                    new_sl = lowest + trail_distance
-                if (direction == "BUY" and new_sl > trade["stop_loss"]) or (direction == "SELL" and new_sl < trade["stop_loss"]):
-                    trade["stop_loss"] = new_sl
-                    trade["stage"] = 2
-                    self.save_trades()
-                    return f"✅ تم تفعيل الوقف المتحرك ({new_sl:.2f})"
-            
-            # ===== المرحلة 3: تحديث الوقف المتحرك باستمرار =====
-            if trade["stage"] >= 2 and trade["trailing_enabled"]:
-                trail_distance = trade["trailing_distance"]
-                if direction == "BUY":
-                    new_sl = trade["highest_price"] - trail_distance
-                    if new_sl > trade["stop_loss"]:
-                        trade["stop_loss"] = new_sl
+            if trade["id"] == trade_id and trade["status"] == "open" and trade["trailing_enabled"]:
+                if trade["direction"] == "BUY":
+                    if current_price > trade["highest_price"]:
+                        trade["highest_price"] = current_price
+                    new_stop = trade["highest_price"] - trade["trailing_distance"]
+                    if new_stop > trade["stop_loss"]:
+                        trade["stop_loss"] = new_stop
                         self.save_trades()
-                        return f"🔄 تم تحديث الوقف المتحرك إلى {new_sl:.2f}"
+                        return True
                 else:
-                    new_sl = trade["lowest_price"] + trail_distance
-                    if new_sl < trade["stop_loss"]:
-                        trade["stop_loss"] = new_sl
+                    if current_price < trade["lowest_price"]:
+                        trade["lowest_price"] = current_price
+                    new_stop = trade["lowest_price"] + trade["trailing_distance"]
+                    if new_stop < trade["stop_loss"]:
+                        trade["stop_loss"] = new_stop
                         self.save_trades()
-                        return f"🔄 تم تحديث الوقف المتحرك إلى {new_sl:.2f}"
-            
-            return None
-    
+                        return True
+        return False
     def close_trade(self, trade_id, exit_price):
         for i, trade in enumerate(self.open_trades):
             if trade["id"] == trade_id:
@@ -1241,9 +1052,7 @@ class TradeManager:
                     pips = (exit_price - trade["entry"]) * 100
                 else:
                     pips = (trade["entry"] - exit_price) * 100
-                # حساب الربح مع مراعاة الإغلاق الجزئي
-                lots = trade.get("lots", 0)
-                profit = pips * lots * 0.1
+                profit = pips * trade["lots"] * 0.1
                 trade["profit"] = round(profit, 2)
                 trade["result"] = "win" if profit > 0 else "loss"
                 trade["close_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1278,9 +1087,7 @@ with st.sidebar:
         st.session_state.show_form = not st.session_state.show_form
         st.rerun()
 
-# ==========================================
 # عرض العملات السريعة
-# ==========================================
 forex_data = get_all_forex()
 if forex_data:
     st.markdown("### 💱 نظرة سريعة على العملات")
@@ -1302,9 +1109,7 @@ if forex_data:
 
 st.markdown("---")
 
-# ==========================================
 # جلب البيانات
-# ==========================================
 current_price, change = get_spot_price(selected_symbol)
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 if df is None:
@@ -1331,24 +1136,11 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# ==========================================
-# تحليل DXY (للذهب فقط)
-# ==========================================
-dxy_analysis = None
-if selected_symbol == "GC=F":
-    dxy_df = get_dxy_data()
-    if dxy_df is not None:
-        dxy_analysis, dxy_msg = analyze_dxy_correlation(df, dxy_df)
-
-# ==========================================
 # توليد الإشارة
-# ==========================================
-signal, confidence, net_score, details, patterns, tbs_info, filters = generate_advanced_signal(df, current_price, selected_symbol)
+signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
-# ==========================================
 # عرض السعر
-# ==========================================
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
@@ -1360,9 +1152,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
 # زر تحديث البيانات
-# ==========================================
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
     if st.button("🔄 تحديث البيانات", use_container_width=True):
@@ -1374,59 +1164,17 @@ with col_refresh2:
 
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ==========================================
-# عرض DXY Analysis
-# ==========================================
-if dxy_analysis:
-    st.markdown("### 💵 تحليل DXY")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("معامل الارتباط", f"{dxy_analysis['correlation']:.3f}", 
-                delta="علاقة عكسية" if dxy_analysis['correlation'] < -0.3 else "علاقة طردية")
-    col2.metric("اتجاه DXY", f"{dxy_analysis['dxy_change']:+.2f}%",
-                delta="صاعد" if dxy_analysis['dxy_trend'] > 0 else "هابط")
-    col3.metric("سعر DXY", f"{dxy_analysis['dxy_current']:.2f}")
-
-# ==========================================
 # عرض المؤشرات
-# ==========================================
 st.markdown("### 📊 مؤشرات السوق")
-cols = st.columns(6)
+cols = st.columns(5)
 last = df.iloc[-1]
 cols[0].metric("RSI", f"{last['rsi']:.1f}")
 cols[1].metric("ATR", f"${last['atr']:.2f}")
-cols[2].metric("ADX", f"{last['adx']:.1f}" + (" (اتجاهي)" if last['adx'] > 25 else " (عرضي)"))
+cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
-cols[5].metric("الجلسة", f"{filters.get('session', {}).get('text', 'N/A')[:10]}")
 
-# ==========================================
-# عرض المستويات الأسبوعية/الشهرية
-# ==========================================
-if 'weekly' in filters and filters['weekly']:
-    st.markdown("### 📅 المستويات الأسبوعية/الشهرية")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"""
-        <div style="background: #1a1a2e; border-radius: 10px; padding: 10px; border: 1px solid #ffd70033;">
-            <b>📆 المستويات الأسبوعية</b><br>
-            أعلى: {price_format.format(filters['weekly']['high'])}<br>
-            أدنى: {price_format.format(filters['weekly']['low'])}<br>
-            النطاق: {price_format.format(filters['weekly']['range'])}
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div style="background: #1a1a2e; border-radius: 10px; padding: 10px; border: 1px solid #ffd70033;">
-            <b>📆 المستويات الشهرية</b><br>
-            أعلى: {price_format.format(filters['monthly']['high'])}<br>
-            أدنى: {price_format.format(filters['monthly']['low'])}<br>
-            النطاق: {price_format.format(filters['monthly']['range'])}
-        </div>
-        """, unsafe_allow_html=True)
-
-# ==========================================
 # عرض مناطق الدخول
-# ==========================================
 st.markdown("---")
 st.markdown("### 🎯 مناطق الدخول والأهداف (استوب دقيق)")
 
@@ -1454,17 +1202,8 @@ if entry_zones and direction != "NEUTRAL":
     else:
         entry_price = (entry_zones['zone1']['low'] + entry_zones['zone1']['high']) / 2
     
-    # ===== STOP LOSS دقيق =====
     stop_loss = planner.get_precise_stop_loss(entry_price, direction)
     targets = planner.get_daily_targets(entry_price, stop_loss, direction)
-    
-    # ===== إعادة الاختبار =====
-    retest_level = entry_zones['zone1']['low'] if direction == "BUY" else entry_zones['zone1']['high']
-    retest_ok, retest_msg = check_retest(df, retest_level, direction)
-    if retest_ok:
-        st.success(f"🔁 {retest_msg}")
-    else:
-        st.info(f"⏳ {retest_msg}")
     
     with col2:
         st.markdown("#### 🛑 وقف الخسارة (دقيق)")
@@ -1482,20 +1221,21 @@ if entry_zones and direction != "NEUTRAL":
         st.markdown(f"""
         <div class="target-zone">
             <b>🎯 الهدف 1 (1:1)</b> → {price_format.format(targets['target1'])}
-            <br><span style="color:#aaa;">💰 إغلاق 50% + نقل الوقف إلى التعادل</span>
+            <br><span style="color:#aaa;">نقل الوقف إلى نقطة التعادل</span>
         </div>
         <div class="target-zone" style="border-left-color: #ffaa00;">
             <b>🎯 الهدف 2 (1:1.5)</b> → {price_format.format(targets['target2'])}
-            <br><span style="color:#aaa;">🔒 تفعيل الوقف المتحرك</span>
+            <br><span style="color:#aaa;">تفعيل الوقف المتحرك</span>
         </div>
         <div class="target-zone" style="border-left-color: #00ff88;">
             <b>🎯 الهدف 3 (1:2)</b> → {price_format.format(targets['target3'])}
-            <br><span style="color:#aaa;">🛡️ وقف محكم لتأمين الأرباح</span>
+            <br><span style="color:#aaa;">وقف محكم لتأمين الأرباح</span>
         </div>
         """, unsafe_allow_html=True)
     
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
     st.success(f"📈 **نسبة المخاطرة/المكافأة القصوى:** {risk_reward}")
+    st.info(f"🔄 **استراتيجية الوقف:** 1:1 → نقطة التعادل | 1:1.5 → وقف متحرك | 1:2 → وقف محكم")
     
     st.markdown("---")
     st.markdown("#### 🛡️ إدارة المخاطر اليومية")
@@ -1518,7 +1258,7 @@ if entry_zones and direction != "NEUTRAL":
     col2.metric("📉 الخسارة اليومية القصوى", f"${max_daily_loss:,.0f} ({max_daily_loss_pct}%)")
     col3.metric("📊 حجم اللوت الموصى به", f"{lot_size:.2f}")
     
-    if st.button("➕ إضافة هذه الصفقة المقترحة (استوب دقيق)", use_container_width=True):
+    if st.button("➕ إضافة هذه الصفقة المقترحة", use_container_width=True):
         trade_manager = TradeManager()
         trade_data = {
             "direction": direction,
@@ -1528,7 +1268,7 @@ if entry_zones and direction != "NEUTRAL":
             "take_profit": targets['target2'],
             "trailing_enabled": True,
             "trailing_distance": atr_value * 0.3,
-            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%) | استوب دقيق"
+            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%)"
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
@@ -1553,9 +1293,7 @@ if tbs_type:
         st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
-# ==========================================
 # الإشارة
-# ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
@@ -1571,7 +1309,7 @@ st.markdown(f"""
 
 # شرح القرار
 with st.expander("📝 شرح القرار", expanded=True):
-    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, filters)
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
@@ -1602,7 +1340,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
     """, unsafe_allow_html=True)
 
     with st.form("suggested_trade_form"):
-        st.write("إضافة هذه الصفقة مع تفعيل الوقف المتحرك الذكي؟")
+        st.write("إضافة هذه الصفقة مع تفعيل الوقف المتحرك؟")
         col1, col2 = st.columns(2)
         enable_trailing = col1.checkbox("تفعيل الوقف المتحرك", value=True)
         trail_distance = col2.number_input("مسافة التحرك (نقاط)", min_value=5, value=20, step=5)
@@ -1625,21 +1363,36 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
             st.rerun()
 
 # ==========================================
-# إدارة الصفقات
+# إدارة الصفقات + كشف الانعكاسات
 # ==========================================
 st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
 trade_manager = TradeManager()
 
-# تحديث الصفقات (خروج مبكر + وقف متحرك)
+# تحديث الوقف المتحرك + كشف الانعكاسات
+reversal_messages = []
 for trade in trade_manager.open_trades:
     if trade["status"] == "open":
-        result = trade_manager.update_trailing_stop_smart(trade["id"], current_price, atr_value, df)
-        if result:
-            if "💰" in result or "تم إغلاق 50%" in result:
-                st.success(result)
-            else:
-                st.info(result)
+        # كشف الانعكاسات
+        is_reversal, reversal_msg = detect_reversal(df, trade)
+        if is_reversal:
+            reversal_messages.append(f"⚠️ الصفقة {trade['id']}: {reversal_msg}")
+        
+        # تحديث الوقف المتحرك
+        if trade["trailing_enabled"]:
+            trade_manager.update_trailing_stop(trade["id"], current_price)
+
+# عرض تنبيهات الانعكاس
+if reversal_messages:
+    st.markdown("---")
+    st.markdown("### 🔄 تنبيهات الانعكاس")
+    for msg in reversal_messages:
+        st.markdown(f"""
+        <div class="reversal-alert">
+            {msg}
+            <br><span style="color:#aaa; font-size:0.8rem;">يُنصح بمراجعة الصفقة أو إغلاقها</span>
+        </div>
+        """, unsafe_allow_html=True)
 
 if trade_manager.open_trades:
     st.write("**الصفقات المفتوحة:**")
@@ -1651,32 +1404,26 @@ if trade_manager.open_trades:
         elif trade["stage"] >= 2:
             stage_text = "🔵 وقف متحرك"
         
-        partial_text = " | ✂️ إغلاق 50%" if trade.get("partial_closed", False) else ""
-        
         st.markdown(f"""
         <div class="trade-row">
             <b>{trade['id']}</b> | {trade['direction']} | الدخول: {trade['entry']} | اللوت: {trade['lots']} | 
             الوقف الحالي: {trade['stop_loss']} | الهدف: {trade['take_profit']}
-            <br><span style="color:#aaa;">المرحلة: {stage_text}{partial_text} {" | 🔄 وقف متحرك مفعّل" if trade['trailing_enabled'] else ""}</span>
+            <br><span style="color:#aaa;">المرحلة: {stage_text} {" | 🔄 وقف متحرك مفعّل" if trade['trailing_enabled'] else ""}</span>
         </div>
         """, unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
         if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_{trade['id']}"):
-            result = trade_manager.update_trailing_stop_smart(trade["id"], current_price, atr_value, df)
-            if result:
-                st.info(result)
+            if trade_manager.update_trailing_stop(trade["id"], current_price):
+                st.success("تم تحديث الوقف المتحرك!")
                 st.rerun()
             else:
                 st.info("الوقف في أفضل وضعية حالياً")
-        if col2.button(f"💰 إغلاق 50% {trade['id']}", key=f"partial_{trade['id']}"):
-            if not trade.get("partial_closed", False):
-                trade["partial_closed"] = True
-                trade["lots"] = trade["lots"] / 2
-                trade_manager.save_trades()
-                st.success("✅ تم إغلاق 50% من الصفقة!")
-                st.rerun()
+        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"reversal_{trade['id']}"):
+            is_reversal, msg = detect_reversal(df, trade)
+            if is_reversal:
+                st.warning(f"⚠️ انعكاس مكتشف: {msg}")
             else:
-                st.info("ℹ️ تم إغلاق 50% مسبقاً")
+                st.success("✅ لا توجد إشارة انعكاس حالياً")
         if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_{trade['id']}"):
             profit = trade_manager.close_trade(trade['id'], current_price)
             st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
@@ -1748,7 +1495,7 @@ st.markdown("""
 # الرسم البياني
 # ==========================================
 st.markdown("---")
-st.markdown("### 📈 Price Chart with Indicators + SMC + TBS + Levels")
+st.markdown("### 📈 Price Chart with Indicators + SMC + TBS Levels")
 df_smc = analyze_smc_ict(df)
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
                     row_heights=[0.6, 0.2, 0.2])
@@ -1759,16 +1506,6 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dic
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
-
-# مستويات أسبوعية/شهرية
-if 'weekly' in filters and filters['weekly']:
-    fig.add_hline(y=filters['weekly']['high'], line_dash="dash", line_color="cyan", opacity=0.5, row=1, col=1)
-    fig.add_hline(y=filters['weekly']['low'], line_dash="dash", line_color="cyan", opacity=0.5, row=1, col=1)
-    fig.add_annotation(x=df.index[-1], y=filters['weekly']['high'], text="W High", showarrow=False, row=1, col=1)
-
-if 'monthly' in filters and filters['monthly']:
-    fig.add_hline(y=filters['monthly']['high'], line_dash="dash", line_color="magenta", opacity=0.5, row=1, col=1)
-    fig.add_hline(y=filters['monthly']['low'], line_dash="dash", line_color="magenta", opacity=0.5, row=1, col=1)
 
 if df_smc['order_block_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
@@ -1804,7 +1541,7 @@ st.plotly_chart(fig, use_container_width=True)
 if selected_symbol == "GC=F":
     st.markdown("---")
     st.markdown("### 🔗 تحليل الارتباط: الذهب vs الدولار")
-    df_dxy = get_dxy_data()
+    df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
     if df_dxy is not None and not df_dxy.empty:
         df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
         df_dxy_aligned = df_dxy_aligned.ffill()
@@ -1827,6 +1564,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | استوب دقيق | ترجيح ديناميكي | تحليل DXY | مستويات أسبوعية/شهرية | خروج مبكر (50%+وقف متحرك)
+    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات
 </div>
 """, unsafe_allow_html=True)
