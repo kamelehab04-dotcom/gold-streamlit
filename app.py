@@ -42,6 +42,7 @@ st.markdown("""
     .target-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
     .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
+    .warning-box { background: #ffaa0033; border: 1px solid #ffaa00; border-radius: 10px; padding: 10px; margin: 5px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,7 +135,7 @@ if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
 
 # ==========================================
-# دوال جلب البيانات
+# دوال جلب البيانات وحالة السوق
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -493,7 +494,7 @@ class SmartTradePlanner:
         }
 
 # ==========================================
-# تحليل SMC/ICT
+# تحليل SMC/ICT + TBS
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -826,10 +827,12 @@ def generate_advanced_signal(df, current_price, symbol=""):
 
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
-    if net_score >= 5:
+    
+    # ===== عتبة الإشارة مرفوعة إلى 7 نقاط =====
+    if net_score >= 7:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
-    elif net_score <= -5:
+    elif net_score <= -7:
         signal = "SELL"
         confidence = min(100, 60 + (abs(net_score) / total_weight) * 100)
     else:
@@ -918,19 +921,19 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         for k, v in details.items():
             if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي"]):
                 explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥7 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
             if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS"]):
                 explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-7 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
         explanation = "⏳ **قرار الانتظار** بسبب:\n"
-        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع).\n- تفاصيل النقاط:\n"
+        explanation += f"- النتيجة الصافية {net_score} بين -7 و +7 (لا يوجد إجماع قوي).\n- تفاصيل النقاط:\n"
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
-        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
+        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±7 أو تتحسن الثقة فوق 60%."
     explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
     if patterns:
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
@@ -1172,7 +1175,9 @@ cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
-# عرض مناطق الدخول
+# ==========================================
+# عرض مناطق الدخول (معدل – متوافق مع الإشارة)
+# ==========================================
 st.markdown("---")
 st.markdown("### 🎯 مناطق الدخول والأهداف (استوب دقيق)")
 
@@ -1181,7 +1186,17 @@ planner = SmartTradePlanner(df, current_price, atr_value)
 entry_zones, direction = planner.get_entry_zones()
 
 if entry_zones and direction != "NEUTRAL":
-    st.markdown(f"**الاتجاه المتوقع:** {'🟢 شراء' if direction == 'BUY' else '🔴 بيع'}")
+    # ✅ الاتجاه المتوقع يتبع الإشارة النهائية
+    if signal == "BUY":
+        st.markdown(f"**الاتجاه المتوقع:** 🟢 شراء (متوافق مع الإشارة - ثقة {confidence:.0f}%)")
+    elif signal == "SELL":
+        st.markdown(f"**الاتجاه المتوقع:** 🔴 بيع (متوافق مع الإشارة - ثقة {confidence:.0f}%)")
+    else:
+        st.markdown(f"**الاتجاه المتوقع:** ⚪ محايد (انتظر)")
+    
+    # ⚠️ تحذير في حالة التعارض
+    if (direction == "BUY" and signal == "SELL") or (direction == "SELL" and signal == "BUY"):
+        st.warning(f"⚠️ تعارض: الاتجاه المتوقع ({direction}) يختلف عن الإشارة ({signal}). الإشارة النهائية هي {signal}.")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -1291,14 +1306,25 @@ if tbs_type:
         st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
-# الإشارة
+# ==========================================
+# الإشارة (معدلة مع قوة الإشارة)
+# ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
+
+# تحديد قوة الإشارة
+if confidence < 40:
+    strength = "ضعيفة جداً"
+elif confidence < 60:
+    strength = "متوسطة"
+else:
+    strength = "قوية"
+
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
 st.markdown(f"""
 <div class="signal-box">
     <div class="signal-text" style="color: {signal_color};">{signal}</div>
-    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score}</div>
+    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score} | القوة: {strength}</div>
     <div style="font-size:0.9rem; color:#aaa; margin-top:10px;">
         MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
     </div>
@@ -1559,6 +1585,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات
+    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات | عتبة إشارة محسّنة (7 نقاط)
 </div>
 """, unsafe_allow_html=True)
