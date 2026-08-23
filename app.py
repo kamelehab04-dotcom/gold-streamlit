@@ -11,14 +11,8 @@ import json
 import os
 
 # ==========================================
-# استيراد الملفات الجديدة
+# إعدادات الصفحة
 # ==========================================
-from market_state import classify_market_state, adjust_weights_by_state
-from momentum import modified_momentum
-from volume_proxy import volume_proxy, volume_signal
-from pattern_matcher import PatternMatcher
-from economic_calendar import get_next_event, apply_news_filter
-
 st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
 
 # ==========================================
@@ -147,10 +141,10 @@ if "last_update" not in st.session_state:
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
 if "pattern_matcher" not in st.session_state:
-    st.session_state.pattern_matcher = PatternMatcher()
+    st.session_state.pattern_matcher = []  # قائمة لتخزين الأنماط
 
 # ==========================================
-# دوال جلب البيانات (نفس السابق)
+# دوال جلب البيانات وحالة السوق
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -281,7 +275,7 @@ def get_economic_news():
     return []
 
 # ==========================================
-# المؤشرات الأساسية (نفس السابق)
+# المؤشرات الأساسية
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -361,7 +355,113 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# نظام تخطيط الصفقات (نفس السابق)
+# الميزات الجديدة (مدمجة)
+# ==========================================
+
+# 1. حالة السوق والأوزان الديناميكية
+def classify_market_state(df, adx_threshold=25, atr_multiplier=1.5):
+    if len(df) < 50:
+        return 'RANGING', 0.5
+    adx = df['adx'].iloc[-1]
+    atr = df['atr'].iloc[-1]
+    avg_atr = df['atr'].iloc[-50:].mean()
+    atr_ratio = atr / avg_atr if avg_atr > 0 else 1
+    if adx > adx_threshold and atr_ratio > 1.2:
+        return 'TRENDING_STRONG', min(1, (adx - 25) / 25 + 0.3)
+    elif adx > adx_threshold:
+        return 'TRENDING_WEAK', 0.6
+    elif atr_ratio > 1.3:
+        return 'VOLATILE', 0.7
+    else:
+        return 'RANGING', 0.8
+
+def adjust_weights_by_state(state):
+    if state == 'TRENDING_STRONG':
+        return {'rsi': 2, 'macd': 4, 'bb': 1, 'vwap': 1, 'adx': 3, 'ichimoku': 4, 'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 1}
+    elif state == 'TRENDING_WEAK':
+        return {'rsi': 2, 'macd': 3, 'bb': 2, 'vwap': 1, 'adx': 3, 'ichimoku': 3, 'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 2}
+    elif state == 'RANGING':
+        return {'rsi': 4, 'macd': 1, 'bb': 4, 'vwap': 1, 'adx': 1, 'ichimoku': 1, 'smc': 3, 'patterns': 3, 'tbs': 3, 'mfi': 4}
+    else:  # VOLATILE
+        return {'rsi': 3, 'macd': 2, 'bb': 3, 'vwap': 2, 'adx': 2, 'ichimoku': 2, 'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3}
+
+# 2. مؤشر الزخم المعدل
+def modified_momentum(df, period=14, smoothing=3):
+    high = df['high']; low = df['low']; close = df['close']
+    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
+    raw_momentum = close - close.shift(period)
+    momentum = raw_momentum / atr.shift(1)
+    momentum = momentum.rolling(smoothing).mean()
+    return momentum
+
+# 3. وكيل حجم التداول
+def volume_proxy(df, lookback=20):
+    price_changes = abs(df['close'] - df['open']) + abs(df['high'] - df['low'])
+    tick_volume = price_changes.rolling(lookback).mean()
+    atr = df['atr'].rolling(lookback).mean()
+    relative_volatility = (df['high'] - df['low']) / atr
+    proxy = tick_volume * (1 + relative_volatility)
+    return proxy
+
+def volume_signal(proxy):
+    if proxy.iloc[-1] > proxy.iloc[-5:].mean() * 1.3:
+        return 'HIGH'
+    elif proxy.iloc[-1] > proxy.iloc[-5:].mean():
+        return 'MEDIUM'
+    else:
+        return 'LOW'
+
+# 4. مطابقة الأنماط التاريخية
+def match_pattern(patterns_db, current_pattern, top_k=10):
+    if len(patterns_db) < 20:
+        return None, None, 0
+    similarities = []
+    for p in patterns_db:
+        sim = 1 - np.mean(np.abs(current_pattern - p['pattern']) / (np.abs(p['pattern']) + 1e-6))
+        similarities.append((sim, p['outcome']))
+    similarities.sort(key=lambda x: x[0], reverse=True)
+    top = similarities[:top_k]
+    profits = [out['profit'] for _, out in top]
+    wins = [1 for out in top if out['profit'] > 0]
+    avg_profit = np.mean(profits) if profits else 0
+    win_rate = len(wins) / len(top) if top else 0
+    return avg_profit, win_rate, len(top)
+
+# 5. التقويم الاقتصادي
+def get_next_event(eastern_tz):
+    now = datetime.now(eastern_tz)
+    today = now.date()
+    ECONOMIC_EVENTS = {
+        'FOMC': {'impact': 'HIGH', 'time': '14:00'},
+        'NFP': {'impact': 'HIGH', 'time': '08:30'},
+        'CPI': {'impact': 'HIGH', 'time': '08:30'},
+        'PPI': {'impact': 'MEDIUM', 'time': '08:30'},
+        'Retail Sales': {'impact': 'MEDIUM', 'time': '08:30'},
+        'GDP': {'impact': 'HIGH', 'time': '08:30'},
+        'Jobless Claims': {'impact': 'MEDIUM', 'time': '08:30'},
+    }
+    for event, data in ECONOMIC_EVENTS.items():
+        event_time = datetime.strptime(data['time'], '%H:%M').time()
+        event_dt = eastern_tz.localize(datetime.combine(today, event_time))
+        if event_dt > now:
+            time_diff = (event_dt - now).total_seconds() / 60
+            if time_diff < 60:
+                return event, data['impact'], time_diff
+    return None, None, None
+
+def apply_news_filter(confidence, impact, minutes):
+    if impact == 'HIGH' and minutes < 30:
+        return confidence * 0.4
+    elif impact == 'HIGH' and minutes < 60:
+        return confidence * 0.7
+    elif impact == 'MEDIUM' and minutes < 30:
+        return confidence * 0.7
+    else:
+        return confidence
+
+# ==========================================
+# نظام تخطيط الصفقات (SmartTradePlanner)
 # ==========================================
 class SmartTradePlanner:
     def __init__(self, df, current_price, atr_value):
@@ -509,7 +609,7 @@ class SmartTradePlanner:
         }
 
 # ==========================================
-# تحليل SMC/ICT + TBS (نفس السابق)
+# تحليل SMC/ICT + TBS
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -603,7 +703,7 @@ def detect_tbs(df, lookback=20, body_multiplier=1.5):
     return None, None, None, None
 
 # ==========================================
-# اكتشاف النماذج الفنية (نفس السابق)
+# اكتشاف النماذج الفنية
 # ==========================================
 def find_peaks_troughs(series, order=5):
     peaks = []
@@ -683,20 +783,17 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# كشف الانعكاسات (نفس السابق)
+# كشف الانعكاسات
 # ==========================================
 def detect_reversal(df, trade):
     if df is None or len(df) < 20:
         return False, "بيانات غير كافية"
-
     last = df.iloc[-1]
     prev = df.iloc[-2]
     direction = trade["direction"]
     entry = trade["entry"]
     current_price = last['close']
-
     signals = []
-    
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if direction == "BUY":
@@ -709,7 +806,6 @@ def detect_reversal(df, trade):
                 signals.append("RSI تحت 30 (تشبع بيعي)")
             elif rsi > 70 and current_price > entry:
                 signals.append("RSI فوق 70 مع صعود (ضعف)")
-
     if 'macd' in df.columns and 'macd_signal' in df.columns:
         if direction == "BUY":
             if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
@@ -717,7 +813,6 @@ def detect_reversal(df, trade):
         else:
             if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
                 signals.append("MACD تقاطع صاعد (انعكاس)")
-
     candle_range = abs(last['high'] - last['low'])
     if candle_range > 0:
         if direction == "BUY":
@@ -728,7 +823,6 @@ def detect_reversal(df, trade):
             lower_wick = min(last['close'], last['open']) - last['low']
             if lower_wick > candle_range * 0.5:
                 signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
-
     if direction == "BUY":
         recent_low = df['low'].iloc[-10:].min()
         if current_price < recent_low:
@@ -737,13 +831,12 @@ def detect_reversal(df, trade):
         recent_high = df['high'].iloc[-10:].max()
         if current_price > recent_high:
             signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
-
     if signals:
         return True, " | ".join(signals)
     return False, ""
 
 # ==========================================
-# دالة توليد الإشارة المطورة (مع الميزات الجديدة)
+# دالة توليد الإشارة المطورة
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -760,133 +853,103 @@ def generate_advanced_signal(df, current_price, symbol=""):
     
     # ===== حالة السوق =====
     market_state, state_confidence = classify_market_state(df)
-    
-    # ===== الأوزان الديناميكية حسب حالة السوق =====
     weights = adjust_weights_by_state(market_state)
 
     # ===== المؤشرات الأساسية =====
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
-            scores['BUY'] += weights['rsi']
-            details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
+            scores['BUY'] += weights['rsi']; details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
         elif rsi > 70:
-            scores['SELL'] += weights['rsi']
-            details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
+            scores['SELL'] += weights['rsi']; details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
-            scores['BUY'] += weights['macd']
-            details['MACD'] = f"إيجابي +{weights['macd']}"
+            scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
         elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
-            scores['SELL'] += weights['macd']
-            details['MACD'] = f"سلبي +{weights['macd']}"
+            scores['SELL'] += weights['macd']; details['MACD'] = f"سلبي +{weights['macd']}"
         else:
             details['MACD'] = "محايد"
 
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
-            scores['BUY'] += weights['bb']
-            details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
+            scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
         elif current_price >= last['bb_upper'] * 0.995:
-            scores['SELL'] += weights['bb']
-            details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
+            scores['SELL'] += weights['bb']; details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
         else:
             details['BB'] = "وسط النطاق"
 
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
-            scores['BUY'] += weights['vwap']
-            details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
+            scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP +{weights['vwap']}"
         else:
-            scores['SELL'] += weights['vwap']
-            details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
+            scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
-                scores['BUY'] += weights['adx']
-                details['ADX'] = f"اتجاه قوي صاعد +{weights['adx']}"
+                scores['BUY'] += weights['adx']; details['ADX'] = f"اتجاه قوي صاعد +{weights['adx']}"
             else:
-                scores['SELL'] += weights['adx']
-                details['ADX'] = f"اتجاه قوي هابط +{weights['adx']}"
+                scores['SELL'] += weights['adx']; details['ADX'] = f"اتجاه قوي هابط +{weights['adx']}"
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
-                scores['BUY'] += weights['ichimoku']
-                details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
+                scores['BUY'] += weights['ichimoku']; details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
             elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
-                scores['SELL'] += weights['ichimoku']
-                details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
+                scores['SELL'] += weights['ichimoku']; details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
     if last_smc.get('order_block_bullish', False):
-        scores['BUY'] += weights['smc']
-        details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
+        scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
     elif last_smc.get('order_block_bearish', False):
-        scores['SELL'] += weights['smc']
-        details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
+        scores['SELL'] += weights['smc']; details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
     elif last_smc.get('fvg_bullish', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"FVG شراء +{weights['smc']//2}"
+        scores['BUY'] += weights['smc']//2; details['SMC'] = f"FVG شراء +{weights['smc']//2}"
     elif last_smc.get('fvg_bearish', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"FVG بيع +{weights['smc']//2}"
+        scores['SELL'] += weights['smc']//2; details['SMC'] = f"FVG بيع +{weights['smc']//2}"
     elif last_smc.get('liquidity_sweep_bullish', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
+        scores['BUY'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
     elif last_smc.get('liquidity_sweep_bearish', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
+        scores['SELL'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
     elif last_smc.get('mss_bullish', False):
-        scores['BUY'] += weights['smc']
-        details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
+        scores['BUY'] += weights['smc']; details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
     elif last_smc.get('mss_bearish', False):
-        scores['SELL'] += weights['smc']
-        details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
+        scores['SELL'] += weights['smc']; details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
     elif last_smc.get('in_discount', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
+        scores['BUY'] += weights['smc']//2; details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
     elif last_smc.get('in_premium', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
+        scores['SELL'] += weights['smc']//2; details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
-                scores['BUY'] += weights['patterns']
-                details['Pattern'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
+                scores['BUY'] += weights['patterns']; details['Pattern'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
             else:
-                scores['SELL'] += weights['patterns']
-                details['Pattern'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
+                scores['SELL'] += weights['patterns']; details['Pattern'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
     else:
         details['Pattern'] = "لا توجد نماذج"
 
     if tbs_type == "BULLISH":
-        scores['BUY'] += weights['tbs']
-        details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
+        scores['BUY'] += weights['tbs']; details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
     elif tbs_type == "BEARISH":
-        scores['SELL'] += weights['tbs']
-        details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
+        scores['SELL'] += weights['tbs']; details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
     else:
         details['TBS'] = "لا توجد إشارة TBS"
 
     if 'mfi' in df.columns and not pd.isna(last['mfi']):
         mfi = last['mfi']
         if mfi < 20:
-            scores['BUY'] += weights['mfi']
-            details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
+            scores['BUY'] += weights['mfi']; details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
         elif mfi > 80:
-            scores['SELL'] += weights['mfi']
-            details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
+            scores['SELL'] += weights['mfi']; details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
@@ -895,11 +958,9 @@ def generate_advanced_signal(df, current_price, symbol=""):
     fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
     if fib_levels:
         if current_price > fib_levels.get('fib_618', current_price):
-            scores['BUY'] += 2
-            details['Fibonacci'] = f"فوق 0.618 +2 BUY"
+            scores['BUY'] += 2; details['Fibonacci'] = f"فوق 0.618 +2 BUY"
         elif current_price < fib_levels.get('fib_382', current_price):
-            scores['SELL'] += 2
-            details['Fibonacci'] = f"تحت 0.382 +2 SELL"
+            scores['SELL'] += 2; details['Fibonacci'] = f"تحت 0.382 +2 SELL"
         else:
             details['Fibonacci'] = "منطقة وسط"
 
@@ -907,24 +968,20 @@ def generate_advanced_signal(df, current_price, symbol=""):
     if 'momentum' in df.columns and not pd.isna(df['momentum'].iloc[-1]):
         momentum = df['momentum'].iloc[-1]
         if momentum > 0.5:
-            scores['BUY'] += 2
-            details['Momentum'] = f"زخم قوي إيجابي +2"
+            scores['BUY'] += 2; details['Momentum'] = f"زخم قوي إيجابي +2"
         elif momentum < -0.5:
-            scores['SELL'] += 2
-            details['Momentum'] = f"زخم قوي سلبي +2"
+            scores['SELL'] += 2; details['Momentum'] = f"زخم قوي سلبي +2"
         else:
             details['Momentum'] = f"زخم محايد ({momentum:.2f})"
 
     # ===== إشارة حجم التداول =====
     if 'volume_proxy' in df.columns:
-        vol_signal = volume_signal(df['volume_proxy'], current_price, 0)
+        vol_signal = volume_signal(df['volume_proxy'])
         if vol_signal == 'HIGH':
             if df['close'].iloc[-1] > df['open'].iloc[-1]:
-                scores['BUY'] += 2
-                details['Volume'] = "حجم مرتفع +2"
+                scores['BUY'] += 2; details['Volume'] = "حجم مرتفع +2"
             else:
-                scores['SELL'] += 2
-                details['Volume'] = "حجم مرتفع +2"
+                scores['SELL'] += 2; details['Volume'] = "حجم مرتفع +2"
         else:
             details['Volume'] = f"حجم {vol_signal}"
 
@@ -1041,7 +1098,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# إدارة الصفقات (نفس السابق مع دعم النمط)
+# إدارة الصفقات
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -1115,10 +1172,9 @@ class TradeManager:
                 trade["close_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 # ===== تخزين النمط في قاعدة البيانات =====
-                if hasattr(st.session_state, 'pattern_matcher') and df is not None and len(df) >= 5:
+                if df is not None and len(df) >= 5:
                     pattern = df[['open', 'high', 'low', 'close']].iloc[-5:].values.flatten()
-                    outcome = {'profit': profit}
-                    st.session_state.pattern_matcher.add_pattern({'pattern': pattern, 'outcome': outcome})
+                    st.session_state.pattern_matcher.append({'pattern': pattern, 'outcome': {'profit': profit}})
                 
                 self.closed_trades.append(trade)
                 self.open_trades.pop(i)
@@ -1204,12 +1260,12 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# ===== المؤشرات الجديدة =====
+# المؤشرات الجديدة
 df['momentum'] = modified_momentum(df)
 df['volume_proxy'] = volume_proxy(df)
 
 # ==========================================
-# توليد الإشارة المطورة
+# توليد الإشارة
 # ==========================================
 signal, confidence, net_score, details, patterns, tbs_info, market_state, state_confidence = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
@@ -1287,7 +1343,7 @@ st.markdown("### 🔄 تحليل النمط الحالي (Pattern Matching)")
 if st.button("📊 تحليل النمط الحالي"):
     if len(df) >= 5:
         current_pattern = df[['open', 'high', 'low', 'close']].iloc[-5:].values.flatten()
-        avg_profit, win_rate, matches = st.session_state.pattern_matcher.match_pattern(current_pattern)
+        avg_profit, win_rate, matches = match_pattern(st.session_state.pattern_matcher, current_pattern)
         if matches > 0:
             st.info(f"🔄 تم العثور على {matches} نمط مشابه | معدل الربح المتوقع: {avg_profit:.2f}% | نسبة النجاح: {win_rate:.0%}")
             if avg_profit is not None:
