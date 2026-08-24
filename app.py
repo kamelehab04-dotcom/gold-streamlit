@@ -42,8 +42,6 @@ st.markdown("""
     .target-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
     .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
-    .warning-box { background: #ffaa0033; border: 1px solid #ffaa00; border-radius: 10px; padding: 10px; margin: 5px 0; }
-    .signals-table { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border: 1px solid #ffd70033; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,11 +132,9 @@ if "last_update" not in st.session_state:
     st.session_state.last_update = datetime.now()
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
-if "all_signals" not in st.session_state:
-    st.session_state.all_signals = None
 
 # ==========================================
-# دوال جلب البيانات وحالة السوق
+# دوال جلب البيانات
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -497,7 +493,7 @@ class SmartTradePlanner:
         }
 
 # ==========================================
-# تحليل SMC/ICT + TBS
+# تحليل SMC/ICT
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -671,7 +667,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل (عتبة ثابتة = 5)
+# نظام التسجيل + كشف الانعكاسات
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -830,8 +826,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
 
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
-    
-    # ===== عتبة ثابتة = 5 نقاط (كما كانت في البداية) =====
     if net_score >= 5:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
@@ -933,7 +927,7 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
         explanation = "⏳ **قرار الانتظار** بسبب:\n"
-        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع قوي).\n- تفاصيل النقاط:\n"
+        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع).\n- تفاصيل النقاط:\n"
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
@@ -1067,50 +1061,6 @@ class TradeManager:
         return None
 
 # ==========================================
-# دالة لجمع إشارات جميع الأزواج
-# ==========================================
-def get_all_signals():
-    """جمع إشارات جميع الأزواج في جدول واحد"""
-    results = []
-    for pair_name, symbol in PAIRS.items():
-        try:
-            df = get_historical_data(symbol, period="1mo", interval="1h")
-            if df is None or len(df) < 100:
-                continue
-            current_price = df['close'].iloc[-1]
-            
-            # حساب المؤشرات الأساسية (نفس الكود)
-            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-            df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-            df['rsi'] = calc_rsi(df['close'])
-            df['atr'] = calc_atr(df)
-            df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
-            df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
-            df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
-            df['vwap'] = calc_vwap(df)
-            tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
-            df['tenkan'] = tenkan
-            df['kijun'] = kijun
-            df['senkou_a'] = senkou_a
-            df['senkou_b'] = senkou_b
-            df['chikou'] = chikou
-            df['mfi'] = calc_mfi(df)
-            
-            signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, symbol)
-            
-            results.append({
-                "الزوج": pair_name,
-                "الإشارة": signal,
-                "الثقة (%)": round(confidence, 1),
-                "النتيجة": net_score,
-                "السعر": round(current_price, 2)
-            })
-        except Exception as e:
-            # في حال فشل تحليل زوج معين، نمرره
-            continue
-    return pd.DataFrame(results)
-
-# ==========================================
 # الواجهة الرئيسية
 # ==========================================
 
@@ -1125,49 +1075,6 @@ with st.sidebar:
         st.markdown(f"🔴 **{status_text}**")
         st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
-    st.markdown("---")
-    
-    # ===== عرض جدول الإشارات لجميع الأزواج =====
-    st.markdown("### 📋 جميع الإشارات المتاحة")
-    if st.button("🔄 تحديث الإشارات", use_container_width=True):
-        with st.spinner("جاري تحليل جميع الأزواج..."):
-            st.session_state.all_signals = get_all_signals()
-    
-    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-        df_signals = st.session_state.all_signals.copy()
-        
-        # تلوين الإشارات
-        def color_signal(val):
-            if val == "BUY":
-                return "🟢 BUY"
-            elif val == "SELL":
-                return "🔴 SELL"
-            else:
-                return "⚪ WAIT"
-        
-        df_signals["الإشارة"] = df_signals["الإشارة"].apply(color_signal)
-        
-        # عرض الجدول مع تنسيق
-        st.dataframe(
-            df_signals,
-            column_config={
-                "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
-                "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
-                "الثقة (%)": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
-                "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
-                "السعر": st.column_config.NumberColumn("السعر", format="$%.2f"),
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
-        # عرض عدد الإشارات النشطة
-        buy_count = len(df_signals[df_signals["الإشارة"] == "🟢 BUY"])
-        sell_count = len(df_signals[df_signals["الإشارة"] == "🔴 SELL"])
-        st.caption(f"🟢 شراء: {buy_count} | 🔴 بيع: {sell_count} | ⚪ انتظار: {len(df_signals) - buy_count - sell_count}")
-    else:
-        st.info("اضغط 'تحديث الإشارات' لعرض جميع الإشارات")
-    
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
@@ -1200,7 +1107,7 @@ if forex_data:
 
 st.markdown("---")
 
-# جلب البيانات للزوج المختار
+# جلب البيانات
 current_price, change = get_spot_price(selected_symbol)
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 if df is None:
@@ -1227,7 +1134,7 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# توليد الإشارة (عتبة ثابتة 5)
+# توليد الإشارة
 signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
@@ -1265,9 +1172,7 @@ cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
-# ==========================================
-# عرض مناطق الدخول (متوافق مع الإشارة)
-# ==========================================
+# عرض مناطق الدخول
 st.markdown("---")
 st.markdown("### 🎯 مناطق الدخول والأهداف (استوب دقيق)")
 
@@ -1276,17 +1181,7 @@ planner = SmartTradePlanner(df, current_price, atr_value)
 entry_zones, direction = planner.get_entry_zones()
 
 if entry_zones and direction != "NEUTRAL":
-    # الاتجاه المتوقع يتبع الإشارة النهائية
-    if signal == "BUY":
-        st.markdown(f"**الاتجاه المتوقع:** 🟢 شراء (متوافق مع الإشارة - ثقة {confidence:.0f}%)")
-    elif signal == "SELL":
-        st.markdown(f"**الاتجاه المتوقع:** 🔴 بيع (متوافق مع الإشارة - ثقة {confidence:.0f}%)")
-    else:
-        st.markdown(f"**الاتجاه المتوقع:** ⚪ محايد (انتظر)")
-    
-    # تحذير في حالة التعارض
-    if (direction == "BUY" and signal == "SELL") or (direction == "SELL" and signal == "BUY"):
-        st.warning(f"⚠️ تعارض: الاتجاه المتوقع ({direction}) يختلف عن الإشارة ({signal}). الإشارة النهائية هي {signal}.")
+    st.markdown(f"**الاتجاه المتوقع:** {'🟢 شراء' if direction == 'BUY' else '🔴 بيع'}")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -1396,25 +1291,14 @@ if tbs_type:
         st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
-# ==========================================
 # الإشارة
-# ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
-
-# تحديد قوة الإشارة
-if confidence < 40:
-    strength = "ضعيفة جداً"
-elif confidence < 60:
-    strength = "متوسطة"
-else:
-    strength = "قوية"
-
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
 st.markdown(f"""
 <div class="signal-box">
     <div class="signal-text" style="color: {signal_color};">{signal}</div>
-    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score} | القوة: {strength}</div>
+    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score}</div>
     <div style="font-size:0.9rem; color:#aaa; margin-top:10px;">
         MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
     </div>
@@ -1675,6 +1559,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات | عتبة إشارة ثابتة (5 نقاط)
+    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات
 </div>
 """, unsafe_allow_html=True)
