@@ -10,200 +10,303 @@ import requests
 import json
 import os
 
+# ==========================================
+# إعداد الصفحة – BLACK PYRAMID
+# ==========================================
 st.set_page_config(
-    page_title="Pharaoh Gold Dashboard",
-    page_icon="🥇",
+    page_title="Black Pyramid",
+    page_icon="▲",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ==========================================
-# CSS للتنسيق
+# 🖤 BLACK PYRAMID – الهوية البصرية
 # ==========================================
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
+    /* ===== الخطوط ===== */
+    .main-title, .signal-text, .price-value {
+        font-family: 'Orbitron', sans-serif !important;
+        letter-spacing: 3px;
+    }
+    .main-subtitle, .price-label, .signal-confidence, .footer {
+        font-family: 'Inter', sans-serif !important;
+        letter-spacing: 1px;
+    }
+    
+    /* ===== الهيدر ===== */
     .main-header {
         text-align: center;
-        padding: 20px 30px;
-        background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #16213e 100%);
+        padding: 25px 30px;
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a0a00 50%, #0a0a0a 100%) !important;
         border-radius: 20px;
         margin-bottom: 25px;
         border: 1px solid rgba(255, 215, 0, 0.2);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+        position: relative;
+        overflow: hidden;
+    }
+    .main-header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(ellipse at center, rgba(255,215,0,0.05) 0%, transparent 70%);
+        animation: pulseGlow 6s ease-in-out infinite;
+    }
+    @keyframes pulseGlow {
+        0%, 100% { opacity: 0.3; transform: scale(1); }
+        50% { opacity: 0.8; transform: scale(1.1); }
     }
     .main-title {
-        font-size: 2.2rem;
+        font-size: 2.5rem;
         color: #ffd700;
-        font-weight: bold;
-        letter-spacing: 3px;
-        text-shadow: 0 0 20px rgba(255,215,0,0.2);
+        font-weight: 900;
+        text-shadow: 0 0 30px rgba(255,215,0,0.15), 0 0 60px rgba(255,215,0,0.05);
+        position: relative;
+        z-index: 1;
+        letter-spacing: 4px;
+    }
+    .main-title .pyramid-icon {
+        display: inline-block;
+        font-size: 1.8rem;
+        color: #ffd700;
+        text-shadow: 0 0 20px rgba(255,215,0,0.3);
     }
     .main-subtitle {
         font-size: 0.95rem;
         color: #aaa;
-        letter-spacing: 1px;
+        letter-spacing: 2px;
+        position: relative;
+        z-index: 1;
+        margin-top: 5px;
+        font-weight: 300;
+    }
+    .main-header::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 10%;
+        width: 80%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #ffd700, #ffd700, transparent);
+        opacity: 0.4;
+    }
+    
+    /* ===== البطاقات ===== */
+    .price-card, .signal-box, .suggested-trade, .trade-row, 
+    .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
+        background: linear-gradient(135deg, #0a0a0a 0%, #150a05 50%, #0a0a0a 100%) !important;
+        border: 1px solid rgba(255, 215, 0, 0.15) !important;
+        box-shadow: 0 4px 30px rgba(0,0,0,0.6) !important;
+        border-radius: 14px !important;
     }
     .price-card {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 16px;
-        padding: 25px;
-        text-align: center;
-        border: 1px solid rgba(255, 215, 0, 0.15);
-        margin: 10px 0;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        border-color: rgba(255, 215, 0, 0.25) !important;
     }
     .price-value {
-        font-size: 3.8rem;
-        font-weight: bold;
-        color: #fff;
-        letter-spacing: 1px;
+        color: #fff !important;
+        text-shadow: 0 0 40px rgba(255,215,0,0.05);
     }
-    .price-change {
-        font-size: 1.3rem;
-        font-weight: 500;
+    .price-label {
+        color: #888 !important;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        letter-spacing: 3px;
     }
+    
+    /* ===== الإشارة ===== */
     .signal-box {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 16px;
-        padding: 25px;
-        text-align: center;
-        border: 2px solid #ffd700;
-        margin: 15px 0;
-        box-shadow: 0 0 30px rgba(255,215,0,0.05);
+        border: 2px solid #ffd700 !important;
+        box-shadow: 0 0 40px rgba(255,215,0,0.05) !important;
     }
     .signal-text {
-        font-size: 3rem;
-        font-weight: bold;
-        letter-spacing: 2px;
+        text-shadow: 0 0 40px currentColor;
     }
-    .signal-confidence {
-        font-size: 1rem;
-        color: #aaa;
-        margin-top: 5px;
-    }
+    
+    /* ===== الصفقة المقترحة ===== */
     .suggested-trade {
-        background: linear-gradient(135deg, #00ff8822 0%, #00cc6622 100%);
-        border-radius: 15px;
-        padding: 18px;
-        border: 2px solid #00ff88;
-        margin: 15px 0;
+        border: 2px solid #00ff88 !important;
+        background: linear-gradient(135deg, #0a0a0a 0%, #001a0a 50%, #0a0a0a 100%) !important;
     }
-    .target-zone {
-        background: linear-gradient(135deg, #ffd70022 0%, #ffaa0022 100%);
-        border-radius: 10px;
-        padding: 8px 12px;
-        margin: 4px 0;
-        border-left: 4px solid #ffd700;
-    }
-    .stop-loss-level {
-        background: linear-gradient(135deg, #ff444422 0%, #cc333322 100%);
-        border-radius: 10px;
-        padding: 8px 12px;
-        margin: 4px 0;
-        border-left: 4px solid #ff4444;
-    }
-    .trade-row {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 10px;
-        padding: 12px 15px;
-        margin: 6px 0;
-        border-left: 4px solid #ffd700;
-    }
-    .footer {
-        text-align: center;
-        padding: 20px;
-        color: #666;
-        font-size: 0.8rem;
-        border-top: 1px solid #333;
-        margin-top: 40px;
-        letter-spacing: 1px;
-    }
-    .explanation-box {
-        background: #1a1a2e;
-        border-radius: 12px;
-        padding: 18px;
-        margin: 10px 0;
-        border: 1px solid rgba(255, 215, 0, 0.1);
-        text-align: left;
-        white-space: pre-wrap;
-        font-size: 0.95rem;
-        line-height: 1.6;
-    }
-    .pattern-badge {
-        display: inline-block;
-        background: rgba(255, 215, 0, 0.15);
-        border: 1px solid #ffd700;
-        border-radius: 20px;
-        padding: 4px 14px;
-        margin: 3px;
-        font-size: 0.8rem;
-        color: #ffd700;
-    }
-    .tbs-badge {
-        display: inline-block;
-        background: rgba(255, 136, 0, 0.2);
-        border: 1px solid #ff8800;
-        border-radius: 20px;
-        padding: 4px 14px;
-        margin: 3px;
-        font-size: 0.8rem;
-        color: #ff8800;
-        font-weight: bold;
-    }
-    .status-open { color: #00ff88; font-weight: bold; }
-    .status-closed { color: #ff4444; font-weight: bold; }
-    .reversal-alert {
-        background: rgba(255, 68, 68, 0.15);
-        border: 1px solid #ff4444;
-        border-radius: 10px;
-        padding: 12px 15px;
-        margin: 6px 0;
-    }
+    
+    /* ===== العملات ===== */
     .currency-card {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        background: linear-gradient(135deg, #0a0a0a 0%, #150a05 100%) !important;
+        border: 1px solid rgba(255, 215, 0, 0.1) !important;
         border-radius: 12px;
         padding: 12px 15px;
         text-align: center;
-        border: 1px solid rgba(255, 215, 0, 0.1);
         transition: all 0.3s ease;
         cursor: default;
     }
     .currency-card:hover {
         transform: translateY(-3px);
-        border-color: #ffd700;
-        box-shadow: 0 8px 25px rgba(255,215,0,0.1);
+        border-color: #ffd700 !important;
+        box-shadow: 0 8px 30px rgba(255,215,0,0.08) !important;
     }
-    .news-card {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 10px;
+    .currency-symbol {
+        font-size: 0.75rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .currency-price {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #fff;
+    }
+    
+    /* ===== الأهداف والاستوب ===== */
+    .target-zone {
+        border-left: 4px solid #ffd700 !important;
+        background: linear-gradient(135deg, rgba(255,215,0,0.05) 0%, transparent 100%) !important;
+        padding: 10px 15px;
+        margin: 5px 0;
+    }
+    .target-zone:last-child {
+        border-left-color: #00ff88 !important;
+    }
+    .stop-loss-level {
+        border-left: 4px solid #ff4444 !important;
+        background: linear-gradient(135deg, rgba(255,68,68,0.05) 0%, transparent 100%) !important;
+        padding: 10px 15px;
+        margin: 5px 0;
+    }
+    .entry-zone {
+        border-left: 4px solid #00ff88 !important;
+        background: linear-gradient(135deg, rgba(0,255,136,0.05) 0%, transparent 100%) !important;
+        padding: 10px 15px;
+        margin: 5px 0;
+    }
+    
+    /* ===== صفوف الصفقات ===== */
+    .trade-row {
+        border-left: 4px solid #ffd700 !important;
         padding: 12px 15px;
         margin: 6px 0;
-        border-left: 3px solid #ffd700;
     }
+    
+    /* ===== التذييل ===== */
+    .footer {
+        text-align: center;
+        padding: 20px;
+        color: #555;
+        font-size: 0.75rem;
+        border-top: 1px solid rgba(255,215,0,0.08);
+        margin-top: 40px;
+        letter-spacing: 2px;
+    }
+    .footer .brand {
+        color: #ffd700;
+        font-weight: 600;
+    }
+    
+    /* ===== الأزرار ===== */
     .stButton button {
-        background: linear-gradient(135deg, #ffd700 0%, #f0a500 100%);
-        color: #000;
-        font-weight: bold;
-        border-radius: 12px;
-        border: none;
-        padding: 10px 20px;
-        width: 100%;
-        transition: all 0.3s ease;
+        background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important;
+        color: #000 !important;
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        border: none !important;
+        padding: 10px 20px !important;
+        width: 100% !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 20px rgba(255,215,0,0.1) !important;
     }
     .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(255,215,0,0.3);
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 30px rgba(255,215,0,0.25) !important;
+    }
+    
+    /* ===== شرح القرار ===== */
+    .explanation-box {
+        background: #0a0a0a !important;
+        border: 1px solid rgba(255,215,0,0.08) !important;
+        border-radius: 12px !important;
+        padding: 18px !important;
+        margin: 10px 0 !important;
+        color: #ccc !important;
+        font-size: 0.95rem !important;
+        line-height: 1.7 !important;
+    }
+    
+    /* ===== الأخبار ===== */
+    .news-card {
+        background: linear-gradient(135deg, #0a0a0a 0%, #150a05 100%) !important;
+        border-left: 3px solid #ffd700 !important;
+        border-radius: 10px !important;
+        padding: 12px 15px !important;
+        margin: 6px 0 !important;
+        border: 1px solid rgba(255,215,0,0.08) !important;
+    }
+    .news-title {
+        color: #eee !important;
+        font-weight: 500 !important;
+    }
+    .news-date {
+        color: #666 !important;
+        font-size: 0.8rem !important;
+    }
+    
+    /* ===== التنبيهات ===== */
+    .reversal-alert {
+        border: 1px solid #ff4444 !important;
+        background: linear-gradient(135deg, rgba(255,68,68,0.05) 0%, transparent 100%) !important;
+        padding: 12px 15px !important;
+        margin: 6px 0 !important;
+        border-radius: 10px !important;
+    }
+    
+    /* ===== الشريط الجانبي ===== */
+    .css-1d391kg, .css-1d391kg * {
+        background-color: #0a0a0a !important;
+    }
+    
+    /* ===== الحالة ===== */
+    .status-open { color: #00ff88 !important; font-weight: bold; }
+    .status-closed { color: #ff4444 !important; font-weight: bold; }
+    
+    /* ===== الشارات ===== */
+    .pattern-badge {
+        display: inline-block;
+        background: rgba(255, 215, 0, 0.1) !important;
+        border: 1px solid rgba(255, 215, 0, 0.2) !important;
+        border-radius: 20px !important;
+        padding: 4px 14px !important;
+        margin: 3px !important;
+        font-size: 0.8rem !important;
+        color: #ffd700 !important;
+    }
+    .tbs-badge {
+        display: inline-block;
+        background: rgba(255, 136, 0, 0.15) !important;
+        border: 1px solid rgba(255, 136, 0, 0.3) !important;
+        border-radius: 20px !important;
+        padding: 4px 14px !important;
+        margin: 3px !important;
+        font-size: 0.8rem !important;
+        color: #ff8800 !important;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# الهيدر
+# الهيدر – BLACK PYRAMID
 # ==========================================
 st.markdown("""
 <div class="main-header">
-    <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Integrated Signal System • SMC/ICT • Patterns • TBS • MTF • Smart Entry • Stop Loss & Targets</div>
+    <div class="main-title">
+        <span class="pyramid-icon">▲</span>
+        BLACK PYRAMID
+        <span class="pyramid-icon">▲</span>
+    </div>
+    <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Patterns • TBS • MTF</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -856,7 +959,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
-    # ===== حساب الاستوب والأهداف (دون الاعتماد على planner) =====
+    # ===== حساب الاستوب والأهداف =====
     stop_loss = None
     entry_price = None
     targets = {}
@@ -1313,7 +1416,7 @@ mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
-    <div style="font-size:1rem; color:#888;">{selected_pair_name}</div>
+    <div class="price-label">{selected_pair_name}</div>
     <div class="price-value">{price_format.format(current_price)}</div>
     <div class="price-change" style="color: {'#00ff88' if change >= 0 else '#ff4444'};">
         {change:+.2f}%
@@ -1635,9 +1738,9 @@ if selected_symbol == "GC=F":
 # ==========================================
 # تذييل
 # ==========================================
-st.markdown("""
+st.markdown(f"""
 <div class="footer">
-    𓋹 PHARAOH GOLD DASHBOARD • النسخة المتكاملة 𓋹<br>
-    إشارة + استوب + أهداف في نظام واحد • SMC/ICT • أنماط • TBS • MTF • كشف انعكاسات
+    <span class="brand">▲ BLACK PYRAMID</span> • Advanced Trading Intelligence<br>
+    SMC/ICT • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets
 </div>
 """, unsafe_allow_html=True)
