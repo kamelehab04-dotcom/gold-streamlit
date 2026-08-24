@@ -9,39 +9,285 @@ import numpy as np
 import requests
 import json
 import os
+import time
 
-st.set_page_config(page_title="Pharaoh Gold Dashboard", page_icon="🥇", layout="wide")
+st.set_page_config(
+    page_title="Pharaoh Gold Dashboard",
+    page_icon="🥇",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ==========================================
-# CSS للتنسيق
+# CSS للتنسيق المتقدم
 # ==========================================
 st.markdown("""
 <style>
-    .main-header { text-align: center; padding: 20px; background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%); border-radius: 15px; margin-bottom: 20px; border: 1px solid #ffd70033; }
-    .main-title { font-size: 2rem; color: #ffd700; font-weight: bold; letter-spacing: 2px; }
-    .main-subtitle { font-size: 0.9rem; color: #aaa; }
-    .price-card { background: #1a1a2e; border-radius: 15px; padding: 20px; text-align: center; border: 1px solid #ffd70033; margin: 10px 0; }
-    .price-value { font-size: 3.5rem; font-weight: bold; color: #fff; }
-    .price-change { font-size: 1.2rem; }
-    .signal-box { background: #1a1a2e; border-radius: 15px; padding: 20px; text-align: center; border: 2px solid #ffd700; margin: 15px 0; }
-    .signal-text { font-size: 2.5rem; font-weight: bold; }
-    .signal-confidence { font-size: 1rem; color: #aaa; }
-    .explanation-box { background: #1a1a2e; border-radius: 10px; padding: 15px; margin: 10px 0; border: 1px solid #ffd70033; text-align: left; white-space: pre-wrap; }
-    .trade-row { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
-    .footer { text-align: center; padding: 15px; color: #666; font-size: 0.8rem; border-top: 1px solid #333; margin-top: 30px; }
-    .stButton button { background: #ffd700; color: #000; font-weight: bold; border-radius: 10px; width: 100%; }
-    .news-card { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 3px solid #ffd700; }
-    .news-title { color: #fff; font-weight: bold; }
-    .news-date { color: #888; font-size: 0.8rem; }
-    .suggested-trade { background: #1a1a2e; border-radius: 15px; padding: 15px; border: 2px solid #00ff88; margin: 15px 0; }
-    .pattern-badge { display: inline-block; background: #ffd70033; border: 1px solid #ffd700; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ffd700; }
-    .status-open { color: #00ff88; }
-    .status-closed { color: #ff4444; }
-    .tbs-badge { display: inline-block; background: #ff880033; border: 1px solid #ff8800; border-radius: 12px; padding: 4px 12px; margin: 3px; font-size: 0.8rem; color: #ff8800; font-weight: bold; }
-    .entry-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #00ff88; }
-    .target-zone { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ffd700; }
-    .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
-    .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
+    /* الهيدر الرئيسي */
+    .main-header {
+        text-align: center;
+        padding: 20px 30px;
+        background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #16213e 100%);
+        border-radius: 20px;
+        margin-bottom: 25px;
+        border: 1px solid rgba(255, 215, 0, 0.2);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .main-title {
+        font-size: 2.2rem;
+        color: #ffd700;
+        font-weight: bold;
+        letter-spacing: 3px;
+        text-shadow: 0 0 20px rgba(255,215,0,0.2);
+    }
+    .main-subtitle {
+        font-size: 0.95rem;
+        color: #aaa;
+        letter-spacing: 1px;
+    }
+    
+    /* بطاقة السعر */
+    .price-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 16px;
+        padding: 25px;
+        text-align: center;
+        border: 1px solid rgba(255, 215, 0, 0.15);
+        margin: 10px 0;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    .price-value {
+        font-size: 3.8rem;
+        font-weight: bold;
+        color: #fff;
+        letter-spacing: 1px;
+    }
+    .price-change {
+        font-size: 1.3rem;
+        font-weight: 500;
+    }
+    .price-label {
+        font-size: 1rem;
+        color: #888;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+    }
+    
+    /* صندوق الإشارة */
+    .signal-box {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 16px;
+        padding: 25px;
+        text-align: center;
+        border: 2px solid #ffd700;
+        margin: 15px 0;
+        box-shadow: 0 0 30px rgba(255,215,0,0.05);
+    }
+    .signal-text {
+        font-size: 3rem;
+        font-weight: bold;
+        letter-spacing: 2px;
+    }
+    .signal-confidence {
+        font-size: 1rem;
+        color: #aaa;
+        margin-top: 5px;
+    }
+    
+    /* بطاقات العملات */
+    .currency-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 12px;
+        padding: 12px 15px;
+        text-align: center;
+        border: 1px solid rgba(255, 215, 0, 0.1);
+        transition: all 0.3s ease;
+        cursor: default;
+    }
+    .currency-card:hover {
+        transform: translateY(-3px);
+        border-color: #ffd700;
+        box-shadow: 0 8px 25px rgba(255,215,0,0.1);
+    }
+    .currency-symbol {
+        font-size: 0.75rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .currency-price {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #fff;
+    }
+    .currency-change {
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    
+    /* مناطق الدخول */
+    .entry-zone {
+        background: linear-gradient(135deg, #00ff8822 0%, #00cc6622 100%);
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+        border-left: 4px solid #00ff88;
+    }
+    .target-zone {
+        background: linear-gradient(135deg, #ffd70022 0%, #ffaa0022 100%);
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+        border-left: 4px solid #ffd700;
+    }
+    .stop-loss-level {
+        background: linear-gradient(135deg, #ff444422 0%, #cc333322 100%);
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+        border-left: 4px solid #ff4444;
+    }
+    
+    /* تنبيهات الانعكاس */
+    .reversal-alert {
+        background: linear-gradient(135deg, #ff444422 0%, #cc333322 100%);
+        border: 1px solid #ff4444;
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+    }
+    
+    /* صفوف الصفقات */
+    .trade-row {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+        border-left: 4px solid #ffd700;
+    }
+    
+    /* الأخبار */
+    .news-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+        border-left: 3px solid #ffd700;
+    }
+    .news-title {
+        color: #fff;
+        font-weight: 500;
+    }
+    .news-date {
+        color: #888;
+        font-size: 0.8rem;
+    }
+    
+    /* الصفقة المقترحة */
+    .suggested-trade {
+        background: linear-gradient(135deg, #00ff8822 0%, #00cc6622 100%);
+        border-radius: 15px;
+        padding: 18px;
+        border: 2px solid #00ff88;
+        margin: 15px 0;
+    }
+    
+    /* شارات */
+    .pattern-badge {
+        display: inline-block;
+        background: rgba(255, 215, 0, 0.15);
+        border: 1px solid #ffd700;
+        border-radius: 20px;
+        padding: 4px 14px;
+        margin: 3px;
+        font-size: 0.8rem;
+        color: #ffd700;
+    }
+    .tbs-badge {
+        display: inline-block;
+        background: rgba(255, 136, 0, 0.2);
+        border: 1px solid #ff8800;
+        border-radius: 20px;
+        padding: 4px 14px;
+        margin: 3px;
+        font-size: 0.8rem;
+        color: #ff8800;
+        font-weight: bold;
+    }
+    
+    /* حالة السوق */
+    .status-open { color: #00ff88; font-weight: bold; }
+    .status-closed { color: #ff4444; font-weight: bold; }
+    
+    /* جدول الإشارات */
+    .signals-table-container {
+        background: #1a1a2e;
+        border-radius: 12px;
+        padding: 10px;
+        border: 1px solid rgba(255, 215, 0, 0.1);
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    .signals-table-container::-webkit-scrollbar {
+        width: 4px;
+    }
+    .signals-table-container::-webkit-scrollbar-track {
+        background: #0a0a1a;
+        border-radius: 10px;
+    }
+    .signals-table-container::-webkit-scrollbar-thumb {
+        background: #ffd700;
+        border-radius: 10px;
+    }
+    
+    /* أزرار */
+    .stButton button {
+        background: linear-gradient(135deg, #ffd700 0%, #f0a500 100%);
+        color: #000;
+        font-weight: bold;
+        border-radius: 12px;
+        border: none;
+        padding: 10px 20px;
+        width: 100%;
+        transition: all 0.3s ease;
+    }
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(255,215,0,0.3);
+    }
+    
+    /* تذييل */
+    .footer {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+        font-size: 0.8rem;
+        border-top: 1px solid #333;
+        margin-top: 40px;
+        letter-spacing: 1px;
+    }
+    
+    /* شرح القرار */
+    .explanation-box {
+        background: #1a1a2e;
+        border-radius: 12px;
+        padding: 18px;
+        margin: 10px 0;
+        border: 1px solid rgba(255, 215, 0, 0.1);
+        text-align: left;
+        white-space: pre-wrap;
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+    
+    /* تحذيرات */
+    .warning-box {
+        background: rgba(255, 170, 0, 0.15);
+        border: 1px solid #ffaa00;
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin: 6px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -51,7 +297,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">𓋹 PHARAOH GOLD DASHBOARD 𓋹</div>
-    <div class="main-subtitle">Indicators + SMC/ICT + Patterns + TBS + MTF + Market Status + Smart Entry</div>
+    <div class="main-subtitle">Advanced Analysis • SMC/ICT • Patterns • TBS • MTF • Smart Entry • Real-time Signals</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -62,7 +308,7 @@ GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 # ==========================================
-# قائمة الأزواج
+# قائمة الأزواج الكاملة
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -132,9 +378,13 @@ if "last_update" not in st.session_state:
     st.session_state.last_update = datetime.now()
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
+if "all_signals" not in st.session_state:
+    st.session_state.all_signals = None
+if "signals_loading" not in st.session_state:
+    st.session_state.signals_loading = False
 
 # ==========================================
-# دوال جلب البيانات
+# دوال جلب البيانات الأساسية
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -493,7 +743,7 @@ class SmartTradePlanner:
         }
 
 # ==========================================
-# تحليل SMC/ICT
+# تحليل SMC/ICT + TBS
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -982,6 +1232,57 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
+# دالة جمع إشارات جميع الأزواج (محسّنة)
+# ==========================================
+@st.cache_data(ttl=120)
+def get_all_signals():
+    """جمع إشارات جميع الأزواج في جدول واحد مع معالجة الأخطاء"""
+    results = []
+    for pair_name, symbol in PAIRS.items():
+        try:
+            df = get_historical_data(symbol, period="1mo", interval="1h")
+            if df is None or len(df) < 100:
+                continue
+            current_price = df['close'].iloc[-1]
+            
+            # حساب المؤشرات الأساسية
+            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+            df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+            df['rsi'] = calc_rsi(df['close'])
+            df['atr'] = calc_atr(df)
+            df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
+            df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
+            df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
+            df['vwap'] = calc_vwap(df)
+            tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
+            df['tenkan'] = tenkan
+            df['kijun'] = kijun
+            df['senkou_a'] = senkou_a
+            df['senkou_b'] = senkou_b
+            df['chikou'] = chikou
+            df['mfi'] = calc_mfi(df)
+            
+            signal, confidence, net_score, _, _, _ = generate_advanced_signal(df, current_price, symbol)
+            
+            # تنسيق السعر حسب الزوج
+            if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
+                price_str = f"${current_price:,.2f}"
+            else:
+                price_str = f"{current_price:.4f}"
+            
+            results.append({
+                "الزوج": pair_name,
+                "الإشارة": signal,
+                "الثقة": round(confidence, 1),
+                "النتيجة": net_score,
+                "السعر": price_str
+            })
+        except Exception as e:
+            # تخطي الأزواج التي فشل تحميلها
+            continue
+    return pd.DataFrame(results)
+
+# ==========================================
 # إدارة الصفقات
 # ==========================================
 class TradeManager:
@@ -1076,6 +1377,66 @@ with st.sidebar:
         st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
     st.markdown("---")
+    
+    # ===== عرض جدول الإشارات لجميع الأزواج =====
+    st.markdown("### 📋 جميع الإشارات المتاحة")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 تحديث الكل", use_container_width=True):
+            with st.spinner("جاري تحليل جميع الأزواج..."):
+                st.session_state.all_signals = get_all_signals()
+                st.session_state.last_update = datetime.now()
+                st.rerun()
+    with col2:
+        if st.button("🗑️ مسح", use_container_width=True):
+            st.session_state.all_signals = None
+            st.rerun()
+    
+    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+        df_signals = st.session_state.all_signals.copy()
+        
+        # تلوين الإشارات
+        def color_signal(val):
+            if val == "BUY":
+                return "🟢 شراء"
+            elif val == "SELL":
+                return "🔴 بيع"
+            else:
+                return "⚪ انتظار"
+        
+        df_signals["الإشارة"] = df_signals["الإشارة"].apply(color_signal)
+        
+        # عرض الجدول مع تنسيق جميل
+        st.dataframe(
+            df_signals,
+            column_config={
+                "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
+                "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
+                "الثقة": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
+                "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
+                "السعر": st.column_config.TextColumn("السعر"),
+            },
+            hide_index=True,
+            use_container_width=True,
+            height=300
+        )
+        
+        # عرض عدد الإشارات النشطة مع تنسيق
+        buy_count = len(df_signals[df_signals["الإشارة"] == "🟢 شراء"])
+        sell_count = len(df_signals[df_signals["الإشارة"] == "🔴 بيع"])
+        wait_count = len(df_signals) - buy_count - sell_count
+        
+        col_b, col_s, col_w = st.columns(3)
+        col_b.markdown(f"🟢 **{buy_count}** شراء")
+        col_s.markdown(f"🔴 **{sell_count}** بيع")
+        col_w.markdown(f"⚪ **{wait_count}** انتظار")
+        
+        st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%H:%M:%S')}")
+    else:
+        st.info("اضغط 'تحديث الكل' لعرض جميع الإشارات")
+    
+    st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
     selected_symbol = PAIRS[selected_pair_name]
@@ -1085,7 +1446,9 @@ with st.sidebar:
         st.session_state.show_form = not st.session_state.show_form
         st.rerun()
 
+# ==========================================
 # عرض العملات السريعة
+# ==========================================
 forex_data = get_all_forex()
 if forex_data:
     st.markdown("### 💱 نظرة سريعة على العملات")
@@ -1098,20 +1461,22 @@ if forex_data:
             else:
                 price_str = f"{data['price']:.2f}"
             cols[i].markdown(f"""
-            <div style="background: #1a1a2e; border-radius: 10px; padding: 10px; text-align: center; border: 1px solid #ffd70033;">
-                <div style="font-size: 0.8rem; color: #888;">{name}</div>
-                <div style="font-size: 1.2rem; font-weight: bold; color: #fff;">{price_str}</div>
-                <div style="font-size: 0.9rem; color: {color};">{data['change']:+.2f}%</div>
+            <div class="currency-card">
+                <div class="currency-symbol">{name}</div>
+                <div class="currency-price">{price_str}</div>
+                <div class="currency-change" style="color: {color};">{data['change']:+.2f}%</div>
             </div>
             """, unsafe_allow_html=True)
 
 st.markdown("---")
 
-# جلب البيانات
+# ==========================================
+# جلب البيانات للزوج المختار
+# ==========================================
 current_price, change = get_spot_price(selected_symbol)
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 if df is None:
-    st.error("تعذر تحميل البيانات")
+    st.error("⚠️ تعذر تحميل البيانات. يرجى المحاولة مرة أخرى.")
     st.stop()
 if current_price is None:
     current_price = df['close'].iloc[-1]
@@ -1138,11 +1503,13 @@ df['mfi'] = calc_mfi(df)
 signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
+# ==========================================
 # عرض السعر
+# ==========================================
 price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
 st.markdown(f"""
 <div class="price-card">
-    <div style="font-size:1rem; color:#888;">{selected_pair_name} (Live)</div>
+    <div class="price-label">{selected_pair_name}</div>
     <div class="price-value">{price_format.format(current_price)}</div>
     <div class="price-change" style="color: {'#00ff88' if change >= 0 else '#ff4444'};">
         {change:+.2f}%
@@ -1150,7 +1517,9 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ==========================================
 # زر تحديث البيانات
+# ==========================================
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
     if st.button("🔄 تحديث البيانات", use_container_width=True):
@@ -1162,7 +1531,9 @@ with col_refresh2:
 
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
+# ==========================================
 # عرض المؤشرات
+# ==========================================
 st.markdown("### 📊 مؤشرات السوق")
 cols = st.columns(5)
 last = df.iloc[-1]
@@ -1172,7 +1543,9 @@ cols[2].metric("ADX", f"{last['adx']:.1f}")
 cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
-# عرض مناطق الدخول
+# ==========================================
+# عرض مناطق الدخول والأهداف
+# ==========================================
 st.markdown("---")
 st.markdown("### 🎯 مناطق الدخول والأهداف (استوب دقيق)")
 
@@ -1275,13 +1648,14 @@ if entry_zones and direction != "NEUTRAL":
 else:
     st.info("ℹ️ السوق في حالة عرضية – انتظر تأكيد الاتجاه")
 
-# عرض النماذج
+# ==========================================
+# عرض النماذج و TBS
+# ==========================================
 if patterns:
     st.markdown("#### 📐 النماذج المكتشفة")
     pattern_html = " ".join([f'<span class="pattern-badge">{p["pattern"]} ({p["direction"]})</span>' for p in patterns])
     st.markdown(pattern_html, unsafe_allow_html=True)
 
-# عرض TBS
 tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
 if tbs_type:
     st.markdown("#### 🐢 TBS (Turtle Body Soup) مكتشف!")
@@ -1291,21 +1665,34 @@ if tbs_type:
         st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
+# ==========================================
 # الإشارة
+# ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
+
+# تحديد قوة الإشارة
+if confidence < 40:
+    strength = "ضعيفة جداً"
+elif confidence < 60:
+    strength = "متوسطة"
+else:
+    strength = "قوية"
+
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
 st.markdown(f"""
 <div class="signal-box">
     <div class="signal-text" style="color: {signal_color};">{signal}</div>
-    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score}</div>
+    <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score} | القوة: {strength}</div>
     <div style="font-size:0.9rem; color:#aaa; margin-top:10px;">
         MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
     </div>
 </div>
 """, unsafe_allow_html=True)
 
+# ==========================================
 # شرح القرار
+# ==========================================
 with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
@@ -1436,7 +1823,9 @@ if trade_manager.closed_trades:
         st.metric("إجمالي الربح", f"${total_profit:.2f}")
         st.metric("متوسط الربح", f"${avg_profit:.2f}")
 
+# ==========================================
 # نموذج إضافة صفقة يدوية
+# ==========================================
 if st.session_state.show_form:
     with st.form("new_trade_form"):
         st.subheader("➕ تفاصيل الصفقة")
@@ -1531,7 +1920,7 @@ fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# تحليل الارتباط للذهب
+# تحليل الارتباط للذهب (DXY)
 # ==========================================
 if selected_symbol == "GC=F":
     st.markdown("---")
@@ -1558,7 +1947,7 @@ if selected_symbol == "GC=F":
 # ==========================================
 st.markdown("""
 <div class="footer">
-    GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات
+    𓋹 PHARAOH GOLD DASHBOARD • النسخة النهائية المحسّنة 𓋹<br>
+    جميع أزواج الفوركس • مؤشرات متقدمة • SMC/ICT • أنماط فنية • TBS • MTF • دخول ذكي • استوب دقيق • كشف انعكاسات • لوحة إشارات شاملة
 </div>
 """, unsafe_allow_html=True)
