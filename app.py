@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية مع خلفية واضحة
+# 🖤 BLACK PYRAMID – الهوية البصرية
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -61,7 +61,7 @@ st.markdown("""
         background-size: cover !important;
         background-position: center !important;
         background-attachment: fixed !important;
-        opacity: 0.3 !important;
+        opacity: 0.25 !important;
         pointer-events: none !important;
         z-index: 0 !important;
         filter: brightness(0.9) contrast(1.1) !important;
@@ -103,84 +103,50 @@ st.markdown("""
         border-right: 1px solid rgba(255, 215, 0, 0.05) !important;
     }
 
-    /* ===== الهيدر ===== */
+    /* ===== الهيدر المصغر ===== */
     .main-header {
-        text-align: center;
-        padding: 30px 30px;
-        background: linear-gradient(135deg, rgba(0,0,0,0.7) 0%, rgba(20,10,0,0.6) 50%, rgba(0,0,0,0.7) 100%),
-                    url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
-        background-size: cover !important;
-        background-position: center !important;
-        background-blend-mode: darken !important;
-        border-radius: 20px;
-        margin-bottom: 25px;
-        border: 1px solid rgba(255, 215, 0, 0.15);
-        box-shadow: 0 8px 40px rgba(0,0,0,0.8);
-        position: relative;
-        overflow: hidden;
-        min-height: 180px;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 10px 25px !important;
+        min-height: 55px !important;
+        background: rgba(0, 0, 0, 0.5) !important;
+        backdrop-filter: blur(8px) !important;
+        border-radius: 12px !important;
+        margin-bottom: 15px !important;
+        border: 1px solid rgba(255, 215, 0, 0.08) !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
     }
-    .main-header::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(ellipse at center, rgba(255,215,0,0.05) 0%, transparent 70%);
-        animation: glowPulse 6s ease-in-out infinite;
+    .main-header .main-title {
+        font-size: 1.2rem !important;
+        color: #ffd700 !important;
+        font-weight: 700 !important;
+        letter-spacing: 2px !important;
+        text-shadow: 0 0 20px rgba(255,215,0,0.05) !important;
     }
-    @keyframes glowPulse {
-        0%, 100% { opacity: 0.3; transform: scale(1); }
-        50% { opacity: 0.8; transform: scale(1.1); }
+    .main-header .pyramid-icon {
+        font-size: 0.9rem !important;
+        color: #ffd700 !important;
     }
-    .main-title {
-        font-size: 2.5rem;
-        color: #ffd700;
-        font-weight: 900;
-        text-shadow: 0 0 30px rgba(255,215,0,0.15), 0 0 60px rgba(255,215,0,0.05);
-        position: relative;
-        z-index: 1;
-        letter-spacing: 4px;
-    }
-    .main-title .pyramid-icon {
-        display: inline-block;
-        font-size: 1.8rem;
-        color: #ffd700;
-        text-shadow: 0 0 20px rgba(255,215,0,0.3);
-    }
-    .main-subtitle {
-        font-size: 0.95rem;
-        color: #aaa;
-        letter-spacing: 2px;
-        position: relative;
-        z-index: 1;
-        margin-top: 5px;
-        font-weight: 300;
-    }
-    .main-header::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 10%;
-        width: 80%;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #ffd700, #ffd700, transparent);
-        opacity: 0.4;
+    .main-header .main-subtitle {
+        font-size: 0.55rem !important;
+        color: #666 !important;
+        letter-spacing: 1px !important;
+        margin-top: 2px !important;
     }
 
     /* ===== البطاقات ===== */
     .price-card, .signal-box, .suggested-trade, .trade-row, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
-        background: rgba(10, 10, 10, 0.78) !important;
+        background: rgba(10, 10, 10, 0.75) !important;
         backdrop-filter: blur(6px) !important;
         -webkit-backdrop-filter: blur(6px) !important;
-        border: 1px solid rgba(255, 215, 0, 0.12) !important;
-        box-shadow: 0 4px 30px rgba(0,0,0,0.6) !important;
-        border-radius: 14px !important;
+        border: 1px solid rgba(255, 215, 0, 0.10) !important;
+        box-shadow: 0 4px 30px rgba(0,0,0,0.5) !important;
+        border-radius: 12px !important;
     }
     .price-card {
-        border-color: rgba(255, 215, 0, 0.2) !important;
+        border-color: rgba(255, 215, 0, 0.15) !important;
     }
     .price-value {
         color: #fff !important;
@@ -189,8 +155,8 @@ st.markdown("""
     .price-label {
         color: #888 !important;
         text-transform: uppercase;
-        font-size: 0.8rem;
-        letter-spacing: 3px;
+        font-size: 0.7rem;
+        letter-spacing: 2px;
     }
 
     /* ===== الإشارة ===== */
@@ -205,44 +171,15 @@ st.markdown("""
     /* ===== الصفقة المقترحة ===== */
     .suggested-trade {
         border: 2px solid #00ff88 !important;
-        background: rgba(0, 10, 5, 0.85) !important;
-    }
-
-    /* ===== العملات ===== */
-    .currency-card {
-        background: rgba(10, 10, 10, 0.7) !important;
-        backdrop-filter: blur(4px) !important;
-        -webkit-backdrop-filter: blur(4px) !important;
-        border: 1px solid rgba(255, 215, 0, 0.08) !important;
-        border-radius: 12px;
-        padding: 12px 15px;
-        text-align: center;
-        transition: all 0.3s ease;
-        cursor: default;
-    }
-    .currency-card:hover {
-        transform: translateY(-3px);
-        border-color: #ffd700 !important;
-        box-shadow: 0 8px 30px rgba(255,215,0,0.08) !important;
-    }
-    .currency-symbol {
-        font-size: 0.75rem;
-        color: #888;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    .currency-price {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #fff;
+        background: rgba(0, 10, 5, 0.80) !important;
     }
 
     /* ===== الأهداف والاستوب ===== */
     .target-zone {
         border-left: 4px solid #ffd700 !important;
         background: rgba(255,215,0,0.04) !important;
-        padding: 10px 15px;
-        margin: 5px 0;
+        padding: 8px 12px;
+        margin: 4px 0;
     }
     .target-zone:last-child {
         border-left-color: #00ff88 !important;
@@ -250,32 +187,32 @@ st.markdown("""
     .stop-loss-level {
         border-left: 4px solid #ff4444 !important;
         background: rgba(255,68,68,0.04) !important;
-        padding: 10px 15px;
-        margin: 5px 0;
+        padding: 8px 12px;
+        margin: 4px 0;
     }
     .entry-zone {
         border-left: 4px solid #00ff88 !important;
         background: rgba(0,255,136,0.04) !important;
-        padding: 10px 15px;
-        margin: 5px 0;
+        padding: 8px 12px;
+        margin: 4px 0;
     }
 
     /* ===== صفوف الصفقات ===== */
     .trade-row {
         border-left: 4px solid #ffd700 !important;
-        padding: 12px 15px;
-        margin: 6px 0;
+        padding: 10px 15px;
+        margin: 5px 0;
     }
 
     /* ===== التذييل ===== */
     .footer {
         text-align: center;
-        padding: 20px;
-        color: #555;
-        font-size: 0.75rem;
-        border-top: 1px solid rgba(255,215,0,0.06);
-        margin-top: 40px;
-        letter-spacing: 2px;
+        padding: 15px;
+        color: #444;
+        font-size: 0.65rem;
+        border-top: 1px solid rgba(255,215,0,0.05);
+        margin-top: 30px;
+        letter-spacing: 1px;
     }
     .footer .brand {
         color: #ffd700;
@@ -287,55 +224,58 @@ st.markdown("""
         background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important;
         color: #000 !important;
         font-weight: 700 !important;
-        border-radius: 12px !important;
+        border-radius: 10px !important;
         border: none !important;
-        padding: 10px 20px !important;
+        padding: 8px 16px !important;
         width: 100% !important;
         transition: all 0.3s ease !important;
-        box-shadow: 0 4px 20px rgba(255,215,0,0.1) !important;
+        box-shadow: 0 4px 15px rgba(255,215,0,0.08) !important;
+        font-size: 0.8rem !important;
     }
     .stButton button:hover {
         transform: translateY(-2px) !important;
-        box-shadow: 0 8px 30px rgba(255,215,0,0.25) !important;
+        box-shadow: 0 8px 25px rgba(255,215,0,0.2) !important;
     }
 
     /* ===== شرح القرار ===== */
     .explanation-box {
-        background: rgba(10, 10, 10, 0.85) !important;
-        border: 1px solid rgba(255,215,0,0.06) !important;
-        border-radius: 12px !important;
-        padding: 18px !important;
-        margin: 10px 0 !important;
-        color: #ccc !important;
-        font-size: 0.95rem !important;
-        line-height: 1.7 !important;
+        background: rgba(10, 10, 10, 0.80) !important;
+        border: 1px solid rgba(255,215,0,0.05) !important;
+        border-radius: 10px !important;
+        padding: 15px !important;
+        margin: 8px 0 !important;
+        color: #bbb !important;
+        font-size: 0.9rem !important;
+        line-height: 1.6 !important;
     }
 
     /* ===== الأخبار ===== */
     .news-card {
-        background: rgba(10, 10, 10, 0.7) !important;
+        background: rgba(10, 10, 10, 0.65) !important;
         border-left: 3px solid #ffd700 !important;
-        border-radius: 10px !important;
-        padding: 12px 15px !important;
-        margin: 6px 0 !important;
-        border: 1px solid rgba(255,215,0,0.06) !important;
+        border-radius: 8px !important;
+        padding: 10px 15px !important;
+        margin: 5px 0 !important;
+        border: 1px solid rgba(255,215,0,0.05) !important;
     }
     .news-title {
         color: #eee !important;
         font-weight: 500 !important;
+        font-size: 0.9rem !important;
     }
     .news-date {
         color: #666 !important;
-        font-size: 0.8rem !important;
+        font-size: 0.7rem !important;
     }
 
     /* ===== التنبيهات ===== */
     .reversal-alert {
         border: 1px solid #ff4444 !important;
         background: rgba(255,68,68,0.04) !important;
-        padding: 12px 15px !important;
-        margin: 6px 0 !important;
-        border-radius: 10px !important;
+        padding: 10px 15px !important;
+        margin: 5px 0 !important;
+        border-radius: 8px !important;
+        font-size: 0.85rem !important;
     }
 
     /* ===== الحالة ===== */
@@ -346,38 +286,56 @@ st.markdown("""
     .pattern-badge {
         display: inline-block;
         background: rgba(255, 215, 0, 0.08) !important;
-        border: 1px solid rgba(255, 215, 0, 0.15) !important;
-        border-radius: 20px !important;
-        padding: 4px 14px !important;
-        margin: 3px !important;
-        font-size: 0.8rem !important;
+        border: 1px solid rgba(255, 215, 0, 0.12) !important;
+        border-radius: 16px !important;
+        padding: 3px 12px !important;
+        margin: 2px !important;
+        font-size: 0.7rem !important;
         color: #ffd700 !important;
     }
     .tbs-badge {
         display: inline-block;
-        background: rgba(255, 136, 0, 0.12) !important;
-        border: 1px solid rgba(255, 136, 0, 0.2) !important;
-        border-radius: 20px !important;
-        padding: 4px 14px !important;
-        margin: 3px !important;
-        font-size: 0.8rem !important;
+        background: rgba(255, 136, 0, 0.10) !important;
+        border: 1px solid rgba(255, 136, 0, 0.15) !important;
+        border-radius: 16px !important;
+        padding: 3px 12px !important;
+        margin: 2px !important;
+        font-size: 0.7rem !important;
         color: #ff8800 !important;
         font-weight: bold;
+    }
+
+    /* ===== أزرار المؤشرات ===== */
+    .indicator-toggle {
+        background: rgba(255,215,0,0.05) !important;
+        border: 1px solid rgba(255,215,0,0.08) !important;
+        border-radius: 8px !important;
+        padding: 4px 8px !important;
+        font-size: 0.7rem !important;
+        color: #aaa !important;
+        cursor: pointer !important;
+        text-align: center !important;
+    }
+    .indicator-toggle:hover {
+        background: rgba(255,215,0,0.10) !important;
+        border-color: #ffd700 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# الهيدر – BLACK PYRAMID
+# الهيدر المصغر – BLACK PYRAMID (يمين)
 # ==========================================
 st.markdown("""
 <div class="main-header">
-    <div class="main-title">
-        <span class="pyramid-icon">▲</span>
-        BLACK PYRAMID
-        <span class="pyramid-icon">▲</span>
+    <div style="text-align: right;">
+        <div class="main-title">
+            <span class="pyramid-icon">▲</span>
+            BLACK PYRAMID
+            <span class="pyramid-icon">▲</span>
+        </div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Patterns • TBS • MTF</div>
     </div>
-    <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Patterns • TBS • MTF</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -460,6 +418,8 @@ if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
 if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
+if "show_indicators" not in st.session_state:
+    st.session_state.show_indicators = True
 
 # ==========================================
 # دوال جلب البيانات
@@ -847,7 +807,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل (مع الاستوب والأهداف)
+# نظام التسجيل المتكامل
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -866,7 +826,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3
     }
 
-    # ===== المؤشرات =====
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -928,7 +887,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
-    # SMC
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']
         details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
@@ -1038,7 +996,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     if signal in ["BUY", "SELL"] and confidence >= 60:
         atr_value = last['atr'] if not pd.isna(last['atr']) else 10
         
-        # استخراج كتل الأوامر من آخر 30 شمعة
         blocks = []
         start_idx = max(3, len(df) - 30)
         for i in range(start_idx, len(df) - 1):
@@ -1062,7 +1019,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             stop_loss = max(recent_low, ob_low)
             stop_loss = max(stop_loss, current_price - atr_value * 1.2)
             stop_loss = min(stop_loss, current_price - atr_value * 0.2)
-        else:  # SELL
+        else:
             recent_high = df['high'].iloc[-20:].max()
             ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.5)
             stop_loss = min(recent_high, ob_high)
@@ -1177,7 +1134,6 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
             explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
     
-    # إضافة معلومات الاستوب والأهداف إذا كانت متاحة
     if stop_loss and entry_price and targets:
         explanation += f"\n\n📍 **سعر الدخول المقترح:** {entry_price:.4f}"
         explanation += f"\n🛑 **وقف الخسارة:** {stop_loss:.4f} (المسافة: {abs(entry_price - stop_loss):.4f})"
@@ -1423,30 +1379,6 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# عرض العملات السريعة
-# ==========================================
-forex_data = get_all_forex()
-if forex_data:
-    st.markdown("### 💱 نظرة سريعة على العملات")
-    cols = st.columns(len(forex_data))
-    for i, (name, data) in enumerate(forex_data.items()):
-        if data['price'] > 0:
-            color = "#00ff88" if data['change'] >= 0 else "#ff4444"
-            if 'USD' in name:
-                price_str = f"{data['price']:.4f}"
-            else:
-                price_str = f"{data['price']:.2f}"
-            cols[i].markdown(f"""
-            <div class="currency-card">
-                <div class="currency-symbol">{name}</div>
-                <div class="currency-price">{price_str}</div>
-                <div class="currency-change" style="color: {color};">{data['change']:+.2f}%</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ==========================================
 # جلب البيانات للزوج المختار
 # ==========================================
 current_price, change = get_spot_price(selected_symbol)
@@ -1476,7 +1408,7 @@ df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
 # ==========================================
-# توليد الإشارة المتكاملة (مع الاستوب والأهداف)
+# توليد الإشارة المتكاملة
 # ==========================================
 signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
@@ -1510,23 +1442,33 @@ with col_refresh2:
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ==========================================
-# عرض المؤشرات
+# مؤشرات السوق (قابلة للإخفاء/الإظهار)
 # ==========================================
-st.markdown("### 📊 مؤشرات السوق")
-cols = st.columns(5)
-last = df.iloc[-1]
-cols[0].metric("RSI", f"{last['rsi']:.1f}")
-cols[1].metric("ATR", f"${last['atr']:.2f}")
-cols[2].metric("ADX", f"{last['adx']:.1f}")
-cols[3].metric("VWAP", f"${last['vwap']:.2f}")
-cols[4].metric("MFI", f"{last['mfi']:.1f}")
+col_btn, col_title = st.columns([1, 5])
+with col_btn:
+    btn_label = "📊 إخفاء" if st.session_state.show_indicators else "📊 إظهار"
+    if st.button(btn_label, use_container_width=True):
+        st.session_state.show_indicators = not st.session_state.show_indicators
+        st.rerun()
+with col_title:
+    st.markdown("### مؤشرات السوق")
 
-# ==========================================
-# عرض الصفقة المقترحة المتكاملة
-# ==========================================
+if st.session_state.show_indicators:
+    cols = st.columns(5)
+    last = df.iloc[-1]
+    cols[0].metric("RSI", f"{last['rsi']:.1f}")
+    cols[1].metric("ATR", f"${last['atr']:.2f}")
+    cols[2].metric("ADX", f"{last['adx']:.1f}")
+    cols[3].metric("VWAP", f"${last['vwap']:.2f}")
+    cols[4].metric("MFI", f"{last['mfi']:.1f}")
+else:
+    st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
+
 st.markdown("---")
-st.markdown("### 🎯 الصفقة المقترحة (من الإشارة المتكاملة)")
 
+# ==========================================
+# عرض الصفقة المقترحة
+# ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
@@ -1543,7 +1485,6 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     </div>
     """, unsafe_allow_html=True)
     
-    # زر إضافة الصفقة
     if st.button("➕ إضافة هذه الصفقة", use_container_width=True):
         trade_manager = TradeManager()
         account_balance = 100000
