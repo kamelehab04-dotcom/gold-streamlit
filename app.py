@@ -81,25 +81,25 @@ st.markdown("""
         color: #aaa;
         margin-top: 5px;
     }
-    .entry-zone {
+    .suggested-trade {
         background: linear-gradient(135deg, #00ff8822 0%, #00cc6622 100%);
-        border-radius: 10px;
-        padding: 12px 15px;
-        margin: 6px 0;
-        border-left: 4px solid #00ff88;
+        border-radius: 15px;
+        padding: 18px;
+        border: 2px solid #00ff88;
+        margin: 15px 0;
     }
     .target-zone {
         background: linear-gradient(135deg, #ffd70022 0%, #ffaa0022 100%);
         border-radius: 10px;
-        padding: 12px 15px;
-        margin: 6px 0;
+        padding: 8px 12px;
+        margin: 4px 0;
         border-left: 4px solid #ffd700;
     }
     .stop-loss-level {
         background: linear-gradient(135deg, #ff444422 0%, #cc333322 100%);
         border-radius: 10px;
-        padding: 12px 15px;
-        margin: 6px 0;
+        padding: 8px 12px;
+        margin: 4px 0;
         border-left: 4px solid #ff4444;
     }
     .trade-row {
@@ -128,13 +128,6 @@ st.markdown("""
         white-space: pre-wrap;
         font-size: 0.95rem;
         line-height: 1.6;
-    }
-    .suggested-trade {
-        background: linear-gradient(135deg, #00ff8822 0%, #00cc6622 100%);
-        border-radius: 15px;
-        padding: 18px;
-        border: 2px solid #00ff88;
-        margin: 15px 0;
     }
     .pattern-badge {
         display: inline-block;
@@ -699,6 +692,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3
     }
 
+    # ===== المؤشرات =====
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -760,6 +754,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
+    # SMC
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']
         details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
@@ -861,34 +856,45 @@ def generate_advanced_signal(df, current_price, symbol=""):
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
-    # ===== حساب الاستوب والأهداف بناءً على الإشارة =====
-    atr_value = last['atr'] if not pd.isna(last['atr']) else 10
+    # ===== حساب الاستوب والأهداف (دون الاعتماد على planner) =====
     stop_loss = None
     entry_price = None
     targets = {}
     
     if signal in ["BUY", "SELL"] and confidence >= 60:
-        # حساب سعر الدخول
+        atr_value = last['atr'] if not pd.isna(last['atr']) else 10
+        
+        # استخراج كتل الأوامر من آخر 30 شمعة
+        blocks = []
+        start_idx = max(3, len(df) - 30)
+        for i in range(start_idx, len(df) - 1):
+            if df['close'].iloc[i] > df['open'].iloc[i]:
+                body = df['close'].iloc[i] - df['open'].iloc[i]
+                avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
+                if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
+                    blocks.append(('bullish', df['low'].iloc[i-1], df['high'].iloc[i-1]))
+            if df['close'].iloc[i] < df['open'].iloc[i]:
+                body = df['open'].iloc[i] - df['close'].iloc[i]
+                avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
+                if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
+                    blocks.append(('bearish', df['low'].iloc[i-1], df['high'].iloc[i-1]))
+        order_blocks = blocks[-5:] if blocks else []
+        
         entry_price = current_price
         
-        # حساب وقف الخسارة
         if signal == "BUY":
-            # أقرب قاع محلي
             recent_low = df['low'].iloc[-20:].min()
-            # كتلة أوامر شراء
-            ob_low = min([block[1] for block in planner.order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.5)
-            # اختيار الأقرب للسعر
+            ob_low = min([block[1] for block in order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.5)
             stop_loss = max(recent_low, ob_low)
             stop_loss = max(stop_loss, current_price - atr_value * 1.2)
             stop_loss = min(stop_loss, current_price - atr_value * 0.2)
         else:  # SELL
             recent_high = df['high'].iloc[-20:].max()
-            ob_high = max([block[2] for block in planner.order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.5)
+            ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.5)
             stop_loss = min(recent_high, ob_high)
             stop_loss = min(stop_loss, current_price + atr_value * 1.2)
             stop_loss = max(stop_loss, current_price + atr_value * 0.2)
         
-        # حساب الأهداف (1:1, 1:1.5, 1:2)
         risk = abs(entry_price - stop_loss) if stop_loss else atr_value
         if signal == "BUY":
             targets = {
@@ -1354,11 +1360,11 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     st.markdown(f"""
     <div class="suggested-trade">
         <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
-        <b>سعر الدخول المقترح:</b> {price_format.format(entry_price)}<br>
+        <b>📍 سعر الدخول المقترح:</b> {price_format.format(entry_price)}<br>
         <b>🛑 وقف الخسارة:</b> {price_format.format(stop_loss)} (المسافة: {abs(entry_price - stop_loss):.2f} نقطة)<br>
-        <b>🎯 الهدف 1 (1:1):</b> {price_format.format(targets['target1'])}<br>
-        <b>🎯 الهدف 2 (1:1.5):</b> {price_format.format(targets['target2'])}<br>
-        <b>🎯 الهدف 3 (1:2):</b> {price_format.format(targets['target3'])}<br>
+        <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_format.format(targets['target1'])}</div>
+        <div class="target-zone" style="border-left-color: #ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_format.format(targets['target2'])}</div>
+        <div class="target-zone" style="border-left-color: #00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_format.format(targets['target3'])}</div>
         <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> {risk_reward}
     </div>
     """, unsafe_allow_html=True)
@@ -1380,7 +1386,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
             "stop_loss": stop_loss,
             "take_profit": targets['target2'],
             "trailing_enabled": True,
-            "trailing_distance": atr_value * 0.3,
+            "trailing_distance": last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else 3,
             "notes": f"مقترحة من الإشارة المتكاملة (الثقة {confidence:.0f}%)"
         }
         trade_id = trade_manager.add_trade(trade_data)
