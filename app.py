@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية مع الصورة الخلفية
+# 🖤 BLACK PYRAMID – الهوية البصرية مع خلفية كاملة
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -36,8 +36,14 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* ===== خلفية الصفحة مع الصورة ===== */
-    html, body, .stApp {
+    /* ===== خلفية الصفحة بالكامل ===== */
+    html, body, .stApp, .stApp > header, .stApp > .main, .stApp > .sidebar {
+        background: transparent !important;
+    }
+
+    /* ===== خلفية الموقع بالكامل مع الصورة ===== */
+    .stApp {
+        position: relative !important;
         background: #0a0a0a !important;
     }
 
@@ -51,9 +57,10 @@ st.markdown("""
         background: url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
         background-size: cover !important;
         background-position: center !important;
-        opacity: 0.08 !important;
+        background-attachment: fixed !important;
+        opacity: 0.15 !important;
         pointer-events: none !important;
-        z-index: -1 !important;
+        z-index: 0 !important;
     }
 
     /* ===== توهج خلفي متحرك ===== */
@@ -67,12 +74,28 @@ st.markdown("""
         background: radial-gradient(ellipse at 30% 20%, rgba(255,215,0,0.03) 0%, transparent 50%),
                     radial-gradient(ellipse at 70% 80%, rgba(255,215,0,0.02) 0%, transparent 50%);
         pointer-events: none;
-        z-index: -2;
+        z-index: 0;
         animation: bgPulse 10s ease-in-out infinite;
     }
     @keyframes bgPulse {
         0%, 100% { opacity: 0.5; transform: scale(1) rotate(0deg); }
         50% { opacity: 1; transform: scale(1.05) rotate(0.5deg); }
+    }
+
+    /* ===== جميع المحتويات فوق الخلفية ===== */
+    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, 
+    .entry-zone, .target-zone, .stop-loss-level, .reversal-alert,
+    .currency-card, .news-card, .explanation-box, .stButton button,
+    .stSelectbox, .stTextInput, .stNumberInput, .stDataFrame {
+        position: relative !important;
+        z-index: 1 !important;
+    }
+
+    /* ===== الشريط الجانبي ===== */
+    .css-1d391kg, .css-1d391kg * {
+        background: rgba(10, 10, 10, 0.85) !important;
+        backdrop-filter: blur(10px) !important;
+        border-right: 1px solid rgba(255, 215, 0, 0.05) !important;
     }
 
     /* ===== الهيدر مع الصورة ===== */
@@ -145,7 +168,7 @@ st.markdown("""
     .price-card, .signal-box, .suggested-trade, .trade-row, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
         background: rgba(10, 10, 10, 0.85) !important;
-        backdrop-filter: blur(2px) !important;
+        backdrop-filter: blur(5px) !important;
         border: 1px solid rgba(255, 215, 0, 0.12) !important;
         box-shadow: 0 4px 30px rgba(0,0,0,0.6) !important;
         border-radius: 14px !important;
@@ -182,7 +205,7 @@ st.markdown("""
     /* ===== العملات ===== */
     .currency-card {
         background: rgba(10, 10, 10, 0.8) !important;
-        backdrop-filter: blur(2px) !important;
+        backdrop-filter: blur(5px) !important;
         border: 1px solid rgba(255, 215, 0, 0.08) !important;
         border-radius: 12px;
         padding: 12px 15px;
