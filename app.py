@@ -43,6 +43,7 @@ st.markdown("""
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
     .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
     .warning-box { background: #ffaa0033; border: 1px solid #ffaa00; border-radius: 10px; padding: 10px; margin: 5px 0; }
+    .threshold-info { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border: 1px solid #ffd70033; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,6 +134,8 @@ if "last_update" not in st.session_state:
     st.session_state.last_update = datetime.now()
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
+if "threshold" not in st.session_state:
+    st.session_state.threshold = 7
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -668,9 +671,9 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل + كشف الانعكاسات
+# نظام التسجيل + كشف الانعكاسات (مع عتبة متغيرة)
 # ==========================================
-def generate_advanced_signal(df, current_price, symbol=""):
+def generate_advanced_signal(df, current_price, symbol="", threshold=7):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None
 
@@ -828,11 +831,11 @@ def generate_advanced_signal(df, current_price, symbol=""):
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     
-    # ===== عتبة الإشارة مرفوعة إلى 7 نقاط =====
-    if net_score >= 7:
+    # ===== استخدام العتبة الديناميكية من المستخدم =====
+    if net_score >= threshold:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
-    elif net_score <= -7:
+    elif net_score <= -threshold:
         signal = "SELL"
         confidence = min(100, 60 + (abs(net_score) / total_weight) * 100)
     else:
@@ -914,27 +917,28 @@ def detect_reversal(df, trade):
 # ==========================================
 # شرح القرار
 # ==========================================
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price):
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, threshold):
     explanation = ""
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
             if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي"]):
                 explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥7 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥{threshold} للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
             if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS"]):
                 explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-7 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-{threshold} للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
         explanation = "⏳ **قرار الانتظار** بسبب:\n"
-        explanation += f"- النتيجة الصافية {net_score} بين -7 و +7 (لا يوجد إجماع قوي).\n- تفاصيل النقاط:\n"
+        explanation += f"- النتيجة الصافية {net_score} بين -{threshold} و +{threshold} (لا يوجد إجماع قوي).\n- تفاصيل النقاط:\n"
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
-        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±7 أو تتحسن الثقة فوق 60%."
-    explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
+        explanation += f"💡 **نصيحة**: خفّض العتبة (حالياً {threshold}) للحصول على إشارات أكثر، أو ارفعها لإشارات أقوى."
+    explanation += f"\n\n⚙️ **عتبة الإشارة الحالية:** {threshold} نقطة"
+    explanation += f"\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
     if patterns:
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
         for p in patterns:
@@ -1079,6 +1083,35 @@ with st.sidebar:
         st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
     st.markdown("---")
+    
+    # ===== منزلق التحكم بحساسية الإشارة =====
+    st.markdown("### 🎯 حساسية الإشارة")
+    threshold = st.slider(
+        "عتبة الإشارة (نقاط)",
+        min_value=3,
+        max_value=10,
+        value=st.session_state.threshold,
+        step=1,
+        help="كلما زادت القيمة، قلّت الإشارات ولكن أصبحت أقوى. القيمة 5 تعطي إشارات متوسطة، 7 تعطي إشارات قوية."
+    )
+    st.session_state.threshold = threshold
+    
+    # عرض تفسير بسيط للعتبة
+    if threshold <= 4:
+        threshold_desc = "🔽 **حساسة جداً** – إشارات كثيرة (قد تكون ضعيفة)"
+    elif threshold <= 6:
+        threshold_desc = "⚖️ **متوسطة** – توازن بين الكمية والجودة"
+    elif threshold <= 8:
+        threshold_desc = "🔼 **قوية** – إشارات أقل ولكن أقوى"
+    else:
+        threshold_desc = "🔺 **صارمة جداً** – إشارات نادرة ولكن عالية الجودة"
+    st.markdown(f"""
+    <div class="threshold-info">
+        {threshold_desc}
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
     selected_symbol = PAIRS[selected_pair_name]
@@ -1137,8 +1170,8 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# توليد الإشارة
-signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
+# توليد الإشارة مع العتبة المختارة
+signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol, threshold)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # عرض السعر
@@ -1176,7 +1209,7 @@ cols[3].metric("VWAP", f"${last['vwap']:.2f}")
 cols[4].metric("MFI", f"{last['mfi']:.1f}")
 
 # ==========================================
-# عرض مناطق الدخول (معدل – متوافق مع الإشارة)
+# عرض مناطق الدخول (متوافق مع الإشارة)
 # ==========================================
 st.markdown("---")
 st.markdown("### 🎯 مناطق الدخول والأهداف (استوب دقيق)")
@@ -1186,7 +1219,7 @@ planner = SmartTradePlanner(df, current_price, atr_value)
 entry_zones, direction = planner.get_entry_zones()
 
 if entry_zones and direction != "NEUTRAL":
-    # ✅ الاتجاه المتوقع يتبع الإشارة النهائية
+    # الاتجاه المتوقع يتبع الإشارة النهائية
     if signal == "BUY":
         st.markdown(f"**الاتجاه المتوقع:** 🟢 شراء (متوافق مع الإشارة - ثقة {confidence:.0f}%)")
     elif signal == "SELL":
@@ -1194,7 +1227,7 @@ if entry_zones and direction != "NEUTRAL":
     else:
         st.markdown(f"**الاتجاه المتوقع:** ⚪ محايد (انتظر)")
     
-    # ⚠️ تحذير في حالة التعارض
+    # تحذير في حالة التعارض
     if (direction == "BUY" and signal == "SELL") or (direction == "SELL" and signal == "BUY"):
         st.warning(f"⚠️ تعارض: الاتجاه المتوقع ({direction}) يختلف عن الإشارة ({signal}). الإشارة النهائية هي {signal}.")
     
@@ -1281,7 +1314,7 @@ if entry_zones and direction != "NEUTRAL":
             "take_profit": targets['target2'],
             "trailing_enabled": True,
             "trailing_distance": atr_value * 0.3,
-            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%)"
+            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%) | العتبة: {threshold}"
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
@@ -1307,7 +1340,7 @@ if tbs_type:
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
 # ==========================================
-# الإشارة (معدلة مع قوة الإشارة)
+# الإشارة (مع قوة الإشارة والعتبة)
 # ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
@@ -1326,14 +1359,14 @@ st.markdown(f"""
     <div class="signal-text" style="color: {signal_color};">{signal}</div>
     <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score} | القوة: {strength}</div>
     <div style="font-size:0.9rem; color:#aaa; margin-top:10px;">
-        MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
+        ⚙️ العتبة: {threshold} نقطة | MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # شرح القرار
 with st.expander("📝 شرح القرار", expanded=True):
-    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price)
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, threshold)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
@@ -1380,7 +1413,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
                 "take_profit": take_profit,
                 "trailing_enabled": enable_trailing,
                 "trailing_distance": trail_distance / 100,
-                "notes": f"مقترحة من البوت (الثقة {confidence:.0f}%)"
+                "notes": f"مقترحة من البوت (الثقة {confidence:.0f}%) | العتبة: {threshold}"
             }
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
@@ -1585,6 +1618,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات | عتبة إشارة محسّنة (7 نقاط)
+    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات | عتبة إشارة قابلة للتعديل (3-10 نقاط)
 </div>
 """, unsafe_allow_html=True)
