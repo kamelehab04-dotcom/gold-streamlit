@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية
+# 🖤 BLACK PYRAMID – الهوية البصرية مع الصورة الخلفية
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -35,18 +35,62 @@ st.markdown("""
         font-family: 'Inter', sans-serif !important;
         letter-spacing: 1px;
     }
-    
-    /* ===== الهيدر ===== */
+
+    /* ===== خلفية الصفحة مع الصورة ===== */
+    html, body, .stApp {
+        background: #0a0a0a !important;
+    }
+
+    .stApp::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
+        background-size: cover !important;
+        background-position: center !important;
+        opacity: 0.08 !important;
+        pointer-events: none !important;
+        z-index: -1 !important;
+    }
+
+    /* ===== توهج خلفي متحرك ===== */
+    .stApp::after {
+        content: '';
+        position: fixed;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(ellipse at 30% 20%, rgba(255,215,0,0.03) 0%, transparent 50%),
+                    radial-gradient(ellipse at 70% 80%, rgba(255,215,0,0.02) 0%, transparent 50%);
+        pointer-events: none;
+        z-index: -2;
+        animation: bgPulse 10s ease-in-out infinite;
+    }
+    @keyframes bgPulse {
+        0%, 100% { opacity: 0.5; transform: scale(1) rotate(0deg); }
+        50% { opacity: 1; transform: scale(1.05) rotate(0.5deg); }
+    }
+
+    /* ===== الهيدر مع الصورة ===== */
     .main-header {
         text-align: center;
-        padding: 25px 30px;
-        background: linear-gradient(135deg, #0a0a0a 0%, #1a0a00 50%, #0a0a0a 100%) !important;
+        padding: 30px 30px;
+        background: linear-gradient(135deg, rgba(0,0,0,0.88) 0%, rgba(20,10,0,0.82) 50%, rgba(0,0,0,0.88) 100%),
+                    url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
+        background-size: cover !important;
+        background-position: center !important;
+        background-blend-mode: overlay !important;
         border-radius: 20px;
         margin-bottom: 25px;
-        border: 1px solid rgba(255, 215, 0, 0.2);
+        border: 1px solid rgba(255, 215, 0, 0.15);
         box-shadow: 0 8px 40px rgba(0,0,0,0.8);
         position: relative;
         overflow: hidden;
+        min-height: 180px;
     }
     .main-header::before {
         content: '';
@@ -56,9 +100,9 @@ st.markdown("""
         width: 200%;
         height: 200%;
         background: radial-gradient(ellipse at center, rgba(255,215,0,0.05) 0%, transparent 70%);
-        animation: pulseGlow 6s ease-in-out infinite;
+        animation: glowPulse 6s ease-in-out infinite;
     }
-    @keyframes pulseGlow {
+    @keyframes glowPulse {
         0%, 100% { opacity: 0.3; transform: scale(1); }
         50% { opacity: 0.8; transform: scale(1.1); }
     }
@@ -96,17 +140,18 @@ st.markdown("""
         background: linear-gradient(90deg, transparent, #ffd700, #ffd700, transparent);
         opacity: 0.4;
     }
-    
+
     /* ===== البطاقات ===== */
     .price-card, .signal-box, .suggested-trade, .trade-row, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
-        background: linear-gradient(135deg, #0a0a0a 0%, #150a05 50%, #0a0a0a 100%) !important;
-        border: 1px solid rgba(255, 215, 0, 0.15) !important;
+        background: rgba(10, 10, 10, 0.85) !important;
+        backdrop-filter: blur(2px) !important;
+        border: 1px solid rgba(255, 215, 0, 0.12) !important;
         box-shadow: 0 4px 30px rgba(0,0,0,0.6) !important;
         border-radius: 14px !important;
     }
     .price-card {
-        border-color: rgba(255, 215, 0, 0.25) !important;
+        border-color: rgba(255, 215, 0, 0.2) !important;
     }
     .price-value {
         color: #fff !important;
@@ -118,7 +163,7 @@ st.markdown("""
         font-size: 0.8rem;
         letter-spacing: 3px;
     }
-    
+
     /* ===== الإشارة ===== */
     .signal-box {
         border: 2px solid #ffd700 !important;
@@ -127,17 +172,18 @@ st.markdown("""
     .signal-text {
         text-shadow: 0 0 40px currentColor;
     }
-    
+
     /* ===== الصفقة المقترحة ===== */
     .suggested-trade {
         border: 2px solid #00ff88 !important;
-        background: linear-gradient(135deg, #0a0a0a 0%, #001a0a 50%, #0a0a0a 100%) !important;
+        background: rgba(0, 10, 5, 0.85) !important;
     }
-    
+
     /* ===== العملات ===== */
     .currency-card {
-        background: linear-gradient(135deg, #0a0a0a 0%, #150a05 100%) !important;
-        border: 1px solid rgba(255, 215, 0, 0.1) !important;
+        background: rgba(10, 10, 10, 0.8) !important;
+        backdrop-filter: blur(2px) !important;
+        border: 1px solid rgba(255, 215, 0, 0.08) !important;
         border-radius: 12px;
         padding: 12px 15px;
         text-align: center;
@@ -160,11 +206,11 @@ st.markdown("""
         font-weight: bold;
         color: #fff;
     }
-    
+
     /* ===== الأهداف والاستوب ===== */
     .target-zone {
         border-left: 4px solid #ffd700 !important;
-        background: linear-gradient(135deg, rgba(255,215,0,0.05) 0%, transparent 100%) !important;
+        background: rgba(255,215,0,0.04) !important;
         padding: 10px 15px;
         margin: 5px 0;
     }
@@ -173,31 +219,31 @@ st.markdown("""
     }
     .stop-loss-level {
         border-left: 4px solid #ff4444 !important;
-        background: linear-gradient(135deg, rgba(255,68,68,0.05) 0%, transparent 100%) !important;
+        background: rgba(255,68,68,0.04) !important;
         padding: 10px 15px;
         margin: 5px 0;
     }
     .entry-zone {
         border-left: 4px solid #00ff88 !important;
-        background: linear-gradient(135deg, rgba(0,255,136,0.05) 0%, transparent 100%) !important;
+        background: rgba(0,255,136,0.04) !important;
         padding: 10px 15px;
         margin: 5px 0;
     }
-    
+
     /* ===== صفوف الصفقات ===== */
     .trade-row {
         border-left: 4px solid #ffd700 !important;
         padding: 12px 15px;
         margin: 6px 0;
     }
-    
+
     /* ===== التذييل ===== */
     .footer {
         text-align: center;
         padding: 20px;
         color: #555;
         font-size: 0.75rem;
-        border-top: 1px solid rgba(255,215,0,0.08);
+        border-top: 1px solid rgba(255,215,0,0.06);
         margin-top: 40px;
         letter-spacing: 2px;
     }
@@ -205,7 +251,7 @@ st.markdown("""
         color: #ffd700;
         font-weight: 600;
     }
-    
+
     /* ===== الأزرار ===== */
     .stButton button {
         background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important;
@@ -222,11 +268,11 @@ st.markdown("""
         transform: translateY(-2px) !important;
         box-shadow: 0 8px 30px rgba(255,215,0,0.25) !important;
     }
-    
+
     /* ===== شرح القرار ===== */
     .explanation-box {
-        background: #0a0a0a !important;
-        border: 1px solid rgba(255,215,0,0.08) !important;
+        background: rgba(10, 10, 10, 0.9) !important;
+        border: 1px solid rgba(255,215,0,0.06) !important;
         border-radius: 12px !important;
         padding: 18px !important;
         margin: 10px 0 !important;
@@ -234,15 +280,15 @@ st.markdown("""
         font-size: 0.95rem !important;
         line-height: 1.7 !important;
     }
-    
+
     /* ===== الأخبار ===== */
     .news-card {
-        background: linear-gradient(135deg, #0a0a0a 0%, #150a05 100%) !important;
+        background: rgba(10, 10, 10, 0.8) !important;
         border-left: 3px solid #ffd700 !important;
         border-radius: 10px !important;
         padding: 12px 15px !important;
         margin: 6px 0 !important;
-        border: 1px solid rgba(255,215,0,0.08) !important;
+        border: 1px solid rgba(255,215,0,0.06) !important;
     }
     .news-title {
         color: #eee !important;
@@ -252,30 +298,25 @@ st.markdown("""
         color: #666 !important;
         font-size: 0.8rem !important;
     }
-    
+
     /* ===== التنبيهات ===== */
     .reversal-alert {
         border: 1px solid #ff4444 !important;
-        background: linear-gradient(135deg, rgba(255,68,68,0.05) 0%, transparent 100%) !important;
+        background: rgba(255,68,68,0.04) !important;
         padding: 12px 15px !important;
         margin: 6px 0 !important;
         border-radius: 10px !important;
     }
-    
-    /* ===== الشريط الجانبي ===== */
-    .css-1d391kg, .css-1d391kg * {
-        background-color: #0a0a0a !important;
-    }
-    
+
     /* ===== الحالة ===== */
     .status-open { color: #00ff88 !important; font-weight: bold; }
     .status-closed { color: #ff4444 !important; font-weight: bold; }
-    
+
     /* ===== الشارات ===== */
     .pattern-badge {
         display: inline-block;
-        background: rgba(255, 215, 0, 0.1) !important;
-        border: 1px solid rgba(255, 215, 0, 0.2) !important;
+        background: rgba(255, 215, 0, 0.08) !important;
+        border: 1px solid rgba(255, 215, 0, 0.15) !important;
         border-radius: 20px !important;
         padding: 4px 14px !important;
         margin: 3px !important;
@@ -284,8 +325,8 @@ st.markdown("""
     }
     .tbs-badge {
         display: inline-block;
-        background: rgba(255, 136, 0, 0.15) !important;
-        border: 1px solid rgba(255, 136, 0, 0.3) !important;
+        background: rgba(255, 136, 0, 0.12) !important;
+        border: 1px solid rgba(255, 136, 0, 0.2) !important;
         border-radius: 20px !important;
         padding: 4px 14px !important;
         margin: 3px !important;
