@@ -43,7 +43,7 @@ st.markdown("""
     .stop-loss-level { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border-left: 4px solid #ff4444; }
     .reversal-alert { background: #ff444422; border: 1px solid #ff4444; border-radius: 10px; padding: 10px; margin: 5px 0; }
     .warning-box { background: #ffaa0033; border: 1px solid #ffaa00; border-radius: 10px; padding: 10px; margin: 5px 0; }
-    .threshold-info { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border: 1px solid #ffd70033; text-align: center; }
+    .signals-table { background: #1a1a2e; border-radius: 10px; padding: 10px; margin: 5px 0; border: 1px solid #ffd70033; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,8 +134,8 @@ if "last_update" not in st.session_state:
     st.session_state.last_update = datetime.now()
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
-if "threshold" not in st.session_state:
-    st.session_state.threshold = 7
+if "all_signals" not in st.session_state:
+    st.session_state.all_signals = None
 
 # ==========================================
 # دوال جلب البيانات وحالة السوق
@@ -671,9 +671,9 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل + كشف الانعكاسات (مع عتبة متغيرة)
+# نظام التسجيل (عتبة ثابتة = 5)
 # ==========================================
-def generate_advanced_signal(df, current_price, symbol="", threshold=7):
+def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None
 
@@ -831,11 +831,11 @@ def generate_advanced_signal(df, current_price, symbol="", threshold=7):
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     
-    # ===== استخدام العتبة الديناميكية من المستخدم =====
-    if net_score >= threshold:
+    # ===== عتبة ثابتة = 5 نقاط (كما كانت في البداية) =====
+    if net_score >= 5:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
-    elif net_score <= -threshold:
+    elif net_score <= -5:
         signal = "SELL"
         confidence = min(100, 60 + (abs(net_score) / total_weight) * 100)
     else:
@@ -917,28 +917,27 @@ def detect_reversal(df, trade):
 # ==========================================
 # شرح القرار
 # ==========================================
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, threshold):
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price):
     explanation = ""
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
             if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي"]):
                 explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥{threshold} للشراء)\n📈 **الثقة**: {confidence:.0f}%"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
             if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS"]):
                 explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-{threshold} للبيع)\n📉 **الثقة**: {confidence:.0f}%"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
         explanation = "⏳ **قرار الانتظار** بسبب:\n"
-        explanation += f"- النتيجة الصافية {net_score} بين -{threshold} و +{threshold} (لا يوجد إجماع قوي).\n- تفاصيل النقاط:\n"
+        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع قوي).\n- تفاصيل النقاط:\n"
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
-        explanation += f"💡 **نصيحة**: خفّض العتبة (حالياً {threshold}) للحصول على إشارات أكثر، أو ارفعها لإشارات أقوى."
-    explanation += f"\n\n⚙️ **عتبة الإشارة الحالية:** {threshold} نقطة"
-    explanation += f"\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
+        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
+    explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
     if patterns:
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
         for p in patterns:
@@ -1068,6 +1067,50 @@ class TradeManager:
         return None
 
 # ==========================================
+# دالة لجمع إشارات جميع الأزواج
+# ==========================================
+def get_all_signals():
+    """جمع إشارات جميع الأزواج في جدول واحد"""
+    results = []
+    for pair_name, symbol in PAIRS.items():
+        try:
+            df = get_historical_data(symbol, period="1mo", interval="1h")
+            if df is None or len(df) < 100:
+                continue
+            current_price = df['close'].iloc[-1]
+            
+            # حساب المؤشرات الأساسية (نفس الكود)
+            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+            df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+            df['rsi'] = calc_rsi(df['close'])
+            df['atr'] = calc_atr(df)
+            df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
+            df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
+            df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
+            df['vwap'] = calc_vwap(df)
+            tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
+            df['tenkan'] = tenkan
+            df['kijun'] = kijun
+            df['senkou_a'] = senkou_a
+            df['senkou_b'] = senkou_b
+            df['chikou'] = chikou
+            df['mfi'] = calc_mfi(df)
+            
+            signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, symbol)
+            
+            results.append({
+                "الزوج": pair_name,
+                "الإشارة": signal,
+                "الثقة (%)": round(confidence, 1),
+                "النتيجة": net_score,
+                "السعر": round(current_price, 2)
+            })
+        except Exception as e:
+            # في حال فشل تحليل زوج معين، نمرره
+            continue
+    return pd.DataFrame(results)
+
+# ==========================================
 # الواجهة الرئيسية
 # ==========================================
 
@@ -1084,32 +1127,46 @@ with st.sidebar:
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
     st.markdown("---")
     
-    # ===== منزلق التحكم بحساسية الإشارة =====
-    st.markdown("### 🎯 حساسية الإشارة")
-    threshold = st.slider(
-        "عتبة الإشارة (نقاط)",
-        min_value=3,
-        max_value=10,
-        value=st.session_state.threshold,
-        step=1,
-        help="كلما زادت القيمة، قلّت الإشارات ولكن أصبحت أقوى. القيمة 5 تعطي إشارات متوسطة، 7 تعطي إشارات قوية."
-    )
-    st.session_state.threshold = threshold
+    # ===== عرض جدول الإشارات لجميع الأزواج =====
+    st.markdown("### 📋 جميع الإشارات المتاحة")
+    if st.button("🔄 تحديث الإشارات", use_container_width=True):
+        with st.spinner("جاري تحليل جميع الأزواج..."):
+            st.session_state.all_signals = get_all_signals()
     
-    # عرض تفسير بسيط للعتبة
-    if threshold <= 4:
-        threshold_desc = "🔽 **حساسة جداً** – إشارات كثيرة (قد تكون ضعيفة)"
-    elif threshold <= 6:
-        threshold_desc = "⚖️ **متوسطة** – توازن بين الكمية والجودة"
-    elif threshold <= 8:
-        threshold_desc = "🔼 **قوية** – إشارات أقل ولكن أقوى"
+    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+        df_signals = st.session_state.all_signals.copy()
+        
+        # تلوين الإشارات
+        def color_signal(val):
+            if val == "BUY":
+                return "🟢 BUY"
+            elif val == "SELL":
+                return "🔴 SELL"
+            else:
+                return "⚪ WAIT"
+        
+        df_signals["الإشارة"] = df_signals["الإشارة"].apply(color_signal)
+        
+        # عرض الجدول مع تنسيق
+        st.dataframe(
+            df_signals,
+            column_config={
+                "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
+                "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
+                "الثقة (%)": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
+                "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
+                "السعر": st.column_config.NumberColumn("السعر", format="$%.2f"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # عرض عدد الإشارات النشطة
+        buy_count = len(df_signals[df_signals["الإشارة"] == "🟢 BUY"])
+        sell_count = len(df_signals[df_signals["الإشارة"] == "🔴 SELL"])
+        st.caption(f"🟢 شراء: {buy_count} | 🔴 بيع: {sell_count} | ⚪ انتظار: {len(df_signals) - buy_count - sell_count}")
     else:
-        threshold_desc = "🔺 **صارمة جداً** – إشارات نادرة ولكن عالية الجودة"
-    st.markdown(f"""
-    <div class="threshold-info">
-        {threshold_desc}
-    </div>
-    """, unsafe_allow_html=True)
+        st.info("اضغط 'تحديث الإشارات' لعرض جميع الإشارات")
     
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
@@ -1143,7 +1200,7 @@ if forex_data:
 
 st.markdown("---")
 
-# جلب البيانات
+# جلب البيانات للزوج المختار
 current_price, change = get_spot_price(selected_symbol)
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 if df is None:
@@ -1170,8 +1227,8 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# توليد الإشارة مع العتبة المختارة
-signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol, threshold)
+# توليد الإشارة (عتبة ثابتة 5)
+signal, confidence, net_score, details, patterns, tbs_info = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # عرض السعر
@@ -1314,7 +1371,7 @@ if entry_zones and direction != "NEUTRAL":
             "take_profit": targets['target2'],
             "trailing_enabled": True,
             "trailing_distance": atr_value * 0.3,
-            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%) | العتبة: {threshold}"
+            "notes": f"مقترحة من نظام الدخول الذكي (الثقة {confidence:.0f}%)"
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
@@ -1340,7 +1397,7 @@ if tbs_type:
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
 # ==========================================
-# الإشارة (مع قوة الإشارة والعتبة)
+# الإشارة
 # ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
@@ -1359,14 +1416,14 @@ st.markdown(f"""
     <div class="signal-text" style="color: {signal_color};">{signal}</div>
     <div class="signal-confidence">الثقة: {confidence:.0f}% | النتيجة: {net_score} | القوة: {strength}</div>
     <div style="font-size:0.9rem; color:#aaa; margin-top:10px;">
-        ⚙️ العتبة: {threshold} نقطة | MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
+        MTF إجماع: {mtf_signal} (عدد الأطر: {mtf_count})
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # شرح القرار
 with st.expander("📝 شرح القرار", expanded=True):
-    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, threshold)
+    explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
@@ -1413,7 +1470,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60:
                 "take_profit": take_profit,
                 "trailing_enabled": enable_trailing,
                 "trailing_distance": trail_distance / 100,
-                "notes": f"مقترحة من البوت (الثقة {confidence:.0f}%) | العتبة: {threshold}"
+                "notes": f"مقترحة من البوت (الثقة {confidence:.0f}%)"
             }
             trade_id = trade_manager.add_trade(trade_data)
             st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
@@ -1618,6 +1675,6 @@ if selected_symbol == "GC=F":
 st.markdown("""
 <div class="footer">
     GoldAPI.io | جميع أزواج الفوركس + مؤشرات + SMC/ICT + أنماط + TBS + MTF + حالة السوق + MFI + فيبوناتشي + مناطق دخول ذكية<br>
-    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات | عتبة إشارة قابلة للتعديل (3-10 نقاط)
+    تحديث لحظي | استوب دقيق | نظام كشف الانعكاسات | عتبة إشارة ثابتة (5 نقاط)
 </div>
 """, unsafe_allow_html=True)
