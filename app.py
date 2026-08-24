@@ -36,14 +36,17 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* ===== خلفية الصفحة بالكامل مع الصورة ===== */
+    /* ===== خلفية الصفحة ===== */
     html, body, .stApp {
         background: #0a0a0a !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     .stApp {
         position: relative !important;
         background: #0a0a0a !important;
+        min-height: 100vh !important;
     }
 
     /* ===== الصورة الخلفية ===== */
@@ -58,13 +61,13 @@ st.markdown("""
         background-size: cover !important;
         background-position: center !important;
         background-attachment: fixed !important;
-        opacity: 0.35 !important;
+        opacity: 0.3 !important;
         pointer-events: none !important;
         z-index: 0 !important;
-        filter: brightness(0.9) contrast(1.2) !important;
+        filter: brightness(0.9) contrast(1.1) !important;
     }
 
-    /* ===== توهج خلفي متحرك (فوق الصورة) ===== */
+    /* ===== توهج خلفي متحرك ===== */
     .stApp::after {
         content: '';
         position: fixed;
@@ -87,7 +90,8 @@ st.markdown("""
     .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert,
     .currency-card, .news-card, .explanation-box, .stButton button,
-    .stSelectbox, .stTextInput, .stNumberInput, .stDataFrame {
+    .stSelectbox, .stTextInput, .stNumberInput, .stDataFrame,
+    .stMetric, .stMarkdown, .stPlotlyChart, .stTabs, .stExpander {
         position: relative !important;
         z-index: 1 !important;
     }
@@ -99,11 +103,11 @@ st.markdown("""
         border-right: 1px solid rgba(255, 215, 0, 0.05) !important;
     }
 
-    /* ===== الهيدر مع الصورة ===== */
+    /* ===== الهيدر ===== */
     .main-header {
         text-align: center;
         padding: 30px 30px;
-        background: linear-gradient(135deg, rgba(0,0,0,0.65) 0%, rgba(20,10,0,0.55) 50%, rgba(0,0,0,0.65) 100%),
+        background: linear-gradient(135deg, rgba(0,0,0,0.7) 0%, rgba(20,10,0,0.6) 50%, rgba(0,0,0,0.7) 100%),
                     url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
         background-size: cover !important;
         background-position: center !important;
@@ -168,8 +172,9 @@ st.markdown("""
     /* ===== البطاقات ===== */
     .price-card, .signal-box, .suggested-trade, .trade-row, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
-        background: rgba(10, 10, 10, 0.82) !important;
-        backdrop-filter: blur(4px) !important;
+        background: rgba(10, 10, 10, 0.78) !important;
+        backdrop-filter: blur(6px) !important;
+        -webkit-backdrop-filter: blur(6px) !important;
         border: 1px solid rgba(255, 215, 0, 0.12) !important;
         box-shadow: 0 4px 30px rgba(0,0,0,0.6) !important;
         border-radius: 14px !important;
@@ -205,8 +210,9 @@ st.markdown("""
 
     /* ===== العملات ===== */
     .currency-card {
-        background: rgba(10, 10, 10, 0.75) !important;
+        background: rgba(10, 10, 10, 0.7) !important;
         backdrop-filter: blur(4px) !important;
+        -webkit-backdrop-filter: blur(4px) !important;
         border: 1px solid rgba(255, 215, 0, 0.08) !important;
         border-radius: 12px;
         padding: 12px 15px;
@@ -295,7 +301,7 @@ st.markdown("""
 
     /* ===== شرح القرار ===== */
     .explanation-box {
-        background: rgba(10, 10, 10, 0.88) !important;
+        background: rgba(10, 10, 10, 0.85) !important;
         border: 1px solid rgba(255,215,0,0.06) !important;
         border-radius: 12px !important;
         padding: 18px !important;
@@ -307,7 +313,7 @@ st.markdown("""
 
     /* ===== الأخبار ===== */
     .news-card {
-        background: rgba(10, 10, 10, 0.75) !important;
+        background: rgba(10, 10, 10, 0.7) !important;
         border-left: 3px solid #ffd700 !important;
         border-radius: 10px !important;
         padding: 12px 15px !important;
