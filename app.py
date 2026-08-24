@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية مع خلفية كاملة
+# 🖤 BLACK PYRAMID – الهوية البصرية مع خلفية واضحة
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -36,17 +36,17 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* ===== خلفية الصفحة بالكامل ===== */
-    html, body, .stApp, .stApp > header, .stApp > .main, .stApp > .sidebar {
-        background: transparent !important;
+    /* ===== خلفية الصفحة بالكامل مع الصورة ===== */
+    html, body, .stApp {
+        background: #0a0a0a !important;
     }
 
-    /* ===== خلفية الموقع بالكامل مع الصورة ===== */
     .stApp {
         position: relative !important;
         background: #0a0a0a !important;
     }
 
+    /* ===== الصورة الخلفية ===== */
     .stApp::before {
         content: '';
         position: fixed;
@@ -58,12 +58,13 @@ st.markdown("""
         background-size: cover !important;
         background-position: center !important;
         background-attachment: fixed !important;
-        opacity: 0.15 !important;
+        opacity: 0.35 !important;
         pointer-events: none !important;
         z-index: 0 !important;
+        filter: brightness(0.9) contrast(1.2) !important;
     }
 
-    /* ===== توهج خلفي متحرك ===== */
+    /* ===== توهج خلفي متحرك (فوق الصورة) ===== */
     .stApp::after {
         content: '';
         position: fixed;
@@ -102,11 +103,11 @@ st.markdown("""
     .main-header {
         text-align: center;
         padding: 30px 30px;
-        background: linear-gradient(135deg, rgba(0,0,0,0.88) 0%, rgba(20,10,0,0.82) 50%, rgba(0,0,0,0.88) 100%),
+        background: linear-gradient(135deg, rgba(0,0,0,0.65) 0%, rgba(20,10,0,0.55) 50%, rgba(0,0,0,0.65) 100%),
                     url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
         background-size: cover !important;
         background-position: center !important;
-        background-blend-mode: overlay !important;
+        background-blend-mode: darken !important;
         border-radius: 20px;
         margin-bottom: 25px;
         border: 1px solid rgba(255, 215, 0, 0.15);
@@ -167,8 +168,8 @@ st.markdown("""
     /* ===== البطاقات ===== */
     .price-card, .signal-box, .suggested-trade, .trade-row, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
-        background: rgba(10, 10, 10, 0.85) !important;
-        backdrop-filter: blur(5px) !important;
+        background: rgba(10, 10, 10, 0.82) !important;
+        backdrop-filter: blur(4px) !important;
         border: 1px solid rgba(255, 215, 0, 0.12) !important;
         box-shadow: 0 4px 30px rgba(0,0,0,0.6) !important;
         border-radius: 14px !important;
@@ -204,8 +205,8 @@ st.markdown("""
 
     /* ===== العملات ===== */
     .currency-card {
-        background: rgba(10, 10, 10, 0.8) !important;
-        backdrop-filter: blur(5px) !important;
+        background: rgba(10, 10, 10, 0.75) !important;
+        backdrop-filter: blur(4px) !important;
         border: 1px solid rgba(255, 215, 0, 0.08) !important;
         border-radius: 12px;
         padding: 12px 15px;
@@ -294,7 +295,7 @@ st.markdown("""
 
     /* ===== شرح القرار ===== */
     .explanation-box {
-        background: rgba(10, 10, 10, 0.9) !important;
+        background: rgba(10, 10, 10, 0.88) !important;
         border: 1px solid rgba(255,215,0,0.06) !important;
         border-radius: 12px !important;
         padding: 18px !important;
@@ -306,7 +307,7 @@ st.markdown("""
 
     /* ===== الأخبار ===== */
     .news-card {
-        background: rgba(10, 10, 10, 0.8) !important;
+        background: rgba(10, 10, 10, 0.75) !important;
         border-left: 3px solid #ffd700 !important;
         border-radius: 10px !important;
         padding: 12px 15px !important;
