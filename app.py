@@ -87,12 +87,12 @@ st.markdown("""
     }
 
     /* ===== جميع المحتويات فوق الخلفية ===== */
-    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, 
+    .main-header, .price-card, .signal-box, .suggested-trade, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert,
     .currency-card, .news-card, .explanation-box, .stButton button,
     .stSelectbox, .stTextInput, .stNumberInput, .stDataFrame,
     .stMetric, .stMarkdown, .stPlotlyChart, .stTabs, .stExpander,
-    .indicator-cards-wrapper {
+    .indicator-scroll {
         position: relative !important;
         z-index: 1 !important;
     }
@@ -137,7 +137,7 @@ st.markdown("""
     }
 
     /* ===== البطاقات ===== */
-    .price-card, .signal-box, .suggested-trade, .trade-row, 
+    .price-card, .signal-box, .suggested-trade, 
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
         background: rgba(10, 10, 10, 0.75) !important;
         backdrop-filter: blur(6px) !important;
@@ -198,7 +198,6 @@ st.markdown("""
         margin: 4px 0;
     }
 
-    /* ===== صفوف الصفقات (تم إلغاؤها) ===== */
     /* ===== التذييل ===== */
     .footer {
         text-align: center;
@@ -314,66 +313,6 @@ st.markdown("""
     .indicator-toggle:hover {
         background: rgba(255,215,0,0.10) !important;
         border-color: #ffd700 !important;
-    }
-
-    /* ===== مؤشرات السوق – بطاقات متحركة ===== */
-    .indicator-cards-wrapper {
-        overflow: hidden;
-        width: 100%;
-        position: relative;
-        background: rgba(0,0,0,0.2);
-        border-radius: 12px;
-        padding: 10px 0;
-        border: 1px solid rgba(255,215,0,0.05);
-    }
-    .indicator-track {
-        display: flex;
-        gap: 20px;
-        animation: scrollIndicators 25s linear infinite;
-        width: max-content;
-    }
-    .indicator-track:hover {
-        animation-play-state: paused;
-    }
-    .indicator-card {
-        background: rgba(10, 10, 10, 0.7);
-        backdrop-filter: blur(4px);
-        border: 1px solid rgba(255,215,0,0.15);
-        border-radius: 10px;
-        padding: 10px 20px;
-        min-width: 120px;
-        text-align: center;
-        box-shadow: 0 0 20px rgba(255,215,0,0.02);
-        transition: all 0.3s ease;
-        flex-shrink: 0;
-    }
-    .indicator-card:hover {
-        border-color: #ffd700;
-        box-shadow: 0 0 30px rgba(255,215,0,0.08);
-        transform: scale(1.02);
-    }
-    .indicator-label {
-        font-size: 0.6rem;
-        color: #888;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        font-family: 'Inter', sans-serif;
-    }
-    .indicator-value {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #ffd700;
-        font-family: 'Orbitron', sans-serif;
-        margin-top: 4px;
-        text-shadow: 0 0 20px rgba(255,215,0,0.05);
-    }
-    @keyframes scrollIndicators {
-        0% { transform: translateX(0); }
-        100% { transform: translateX(-50%); }
-    }
-    /* توقف مؤقت عند التمرير */
-    .indicator-wrapper:hover .indicator-track {
-        animation-play-state: paused;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1096,13 +1035,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# كشف الانعكاسات (تم إلغاؤها مع الصفقات، لكن نترك الدالة)
-# ==========================================
-def detect_reversal(df, trade):
-    # لن تُستخدم بعد الآن
-    return False, ""
-
-# ==========================================
 # شرح القرار
 # ==========================================
 def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets):
@@ -1350,7 +1282,7 @@ with col_refresh2:
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ==========================================
-# مؤشرات السوق – بطاقات متحركة (تصميم جديد)
+# مؤشرات السوق – بطاقات أفقية مع شريط تمرير (تصميم عصري)
 # ==========================================
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
@@ -1363,7 +1295,6 @@ with col_title:
 
 if st.session_state.show_indicators:
     last = df.iloc[-1]
-    # تحضير البيانات
     indicators = [
         ("RSI", f"{last['rsi']:.1f}" if not pd.isna(last['rsi']) else "N/A"),
         ("ATR", f"${last['atr']:.2f}" if not pd.isna(last['atr']) else "N/A"),
@@ -1371,22 +1302,73 @@ if st.session_state.show_indicators:
         ("VWAP", f"${last['vwap']:.2f}" if not pd.isna(last['vwap']) else "N/A"),
         ("MFI", f"{last['mfi']:.1f}" if not pd.isna(last['mfi']) else "N/A")
     ]
-    # تكرار البطاقات لعمل تأثير لا نهائي (نكرر القائمة مرتين)
-    cards = []
-    for _ in range(2):
-        for label, value in indicators:
-            cards.append(f"""
-            <div class="indicator-card">
-                <div class="indicator-label">{label}</div>
-                <div class="indicator-value">{value}</div>
-            </div>
-            """)
-    cards_html = "".join(cards)
-    st.markdown(f"""
-    <div class="indicator-cards-wrapper">
-        <div class="indicator-track">
-            {cards_html}
+    
+    # بناء بطاقات HTML بسيطة
+    cards_html = ""
+    for label, value in indicators:
+        cards_html += f"""
+        <div class="indicator-card">
+            <div class="indicator-label">{label}</div>
+            <div class="indicator-value">{value}</div>
         </div>
+        """
+    
+    st.markdown(f"""
+    <style>
+        .indicator-scroll {{
+            display: flex;
+            overflow-x: auto;
+            gap: 15px;
+            padding: 10px 5px;
+            scrollbar-width: thin;
+            scrollbar-color: #ffd700 rgba(255,215,0,0.1);
+        }}
+        .indicator-scroll::-webkit-scrollbar {{
+            height: 6px;
+        }}
+        .indicator-scroll::-webkit-scrollbar-track {{
+            background: rgba(255,215,0,0.05);
+            border-radius: 10px;
+        }}
+        .indicator-scroll::-webkit-scrollbar-thumb {{
+            background: #ffd700;
+            border-radius: 10px;
+        }}
+        .indicator-card {{
+            flex: 0 0 auto;
+            background: rgba(10, 10, 10, 0.7);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,215,0,0.15);
+            border-radius: 10px;
+            padding: 12px 25px;
+            min-width: 120px;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(255,215,0,0.02);
+            transition: all 0.3s ease;
+        }}
+        .indicator-card:hover {{
+            border-color: #ffd700;
+            box-shadow: 0 0 30px rgba(255,215,0,0.08);
+            transform: scale(1.03);
+        }}
+        .indicator-label {{
+            font-size: 0.65rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-family: 'Inter', sans-serif;
+        }}
+        .indicator-value {{
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #ffd700;
+            font-family: 'Orbitron', sans-serif;
+            margin-top: 4px;
+            text-shadow: 0 0 20px rgba(255,215,0,0.05);
+        }}
+    </style>
+    <div class="indicator-scroll">
+        {cards_html}
     </div>
     """, unsafe_allow_html=True)
 else:
