@@ -91,7 +91,8 @@ st.markdown("""
     .entry-zone, .target-zone, .stop-loss-level, .reversal-alert,
     .currency-card, .news-card, .explanation-box, .stButton button,
     .stSelectbox, .stTextInput, .stNumberInput, .stDataFrame,
-    .stMetric, .stMarkdown, .stPlotlyChart, .stTabs, .stExpander {
+    .stMetric, .stMarkdown, .stPlotlyChart, .stTabs, .stExpander,
+    .indicator-cards-wrapper {
         position: relative !important;
         z-index: 1 !important;
     }
@@ -313,6 +314,66 @@ st.markdown("""
     .indicator-toggle:hover {
         background: rgba(255,215,0,0.10) !important;
         border-color: #ffd700 !important;
+    }
+
+    /* ===== مؤشرات السوق – بطاقات متحركة ===== */
+    .indicator-cards-wrapper {
+        overflow: hidden;
+        width: 100%;
+        position: relative;
+        background: rgba(0,0,0,0.2);
+        border-radius: 12px;
+        padding: 10px 0;
+        border: 1px solid rgba(255,215,0,0.05);
+    }
+    .indicator-track {
+        display: flex;
+        gap: 20px;
+        animation: scrollIndicators 25s linear infinite;
+        width: max-content;
+    }
+    .indicator-track:hover {
+        animation-play-state: paused;
+    }
+    .indicator-card {
+        background: rgba(10, 10, 10, 0.7);
+        backdrop-filter: blur(4px);
+        border: 1px solid rgba(255,215,0,0.15);
+        border-radius: 10px;
+        padding: 10px 20px;
+        min-width: 120px;
+        text-align: center;
+        box-shadow: 0 0 20px rgba(255,215,0,0.02);
+        transition: all 0.3s ease;
+        flex-shrink: 0;
+    }
+    .indicator-card:hover {
+        border-color: #ffd700;
+        box-shadow: 0 0 30px rgba(255,215,0,0.08);
+        transform: scale(1.02);
+    }
+    .indicator-label {
+        font-size: 0.6rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-family: 'Inter', sans-serif;
+    }
+    .indicator-value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #ffd700;
+        font-family: 'Orbitron', sans-serif;
+        margin-top: 4px;
+        text-shadow: 0 0 20px rgba(255,215,0,0.05);
+    }
+    @keyframes scrollIndicators {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+    }
+    /* توقف مؤقت عند التمرير */
+    .indicator-wrapper:hover .indicator-track {
+        animation-play-state: paused;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1289,7 +1350,7 @@ with col_refresh2:
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ==========================================
-# مؤشرات السوق – بشكل أفقي (تم تعديل التصميم)
+# مؤشرات السوق – بطاقات متحركة (تصميم جديد)
 # ==========================================
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
@@ -1302,13 +1363,32 @@ with col_title:
 
 if st.session_state.show_indicators:
     last = df.iloc[-1]
-    # عرض المؤشرات في صف أفقي واحد مع تنسيق بسيط
-    cols = st.columns(5)
-    cols[0].metric("RSI", f"{last['rsi']:.1f}" if not pd.isna(last['rsi']) else "N/A")
-    cols[1].metric("ATR", f"${last['atr']:.2f}" if not pd.isna(last['atr']) else "N/A")
-    cols[2].metric("ADX", f"{last['adx']:.1f}" if not pd.isna(last['adx']) else "N/A")
-    cols[3].metric("VWAP", f"${last['vwap']:.2f}" if not pd.isna(last['vwap']) else "N/A")
-    cols[4].metric("MFI", f"{last['mfi']:.1f}" if not pd.isna(last['mfi']) else "N/A")
+    # تحضير البيانات
+    indicators = [
+        ("RSI", f"{last['rsi']:.1f}" if not pd.isna(last['rsi']) else "N/A"),
+        ("ATR", f"${last['atr']:.2f}" if not pd.isna(last['atr']) else "N/A"),
+        ("ADX", f"{last['adx']:.1f}" if not pd.isna(last['adx']) else "N/A"),
+        ("VWAP", f"${last['vwap']:.2f}" if not pd.isna(last['vwap']) else "N/A"),
+        ("MFI", f"{last['mfi']:.1f}" if not pd.isna(last['mfi']) else "N/A")
+    ]
+    # تكرار البطاقات لعمل تأثير لا نهائي (نكرر القائمة مرتين)
+    cards = []
+    for _ in range(2):
+        for label, value in indicators:
+            cards.append(f"""
+            <div class="indicator-card">
+                <div class="indicator-label">{label}</div>
+                <div class="indicator-value">{value}</div>
+            </div>
+            """)
+    cards_html = "".join(cards)
+    st.markdown(f"""
+    <div class="indicator-cards-wrapper">
+        <div class="indicator-track">
+            {cards_html}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
 
