@@ -197,13 +197,7 @@ st.markdown("""
         margin: 4px 0;
     }
 
-    /* ===== صفوف الصفقات ===== */
-    .trade-row {
-        border-left: 4px solid #ffd700 !important;
-        padding: 10px 15px;
-        margin: 5px 0;
-    }
-
+    /* ===== صفوف الصفقات (تم إلغاؤها) ===== */
     /* ===== التذييل ===== */
     .footer {
         text-align: center;
@@ -396,22 +390,12 @@ PAIRS = {
 }
 
 # ==========================================
-# تهيئة حالة الجلسة
+# تهيئة حالة الجلسة (تم إزالة كل ما يخص الصفقات)
 # ==========================================
 if "df" not in st.session_state:
     st.session_state.df = None
-if "current_trade" not in st.session_state:
-    st.session_state.current_trade = None
-if "trades" not in st.session_state:
-    st.session_state.trades = []
 if "price_data" not in st.session_state:
     st.session_state.price_data = None
-if "show_form" not in st.session_state:
-    st.session_state.show_form = False
-if "daily_pnl" not in st.session_state:
-    st.session_state.daily_pnl = 0
-if "daily_trades" not in st.session_state:
-    st.session_state.daily_trades = 0
 if "last_update" not in st.session_state:
     st.session_state.last_update = datetime.now()
 if "refresh_trigger" not in st.session_state:
@@ -1051,63 +1035,10 @@ def generate_advanced_signal(df, current_price, symbol=""):
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# كشف الانعكاسات
+# كشف الانعكاسات (تم إلغاؤها مع الصفقات، لكن نترك الدالة)
 # ==========================================
 def detect_reversal(df, trade):
-    if df is None or len(df) < 20:
-        return False, "بيانات غير كافية"
-
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    direction = trade["direction"]
-    entry = trade["entry"]
-    current_price = last['close']
-
-    signals = []
-    
-    if 'rsi' in df.columns and not pd.isna(last['rsi']):
-        rsi = last['rsi']
-        if direction == "BUY":
-            if rsi > 70:
-                signals.append("RSI فوق 70 (تشبع شرائي)")
-            elif rsi < 30 and current_price < entry:
-                signals.append("RSI تحت 30 مع هبوط (ضعف)")
-        else:
-            if rsi < 30:
-                signals.append("RSI تحت 30 (تشبع بيعي)")
-            elif rsi > 70 and current_price > entry:
-                signals.append("RSI فوق 70 مع صعود (ضعف)")
-
-    if 'macd' in df.columns and 'macd_signal' in df.columns:
-        if direction == "BUY":
-            if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
-                signals.append("MACD تقاطع هابط (انعكاس)")
-        else:
-            if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
-                signals.append("MACD تقاطع صاعد (انعكاس)")
-
-    candle_range = abs(last['high'] - last['low'])
-    if candle_range > 0:
-        if direction == "BUY":
-            upper_wick = last['high'] - max(last['close'], last['open'])
-            if upper_wick > candle_range * 0.5:
-                signals.append("شمعة انعكاس هابط (ذيل علوي طويل)")
-        else:
-            lower_wick = min(last['close'], last['open']) - last['low']
-            if lower_wick > candle_range * 0.5:
-                signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
-
-    if direction == "BUY":
-        recent_low = df['low'].iloc[-10:].min()
-        if current_price < recent_low:
-            signals.append(f"كسر الدعم القريب ({recent_low:.4f})")
-    else:
-        recent_high = df['high'].iloc[-10:].max()
-        if current_price > recent_high:
-            signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
-
-    if signals:
-        return True, " | ".join(signals)
+    # لن تُستخدم بعد الآن
     return False, ""
 
 # ==========================================
@@ -1229,86 +1160,7 @@ def get_all_signals():
     return pd.DataFrame(results)
 
 # ==========================================
-# إدارة الصفقات
-# ==========================================
-class TradeManager:
-    def __init__(self):
-        self.trades_file = "trades_data.json"
-        self.load_trades()
-    def load_trades(self):
-        try:
-            with open(self.trades_file, "r", encoding='utf-8') as f:
-                data = json.load(f)
-                self.open_trades = data.get("open_trades", [])
-                self.closed_trades = data.get("closed_trades", [])
-        except:
-            self.open_trades = []
-            self.closed_trades = []
-    def save_trades(self):
-        with open(self.trades_file, "w", encoding='utf-8') as f:
-            json.dump({"open_trades": self.open_trades, "closed_trades": self.closed_trades}, f, indent=2, ensure_ascii=False)
-    def add_trade(self, trade_data):
-        trade_id = f"T{len(self.open_trades)+len(self.closed_trades)+1:03d}"
-        trade = {
-            "id": trade_id,
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "direction": trade_data["direction"],
-            "entry": trade_data["entry"],
-            "lots": trade_data["lots"],
-            "stop_loss": trade_data["stop_loss"],
-            "take_profit": trade_data["take_profit"],
-            "trailing_enabled": trade_data.get("trailing_enabled", False),
-            "trailing_distance": trade_data.get("trailing_distance", 0),
-            "highest_price": trade_data["entry"],
-            "lowest_price": trade_data["entry"],
-            "status": "open",
-            "stage": 0,
-            "notes": trade_data.get("notes", "")
-        }
-        self.open_trades.append(trade)
-        self.save_trades()
-        return trade_id
-    def update_trailing_stop(self, trade_id, current_price):
-        for trade in self.open_trades:
-            if trade["id"] == trade_id and trade["status"] == "open" and trade["trailing_enabled"]:
-                if trade["direction"] == "BUY":
-                    if current_price > trade["highest_price"]:
-                        trade["highest_price"] = current_price
-                    new_stop = trade["highest_price"] - trade["trailing_distance"]
-                    if new_stop > trade["stop_loss"]:
-                        trade["stop_loss"] = new_stop
-                        self.save_trades()
-                        return True
-                else:
-                    if current_price < trade["lowest_price"]:
-                        trade["lowest_price"] = current_price
-                    new_stop = trade["lowest_price"] + trade["trailing_distance"]
-                    if new_stop < trade["stop_loss"]:
-                        trade["stop_loss"] = new_stop
-                        self.save_trades()
-                        return True
-        return False
-    def close_trade(self, trade_id, exit_price):
-        for i, trade in enumerate(self.open_trades):
-            if trade["id"] == trade_id:
-                trade["exit"] = exit_price
-                trade["status"] = "closed"
-                if trade["direction"] == "BUY":
-                    pips = (exit_price - trade["entry"]) * 100
-                else:
-                    pips = (trade["entry"] - exit_price) * 100
-                profit = pips * trade["lots"] * 0.1
-                trade["profit"] = round(profit, 2)
-                trade["result"] = "win" if profit > 0 else "loss"
-                trade["close_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.closed_trades.append(trade)
-                self.open_trades.pop(i)
-                self.save_trades()
-                return profit
-        return None
-
-# ==========================================
-# الواجهة الرئيسية
+# الواجهة الرئيسية (تم حذف إدارة الصفقات)
 # ==========================================
 
 with st.sidebar:
@@ -1372,11 +1224,6 @@ with st.sidebar:
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
     selected_symbol = PAIRS[selected_pair_name]
-    st.markdown("---")
-    st.markdown("### 📋 إدارة الصفقات اليدوية")
-    if st.button("➕ صفقة جديدة", use_container_width=True):
-        st.session_state.show_form = not st.session_state.show_form
-        st.rerun()
 
 # ==========================================
 # جلب البيانات للزوج المختار
@@ -1442,7 +1289,7 @@ with col_refresh2:
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ==========================================
-# مؤشرات السوق (قابلة للإخفاء/الإظهار)
+# مؤشرات السوق – بشكل أفقي (تم تعديل التصميم)
 # ==========================================
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
@@ -1454,13 +1301,14 @@ with col_title:
     st.markdown("### مؤشرات السوق")
 
 if st.session_state.show_indicators:
-    cols = st.columns(5)
     last = df.iloc[-1]
-    cols[0].metric("RSI", f"{last['rsi']:.1f}")
-    cols[1].metric("ATR", f"${last['atr']:.2f}")
-    cols[2].metric("ADX", f"{last['adx']:.1f}")
-    cols[3].metric("VWAP", f"${last['vwap']:.2f}")
-    cols[4].metric("MFI", f"{last['mfi']:.1f}")
+    # عرض المؤشرات في صف أفقي واحد مع تنسيق بسيط
+    cols = st.columns(5)
+    cols[0].metric("RSI", f"{last['rsi']:.1f}" if not pd.isna(last['rsi']) else "N/A")
+    cols[1].metric("ATR", f"${last['atr']:.2f}" if not pd.isna(last['atr']) else "N/A")
+    cols[2].metric("ADX", f"{last['adx']:.1f}" if not pd.isna(last['adx']) else "N/A")
+    cols[3].metric("VWAP", f"${last['vwap']:.2f}" if not pd.isna(last['vwap']) else "N/A")
+    cols[4].metric("MFI", f"{last['mfi']:.1f}" if not pd.isna(last['mfi']) else "N/A")
 else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
 
@@ -1485,29 +1333,6 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     </div>
     """, unsafe_allow_html=True)
     
-    if st.button("➕ إضافة هذه الصفقة", use_container_width=True):
-        trade_manager = TradeManager()
-        account_balance = 100000
-        risk_per_trade_pct = 2
-        risk_per_trade = account_balance * (risk_per_trade_pct / 100)
-        risk_amount = abs(entry_price - stop_loss)
-        lot_size = risk_per_trade / (risk_amount * 100) if risk_amount > 0 else 0.01
-        lot_size = round(lot_size, 2)
-        
-        trade_data = {
-            "direction": signal,
-            "entry": entry_price,
-            "lots": max(lot_size, 0.01),
-            "stop_loss": stop_loss,
-            "take_profit": targets['target2'],
-            "trailing_enabled": True,
-            "trailing_distance": last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else 3,
-            "notes": f"مقترحة من الإشارة المتكاملة (الثقة {confidence:.0f}%)"
-        }
-        trade_id = trade_manager.add_trade(trade_data)
-        st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
-        st.rerun()
-
 else:
     st.info("⏳ لا توجد صفقة مقترحة حالياً (انتظر إشارة قوية)")
 
@@ -1558,105 +1383,6 @@ st.markdown(f"""
 with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
-
-# ==========================================
-# إدارة الصفقات + كشف الانعكاسات
-# ==========================================
-st.markdown("---")
-st.markdown("### 💼 إدارة الصفقات")
-trade_manager = TradeManager()
-
-reversal_messages = []
-for trade in trade_manager.open_trades:
-    if trade["status"] == "open":
-        is_reversal, reversal_msg = detect_reversal(df, trade)
-        if is_reversal:
-            reversal_messages.append(f"⚠️ الصفقة {trade['id']}: {reversal_msg}")
-        if trade["trailing_enabled"]:
-            trade_manager.update_trailing_stop(trade["id"], current_price)
-
-if reversal_messages:
-    st.markdown("---")
-    st.markdown("### 🔄 تنبيهات الانعكاس")
-    for msg in reversal_messages:
-        st.markdown(f"""
-        <div class="reversal-alert">
-            {msg}
-            <br><span style="color:#aaa; font-size:0.8rem;">يُنصح بمراجعة الصفقة أو إغلاقها</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-if trade_manager.open_trades:
-    st.write("**الصفقات المفتوحة:**")
-    for trade in trade_manager.open_trades:
-        if trade["stage"] == 0:
-            stage_text = "🟡 وقف ثابت"
-        elif trade["stage"] == 1:
-            stage_text = "🟢 نقطة تعادل"
-        elif trade["stage"] >= 2:
-            stage_text = "🔵 وقف متحرك"
-        st.markdown(f"""
-        <div class="trade-row">
-            <b>{trade['id']}</b> | {trade['direction']} | الدخول: {trade['entry']} | اللوت: {trade['lots']} | 
-            الوقف الحالي: {trade['stop_loss']} | الهدف: {trade['take_profit']}
-            <br><span style="color:#aaa;">المرحلة: {stage_text} {" | 🔄 وقف متحرك مفعّل" if trade['trailing_enabled'] else ""}</span>
-        </div>
-        """, unsafe_allow_html=True)
-        col1, col2, col3 = st.columns(3)
-        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_{trade['id']}"):
-            if trade_manager.update_trailing_stop(trade["id"], current_price):
-                st.success("تم تحديث الوقف المتحرك!")
-                st.rerun()
-            else:
-                st.info("الوقف في أفضل وضعية حالياً")
-        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"reversal_{trade['id']}"):
-            is_reversal, msg = detect_reversal(df, trade)
-            if is_reversal:
-                st.warning(f"⚠️ انعكاس مكتشف: {msg}")
-            else:
-                st.success("✅ لا توجد إشارة انعكاس حالياً")
-        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_{trade['id']}"):
-            profit = trade_manager.close_trade(trade['id'], current_price)
-            st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
-            st.rerun()
-else:
-    st.write("لا توجد صفقات مفتوحة")
-
-if trade_manager.closed_trades:
-    profits = [t.get('profit', 0) for t in trade_manager.closed_trades if 'profit' in t]
-    if profits:
-        win_rate = sum(1 for p in profits if p > 0) / len(profits) * 100
-        total_profit = sum(profits)
-        avg_profit = total_profit / len(profits)
-        st.metric("نسبة الربح", f"{win_rate:.1f}%")
-        st.metric("إجمالي الربح", f"${total_profit:.2f}")
-        st.metric("متوسط الربح", f"${avg_profit:.2f}")
-
-if st.session_state.show_form:
-    with st.form("new_trade_form"):
-        st.subheader("➕ تفاصيل الصفقة")
-        direction = st.selectbox("الاتجاه", ["BUY", "SELL"])
-        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f")
-        stop = st.number_input("وقف الخسارة", value=float(current_price - 20), format="%.2f")
-        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970")
-        lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
-        submitted = st.form_submit_button("إضافة الصفقة")
-        if submitted and entry > 0 and stop > 0:
-            targets_list = [float(x.strip()) for x in targets_input.split(",") if x.strip()]
-            trade_data = {
-                "direction": direction,
-                "entry": entry,
-                "lots": lots,
-                "stop_loss": stop,
-                "take_profit": targets_list[0] if targets_list else entry + 40,
-                "trailing_enabled": False,
-                "trailing_distance": 0,
-                "notes": "تمت إضافتها يدوياً"
-            }
-            trade_id = trade_manager.add_trade(trade_data)
-            st.success(f"✅ تم إضافة الصفقة {trade_id}")
-            st.session_state.show_form = False
-            st.rerun()
 
 # ==========================================
 # الأخبار الاقتصادية والتقويم
