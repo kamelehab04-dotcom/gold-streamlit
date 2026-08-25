@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية (نفسها)
+# 🖤 BLACK PYRAMID – الهوية البصرية
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -340,10 +340,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# إعدادات API
+# إعدادات API – 🔑 يجب استبدال المفتاح بمفتاح صحيح من GoldAPI
 # ==========================================
-GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"
+# للحصول على مفتاح مجاني: https://www.goldapi.io/
+GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"  # استبدل بمفتاحك
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # اختياري
 
 # ==========================================
 # قائمة الأزواج
@@ -420,11 +421,9 @@ if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
 if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
-if "all_trades" not in st.session_state:
-    st.session_state.all_trades = None
 
 # ==========================================
-# دوال جلب البيانات وحالة السوق
+# دوال جلب البيانات
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -469,18 +468,28 @@ def time_remaining(dt):
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=5)  # تحديث كل 5 ثوانٍ للحصول على سعر دقيق
 def get_spot_price(symbol="GC=F"):
-    try:
-        if symbol == "GC=F":
+    """
+    جلب السعر الفوري للذهب:
+    - الأولوية: GoldAPI (دقيق)
+    - البديل: yfinance
+    """
+    # محاولة GoldAPI أولاً (للذهب فقط)
+    if symbol == "GC=F" and GOLD_API_KEY:
+        try:
             url = "https://www.goldapi.io/api/XAU/USD"
             headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                return float(data.get('price', 0)), float(data.get('change', 0))
-    except:
-        pass
+                price = float(data.get('price', 0))
+                change = float(data.get('change_percent', 0))
+                return price, change
+        except Exception as e:
+            pass  # في حال فشل GoldAPI، ننتقل إلى yfinance
+    
+    # البديل: yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -809,7 +818,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل (مع الاستوب والأهداف)
+# نظام التسجيل المتكامل
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -1184,7 +1193,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# دالة جمع إشارات جميع الأزواج (معدلة لجلب تفاصيل الصفقة)
+# دالة جمع إشارات جميع الأزواج
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
@@ -1221,7 +1230,6 @@ def get_all_signals_with_trades():
                 price_str = f"{current_price:.4f}"
                 fmt = "{:.4f}"
             
-            # تفاصيل الصفقة فقط إذا كانت الإشارة قوية
             trade_details = {}
             if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
                 trade_details = {
@@ -1251,7 +1259,7 @@ def get_all_signals_with_trades():
     return pd.DataFrame(results)
 
 # ==========================================
-# إدارة الصفقات (النسخة الأصلية من الكود)
+# إدارة الصفقات
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -1436,9 +1444,16 @@ signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_pri
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # ==========================================
-# عرض السعر
+# عرض السعر – مع تنسيق خاص بالذهب
 # ==========================================
-price_format = "${:,.2f}" if any(x in selected_pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]) else "${:.4f}"
+# تحديد تنسيق السعر حسب نوع الزوج
+if "Gold" in selected_pair_name or "Silver" in selected_pair_name:
+    price_format = "${:,.2f}"  # دولار بفاصلة عشرية
+elif "Bitcoin" in selected_pair_name or "Ethereum" in selected_pair_name:
+    price_format = "${:,.2f}"
+else:
+    price_format = "{:.4f}"  # 4 خانات عشرية للعملات
+
 st.markdown(f"""
 <div class="price-card">
     <div class="price-label">{selected_pair_name}</div>
@@ -1489,7 +1504,7 @@ else:
 st.markdown("---")
 
 # ==========================================
-# عرض الصفقة المقترحة للزوج المختار
+# عرض الصفقة المقترحة
 # ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
@@ -1551,7 +1566,7 @@ if tbs_type:
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
 # ==========================================
-# الإشارة الرئيسية
+# الإشارة
 # ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
@@ -1582,20 +1597,17 @@ with st.expander("📝 شرح القرار", expanded=True):
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
-# ⭐ جميع الصفقات المقترحة عبر جميع الأزواج
+# ⭐ جميع الصفقات المقترحة
 # ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
 
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
     df_all = st.session_state.all_signals.copy()
-    # تصفية فقط الصفقات القوية (BUY/SELL وثقة >= 60)
     df_trades = df_all[(df_all["الإشارة"].isin(["BUY", "SELL"])) & (df_all["الثقة"] >= 60)]
     
     if not df_trades.empty:
-        # إعادة ترتيب الأعمدة للعرض
         cols_to_show = ["الزوج", "الإشارة", "الثقة", "سعر الدخول", "وقف الخسارة", "الهدف 1", "الهدف 2", "الهدف 3", "نسبة المخاطرة"]
-        # تلوين الإشارة
         def style_signal(val):
             if val == "BUY":
                 return "🟢 شراء"
@@ -1621,7 +1633,6 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
             use_container_width=True
         )
         
-        # عرض عدد الصفقات
         st.caption(f"🟢 إجمالي صفقات الشراء: {len(df_trades[df_trades['الإشارة'] == '🟢 شراء'])}  |  🔴 إجمالي صفقات البيع: {len(df_trades[df_trades['الإشارة'] == '🔴 بيع'])}")
     else:
         st.info("لا توجد صفقات مقترحة حالياً (جميع الإشارات ضعيفة أو انتظار).")
@@ -1629,7 +1640,7 @@ else:
     st.info("اضغط 'تحديث الكل' في الشريط الجانبي لعرض جميع الصفقات المقترحة.")
 
 # ==========================================
-# إدارة الصفقات (نفس الكود الأصلي)
+# إدارة الصفقات
 # ==========================================
 st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
