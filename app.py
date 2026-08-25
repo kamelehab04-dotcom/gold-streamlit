@@ -346,7 +346,7 @@ GOLD_API_KEY = "goldapi-e2e53584d1ec7f76897b93bb0a88420f-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # اختياري
 
 # ==========================================
-# قائمة الأزواج
+# قائمة الأزواج (تم حذف الأزواج المطلوبة)
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -379,18 +379,6 @@ PAIRS = {
     "NZD/CAD": "NZDCAD=X",
     "CAD/JPY": "CADJPY=X",
     "CAD/CHF": "CADCHF=X",
-    "USD/TRY": "USDTRY=X",
-    "USD/MXN": "USDMXN=X",
-    "USD/ZAR": "USDZAR=X",
-    "USD/SGD": "USDSGD=X",
-    "USD/HKD": "USDHKD=X",
-    "USD/SEK": "USDSEK=X",
-    "USD/NOK": "USDNOK=X",
-    "USD/DKK": "USDDKK=X",
-    "USD/PLN": "USDPLN=X",
-    "USD/ILS": "USDILS=X",
-    "USD/CNH": "USDCNH=X",
-    "USD/RUB": "USDRUB=X",
     "BTC/USD (Bitcoin)": "BTC-USD",
     "ETH/USD (Ethereum)": "ETH-USD"
 }
@@ -469,12 +457,6 @@ def time_remaining(dt):
 
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
-    """
-    جلب السعر الفوري:
-    - أولوية GoldAPI للذهب للحصول على سعر دقيق.
-    - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI.
-    """
-    # محاولة GoldAPI للذهب فقط
     if symbol == "GC=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAU/USD"
@@ -485,10 +467,8 @@ def get_spot_price(symbol="GC=F"):
                 price = float(data.get('price', 0))
                 change = float(data.get('change_percent', 0))
                 return price, change
-        except Exception as e:
+        except:
             pass
-    
-    # البديل: yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -998,7 +978,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
-    # ===== حساب الاستوب والأهداف =====
     stop_loss = None
     entry_price = None
     targets = {}
