@@ -474,6 +474,7 @@ def get_spot_price(symbol="GC=F"):
     - أولوية GoldAPI للذهب للحصول على سعر دقيق.
     - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI.
     """
+    # محاولة GoldAPI للذهب فقط
     if symbol == "GC=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAU/USD"
@@ -487,6 +488,7 @@ def get_spot_price(symbol="GC=F"):
         except Exception as e:
             pass
     
+    # البديل: yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -1190,7 +1192,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# دالة جمع إشارات جميع الأزواج مع تفاصيل الصفقات
+# دالة جمع إشارات جميع الأزواج
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
@@ -1500,62 +1502,20 @@ else:
 st.markdown("---")
 
 # ==========================================
-# عرض الصفقة المقترحة مع أزرار النسخ
+# عرض الصفقة المقترحة
 # ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
     
-    # دالة مساعدة لإنشاء زر نسخ
-    def copy_button(value, fmt=None):
-        if fmt:
-            value_str = fmt.format(value)
-        else:
-            value_str = str(value)
-        return f"""
-        <button onclick="navigator.clipboard.writeText('{value_str}')" 
-                style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3); 
-                       color: #ffd700; border-radius: 6px; padding: 2px 10px; 
-                       font-size: 0.7rem; cursor: pointer; transition: 0.3s;
-                       margin-left: 8px; font-family: 'Inter', sans-serif;
-                       hover: background: rgba(255,215,0,0.2);">
-            📋 نسخ
-        </button>
-        """
-    
     st.markdown(f"""
     <div class="suggested-trade">
         <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
-        
-        <b>📍 سعر الدخول المقترح:</b> 
-        <span style="color: #ffd700; font-weight: bold;">{price_format.format(entry_price)}</span>
-        {copy_button(entry_price, price_format)}
-        <br>
-        
-        <b>🛑 وقف الخسارة:</b> 
-        <span style="color: #ff4444; font-weight: bold;">{price_format.format(stop_loss)}</span>
-        (المسافة: {abs(entry_price - stop_loss):.2f} نقطة)
-        {copy_button(stop_loss, price_format)}
-        <br>
-        
-        <div class="target-zone">
-            <b>🎯 الهدف 1 (1:1):</b> 
-            <span style="color: #ffd700;">{price_format.format(targets['target1'])}</span>
-            {copy_button(targets['target1'], price_format)}
-        </div>
-        
-        <div class="target-zone" style="border-left-color: #ffaa00;">
-            <b>🎯 الهدف 2 (1:1.5):</b> 
-            <span style="color: #ffaa00;">{price_format.format(targets['target2'])}</span>
-            {copy_button(targets['target2'], price_format)}
-        </div>
-        
-        <div class="target-zone" style="border-left-color: #00ff88;">
-            <b>🎯 الهدف 3 (1:2):</b> 
-            <span style="color: #00ff88;">{price_format.format(targets['target3'])}</span>
-            {copy_button(targets['target3'], price_format)}
-        </div>
-        
+        <b>📍 سعر الدخول المقترح:</b> {price_format.format(entry_price)}<br>
+        <b>🛑 وقف الخسارة:</b> {price_format.format(stop_loss)} (المسافة: {abs(entry_price - stop_loss):.2f} نقطة)<br>
+        <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_format.format(targets['target1'])}</div>
+        <div class="target-zone" style="border-left-color: #ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_format.format(targets['target2'])}</div>
+        <div class="target-zone" style="border-left-color: #00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_format.format(targets['target3'])}</div>
         <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> {risk_reward}
     </div>
     """, unsafe_allow_html=True)
