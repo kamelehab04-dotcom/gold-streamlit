@@ -340,10 +340,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# إعدادات API – 🔑 يجب استبدال المفتاح بمفتاح صحيح من GoldAPI
+# 🔑 إعدادات API – باستخدام المفتاح الجديد
 # ==========================================
-# للحصول على مفتاح مجاني: https://www.goldapi.io/
-GOLD_API_KEY = "goldapi-2262c60e69ce568bf76b982116077d1f-io"  # استبدل بمفتاحك
+GOLD_API_KEY = "goldapi-e2e53584d1ec7f76897b93bb0a88420f-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # اختياري
 
 # ==========================================
@@ -468,14 +467,14 @@ def time_remaining(dt):
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
 
-@st.cache_data(ttl=5)  # تحديث كل 5 ثوانٍ للحصول على سعر دقيق
+@st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
     """
-    جلب السعر الفوري للذهب:
-    - الأولوية: GoldAPI (دقيق)
-    - البديل: yfinance
+    جلب السعر الفوري:
+    - أولوية GoldAPI للذهب للحصول على سعر دقيق.
+    - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI.
     """
-    # محاولة GoldAPI أولاً (للذهب فقط)
+    # محاولة GoldAPI للذهب فقط
     if symbol == "GC=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAU/USD"
@@ -487,7 +486,7 @@ def get_spot_price(symbol="GC=F"):
                 change = float(data.get('change_percent', 0))
                 return price, change
         except Exception as e:
-            pass  # في حال فشل GoldAPI، ننتقل إلى yfinance
+            pass
     
     # البديل: yfinance
     try:
@@ -1444,15 +1443,14 @@ signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_pri
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # ==========================================
-# عرض السعر – مع تنسيق خاص بالذهب
+# عرض السعر
 # ==========================================
-# تحديد تنسيق السعر حسب نوع الزوج
 if "Gold" in selected_pair_name or "Silver" in selected_pair_name:
-    price_format = "${:,.2f}"  # دولار بفاصلة عشرية
+    price_format = "${:,.2f}"
 elif "Bitcoin" in selected_pair_name or "Ethereum" in selected_pair_name:
     price_format = "${:,.2f}"
 else:
-    price_format = "{:.4f}"  # 4 خانات عشرية للعملات
+    price_format = "{:.4f}"
 
 st.markdown(f"""
 <div class="price-card">
@@ -1479,7 +1477,7 @@ with col_refresh2:
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ==========================================
-# مؤشرات السوق (قابلة للإخفاء/الإظهار)
+# مؤشرات السوق
 # ==========================================
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
