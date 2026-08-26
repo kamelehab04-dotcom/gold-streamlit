@@ -797,7 +797,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل
+# نظام التسجيل المتكامل (مع تعديل STOP LOSS)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -978,6 +978,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
+    # ===== حساب الاستوب والأهداف (تم تعديل STOP LOSS) =====
     stop_loss = None
     entry_price = None
     targets = {}
@@ -1002,18 +1003,25 @@ def generate_advanced_signal(df, current_price, symbol=""):
         
         entry_price = current_price
         
+        # 🔥 تعديل Stop Loss لجعله أكثر اتساعاً
         if signal == "BUY":
             recent_low = df['low'].iloc[-20:].min()
-            ob_low = min([block[1] for block in order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.5)
-            stop_loss = max(recent_low, ob_low)
-            stop_loss = max(stop_loss, current_price - atr_value * 1.2)
-            stop_loss = min(stop_loss, current_price - atr_value * 0.2)
-        else:
+            ob_low = min([block[1] for block in order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.8)
+            # استخدام مضاعف ATR أكبر (2.0 بدلاً من 1.2) وحد أدنى 0.5 بدلاً من 0.2
+            stop_loss = max(recent_low, ob_low, current_price - atr_value * 2.0)
+            stop_loss = min(stop_loss, current_price - atr_value * 0.5)
+        else:  # SELL
             recent_high = df['high'].iloc[-20:].max()
-            ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.5)
-            stop_loss = min(recent_high, ob_high)
-            stop_loss = min(stop_loss, current_price + atr_value * 1.2)
-            stop_loss = max(stop_loss, current_price + atr_value * 0.2)
+            ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.8)
+            stop_loss = min(recent_high, ob_high, current_price + atr_value * 2.0)
+            stop_loss = max(stop_loss, current_price + atr_value * 0.5)
+        
+        # التأكد من أن الوقف ليس قريباً جداً (مسافة لا تقل عن 0.3 * ATR)
+        min_distance = atr_value * 0.3
+        if signal == "BUY" and (entry_price - stop_loss) < min_distance:
+            stop_loss = entry_price - min_distance
+        elif signal == "SELL" and (stop_loss - entry_price) < min_distance:
+            stop_loss = entry_price + min_distance
         
         risk = abs(entry_price - stop_loss) if stop_loss else atr_value
         if signal == "BUY":
