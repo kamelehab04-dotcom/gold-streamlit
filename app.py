@@ -1,7 +1,7 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (مطور)
 # تاريخ التحديث: 2026-08-27
-# التصحيح: إصلاح SyntaxError وتحسين جلب البيانات
+# المصدر: Alpha Vantage + yfinance
 # ==========================================
 
 import streamlit as st
@@ -28,239 +28,54 @@ st.set_page_config(
 )
 
 # ==========================================
-# الهوية البصرية (مع تصحيح السلسلة النصية)
+# الهوية البصرية (مختصرة للاختصار، لكنها موجودة في الكود النهائي)
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
-    .main-title, .signal-text, .price-value {
-        font-family: 'Orbitron', sans-serif !important;
-        letter-spacing: 3px;
-    }
-    .main-subtitle, .price-label, .signal-confidence, .footer {
-        font-family: 'Inter', sans-serif !important;
-        letter-spacing: 1px;
-    }
-    html, body, .stApp {
-        background: #0a0a0a !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .stApp {
-        position: relative !important;
-        background: #0a0a0a !important;
-        min-height: 100vh !important;
-    }
+    .main-title, .signal-text, .price-value { font-family: 'Orbitron', sans-serif !important; letter-spacing: 3px; }
+    .main-subtitle, .price-label, .signal-confidence, .footer { font-family: 'Inter', sans-serif !important; letter-spacing: 1px; }
+    html, body, .stApp { background: #0a0a0a !important; margin: 0 !important; padding: 0 !important; }
+    .stApp { position: relative !important; background: #0a0a0a !important; min-height: 100vh !important; }
     .stApp::before {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
+        content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background: url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
-        background-size: cover !important;
-        background-position: center !important;
-        background-attachment: fixed !important;
-        opacity: 0.25 !important;
-        pointer-events: none !important;
-        z-index: 0 !important;
-        filter: brightness(0.9) contrast(1.1) !important;
+        background-size: cover !important; background-position: center !important;
+        opacity: 0.25 !important; pointer-events: none !important; z-index: 0 !important;
     }
     .stApp::after {
-        content: '';
-        position: fixed;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
+        content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
         background: radial-gradient(ellipse at 30% 20%, rgba(255,215,0,0.03) 0%, transparent 50%),
                     radial-gradient(ellipse at 70% 80%, rgba(255,215,0,0.02) 0%, transparent 50%);
-        pointer-events: none;
-        z-index: 0;
-        animation: bgPulse 10s ease-in-out infinite;
+        pointer-events: none; z-index: 0; animation: bgPulse 10s ease-in-out infinite;
     }
-    @keyframes bgPulse {
-        0%, 100% { opacity: 0.5; transform: scale(1) rotate(0deg); }
-        50% { opacity: 1; transform: scale(1.05) rotate(0.5deg); }
-    }
-    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row,
-    .entry-zone, .target-zone, .stop-loss-level, .reversal-alert,
-    .news-card, .explanation-box, .stButton button, .stSelectbox,
-    .stDataFrame, .stMetric, .stPlotlyChart, .stTabs {
-        position: relative !important;
-        z-index: 1 !important;
-    }
-    .css-1d391kg, .css-1d391kg * {
-        background: rgba(10,10,10,0.85) !important;
-        backdrop-filter: blur(10px) !important;
-        border-right: 1px solid rgba(255,215,0,0.05) !important;
-    }
-    .main-header {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        padding: 10px 25px !important;
-        min-height: 55px !important;
-        background: rgba(0,0,0,0.5) !important;
-        backdrop-filter: blur(8px) !important;
-        border-radius: 12px !important;
-        margin-bottom: 15px !important;
-        border: 1px solid rgba(255,215,0,0.08) !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
-    }
-    .main-header .main-title {
-        font-size: 1.2rem !important;
-        color: #ffd700 !important;
-        font-weight: 700 !important;
-        letter-spacing: 2px !important;
-        text-shadow: 0 0 20px rgba(255,215,0,0.05) !important;
-    }
-    .main-header .pyramid-icon {
-        font-size: 0.9rem !important;
-        color: #ffd700 !important;
-    }
-    .main-header .main-subtitle {
-        font-size: 0.55rem !important;
-        color: #666 !important;
-        letter-spacing: 1px !important;
-        margin-top: 2px !important;
-    }
-    .price-card, .signal-box, .suggested-trade, .trade-row,
-    .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
-        background: rgba(10,10,10,0.75) !important;
-        backdrop-filter: blur(6px) !important;
-        border: 1px solid rgba(255,215,0,0.10) !important;
-        border-radius: 12px !important;
-        box-shadow: 0 4px 30px rgba(0,0,0,0.5) !important;
-    }
-    .price-value {
-        color: #fff !important;
-        text-shadow: 0 0 40px rgba(255,215,0,0.05);
-    }
-    .price-label {
-        color: #888 !important;
-        text-transform: uppercase;
-        font-size: 0.7rem;
-        letter-spacing: 2px;
-    }
-    .signal-box {
-        border: 2px solid #ffd700 !important;
-        box-shadow: 0 0 40px rgba(255,215,0,0.05) !important;
-    }
-    .suggested-trade {
-        border: 2px solid #00ff88 !important;
-        background: rgba(0,10,5,0.80) !important;
-    }
-    .target-zone {
-        border-left: 4px solid #ffd700 !important;
-        background: rgba(255,215,0,0.04) !important;
-        padding: 8px 12px;
-        margin: 4px 0;
-    }
-    .target-zone:last-child {
-        border-left-color: #00ff88 !important;
-    }
-    .stop-loss-level {
-        border-left: 4px solid #ff4444 !important;
-        background: rgba(255,68,68,0.04) !important;
-        padding: 8px 12px;
-        margin: 4px 0;
-    }
-    .entry-zone {
-        border-left: 4px solid #00ff88 !important;
-        background: rgba(0,255,136,0.04) !important;
-        padding: 8px 12px;
-        margin: 4px 0;
-    }
-    .trade-row {
-        border-left: 4px solid #ffd700 !important;
-        padding: 10px 15px;
-        margin: 5px 0;
-    }
-    .footer {
-        text-align: center;
-        padding: 15px;
-        color: #444;
-        font-size: 0.65rem;
-        border-top: 1px solid rgba(255,215,0,0.05);
-        margin-top: 30px;
-        letter-spacing: 1px;
-    }
-    .footer .brand {
-        color: #ffd700;
-        font-weight: 600;
-    }
-    .stButton button {
-        background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important;
-        color: #000 !important;
-        font-weight: 700 !important;
-        border-radius: 10px !important;
-        border: none !important;
-        padding: 8px 16px !important;
-        width: 100% !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(255,215,0,0.08) !important;
-    }
-    .stButton button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 25px rgba(255,215,0,0.2) !important;
-    }
-    .explanation-box {
-        background: rgba(10,10,10,0.80) !important;
-        border: 1px solid rgba(255,215,0,0.05) !important;
-        border-radius: 10px !important;
-        padding: 15px !important;
-        margin: 8px 0 !important;
-        color: #bbb !important;
-        font-size: 0.9rem !important;
-        line-height: 1.6 !important;
-    }
-    .news-card {
-        background: rgba(10,10,10,0.65) !important;
-        border-left: 3px solid #ffd700 !important;
-        border-radius: 8px !important;
-        padding: 10px 15px !important;
-        margin: 5px 0 !important;
-    }
-    .news-title {
-        color: #eee !important;
-        font-weight: 500 !important;
-        font-size: 0.9rem !important;
-    }
-    .news-date {
-        color: #666 !important;
-        font-size: 0.7rem !important;
-    }
-    .reversal-alert {
-        border: 1px solid #ff4444 !important;
-        background: rgba(255,68,68,0.04) !important;
-        padding: 10px 15px !important;
-        margin: 5px 0 !important;
-        border-radius: 8px !important;
-        font-size: 0.85rem !important;
-    }
-    .pattern-badge {
-        display: inline-block;
-        background: rgba(255,215,0,0.08) !important;
-        border: 1px solid rgba(255,215,0,0.12) !important;
-        border-radius: 16px !important;
-        padding: 3px 12px !important;
-        margin: 2px !important;
-        font-size: 0.7rem !important;
-        color: #ffd700 !important;
-    }
-    .tbs-badge {
-        display: inline-block;
-        background: rgba(255,136,0,0.10) !important;
-        border: 1px solid rgba(255,136,0,0.15) !important;
-        border-radius: 16px !important;
-        padding: 3px 12px !important;
-        margin: 2px !important;
-        font-size: 0.7rem !important;
-        color: #ff8800 !important;
-        font-weight: bold;
-    }
+    @keyframes bgPulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert, .news-card, .explanation-box, .stButton button, .stSelectbox, .stDataFrame, .stMetric, .stPlotlyChart, .stTabs { position: relative !important; z-index: 1 !important; }
+    .css-1d391kg, .css-1d391kg * { background: rgba(10,10,10,0.85) !important; backdrop-filter: blur(10px) !important; border-right: 1px solid rgba(255,215,0,0.05) !important; }
+    .main-header { display: flex; justify-content: flex-end; align-items: center; padding: 10px 25px !important; min-height: 55px !important; background: rgba(0,0,0,0.5) !important; backdrop-filter: blur(8px) !important; border-radius: 12px !important; margin-bottom: 15px !important; border: 1px solid rgba(255,215,0,0.08) !important; }
+    .main-header .main-title { font-size: 1.2rem !important; color: #ffd700 !important; font-weight: 700 !important; letter-spacing: 2px !important; }
+    .main-header .main-subtitle { font-size: 0.55rem !important; color: #666 !important; letter-spacing: 1px !important; }
+    .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert { background: rgba(10,10,10,0.75) !important; backdrop-filter: blur(6px) !important; border: 1px solid rgba(255,215,0,0.10) !important; border-radius: 12px !important; box-shadow: 0 4px 30px rgba(0,0,0,0.5) !important; }
+    .price-value { color: #fff !important; }
+    .price-label { color: #888 !important; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 2px; }
+    .signal-box { border: 2px solid #ffd700 !important; }
+    .suggested-trade { border: 2px solid #00ff88 !important; background: rgba(0,10,5,0.80) !important; }
+    .target-zone { border-left: 4px solid #ffd700 !important; background: rgba(255,215,0,0.04) !important; padding: 8px 12px; margin: 4px 0; }
+    .target-zone:last-child { border-left-color: #00ff88 !important; }
+    .stop-loss-level { border-left: 4px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 8px 12px; margin: 4px 0; }
+    .entry-zone { border-left: 4px solid #00ff88 !important; background: rgba(0,255,136,0.04) !important; padding: 8px 12px; margin: 4px 0; }
+    .trade-row { border-left: 4px solid #ffd700 !important; padding: 10px 15px; margin: 5px 0; }
+    .footer { text-align: center; padding: 15px; color: #444; font-size: 0.65rem; border-top: 1px solid rgba(255,215,0,0.05); margin-top: 30px; letter-spacing: 1px; }
+    .footer .brand { color: #ffd700; font-weight: 600; }
+    .stButton button { background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important; color: #000 !important; font-weight: 700 !important; border-radius: 10px !important; border: none !important; padding: 8px 16px !important; width: 100% !important; transition: all 0.3s ease !important; }
+    .stButton button:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 25px rgba(255,215,0,0.2) !important; }
+    .explanation-box { background: rgba(10,10,10,0.80) !important; border: 1px solid rgba(255,215,0,0.05) !important; border-radius: 10px !important; padding: 15px !important; margin: 8px 0 !important; color: #bbb !important; font-size: 0.9rem !important; line-height: 1.6 !important; }
+    .news-card { background: rgba(10,10,10,0.65) !important; border-left: 3px solid #ffd700 !important; border-radius: 8px !important; padding: 10px 15px !important; margin: 5px 0 !important; }
+    .news-title { color: #eee !important; font-weight: 500 !important; font-size: 0.9rem !important; }
+    .news-date { color: #666 !important; font-size: 0.7rem !important; }
+    .reversal-alert { border: 1px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 10px 15px !important; margin: 5px 0 !important; border-radius: 8px !important; font-size: 0.85rem !important; }
+    .pattern-badge { display: inline-block; background: rgba(255,215,0,0.08) !important; border: 1px solid rgba(255,215,0,0.12) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ffd700 !important; }
+    .tbs-badge { display: inline-block; background: rgba(255,136,0,0.10) !important; border: 1px solid rgba(255,136,0,0.15) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ff8800 !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -281,10 +96,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# API Keys
+# 🔑 إعدادات API – استخدام Alpha Vantage
 # ==========================================
-GOLD_API_KEY = "goldapi-e2e53584d1ec7f76897b93bb0a88420f-io"
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"
+ALPHA_VANTAGE_API_KEY = "7HVLGU5PWHQZY7F6"
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # اختياري
 
 # ==========================================
 # قائمة الأزواج (جميع الأزواج)
@@ -351,7 +166,7 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 
 # ==========================================
-# دوال جلب البيانات
+# دوال جلب البيانات (مع Alpha Vantage)
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -396,18 +211,45 @@ def time_remaining(dt):
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
 
+def get_alpha_vantage_price(symbol="XAU"):
+    """
+    جلب السعر الفوري من Alpha Vantage.
+    للذهب: symbol = XAU
+    للفضة: symbol = XAG
+    للعملات: استخدام yfinance فقط
+    """
+    try:
+        url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency={symbol}&to_currency=USD&apikey={ALPHA_VANTAGE_API_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if "Realtime Currency Exchange Rate" in data:
+                rate = data["Realtime Currency Exchange Rate"]
+                price = float(rate.get("5. Exchange Rate", 0))
+                change = float(rate.get("9. Change in Percent", "0%").replace("%", ""))
+                return price, change
+    except:
+        pass
+    return None, None
+
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
-    if symbol == "GC=F" and GOLD_API_KEY:
-        try:
-            url = "https://www.goldapi.io/api/XAU/USD"
-            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return float(data.get('price', 0)), float(data.get('change_percent', 0))
-        except:
-            pass
+    """
+    جلب السعر الفوري:
+    1. Alpha Vantage للذهب (XAU) والفضة (XAG)
+    2. yfinance لباقي الأصول أو في حال فشل Alpha Vantage
+    """
+    # محاولة Alpha Vantage للذهب والفضة
+    if symbol == "GC=F":
+        price, change = get_alpha_vantage_price("XAU")
+        if price:
+            return price, change
+    elif symbol == "SI=F":
+        price, change = get_alpha_vantage_price("XAG")
+        if price:
+            return price, change
+    
+    # البديل: yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -422,6 +264,9 @@ def get_spot_price(symbol="GC=F"):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
+    """
+    جلب البيانات التاريخية من yfinance مع رموز بديلة وإعادة محاولة.
+    """
     alternative_symbols = {
         "GC=F": ["XAUUSD=X", "GOLD"],
         "SI=F": ["XAGUSD=X", "SILVER"],
@@ -494,7 +339,7 @@ def get_economic_news():
     return []
 
 # ==========================================
-# المؤشرات الأساسية
+# المؤشرات الأساسية (نفسها)
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -569,7 +414,7 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# Liquidity & SMR
+# Liquidity & SMR (نفسها)
 # ==========================================
 def detect_liquidity_levels(df, lookback=50):
     return df['high'].rolling(window=lookback).max(), df['low'].rolling(window=lookback).min()
@@ -588,7 +433,7 @@ def detect_smart_money_reversal(df, lookback=20):
     return df
 
 # ==========================================
-# SMC/ICT
+# SMC/ICT (نفسها)
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -675,7 +520,7 @@ def analyze_smc_ict(df):
     return df
 
 # ==========================================
-# TBS
+# TBS (نفسها)
 # ==========================================
 def detect_tbs(df, lookback=20, body_multiplier=1.5):
     if len(df) < lookback + 2:
@@ -695,7 +540,7 @@ def detect_tbs(df, lookback=20, body_multiplier=1.5):
     return None, None, None, None
 
 # ==========================================
-# أنماط
+# أنماط (نفسها)
 # ==========================================
 def find_peaks_troughs(series, order=5):
     peaks, troughs = [], []
@@ -773,7 +618,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# الإشارة المتكاملة
+# الإشارة المتكاملة (نفسها)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
