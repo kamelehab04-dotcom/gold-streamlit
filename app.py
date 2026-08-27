@@ -1,8 +1,8 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (مطور)
-# تاريخ التحديث: 2026-08-26
+# تاريخ التحديث: 2026-08-27
 # الإضافات: مستويات السيولة (BSL/SSL) + انعكاسات Smart Money (SMR)
-# الإصلاحات: إزالة الاستيرادات غير الموجودة، تعريف جميع الدوال، إصلاح الأخطاء
+# الأزواج: كاملة (الذهب، الفضة، البيتكوين، الإيثيريوم + جميع العملات)
 # ==========================================
 
 import streamlit as st
@@ -16,9 +16,10 @@ import numpy as np
 import requests
 import json
 import os
+import time
 
 # ==========================================
-# إعداد الصفحة – BLACK PYRAMID
+# إعداد الصفحة
 # ==========================================
 st.set_page_config(
     page_title="Black Pyramid",
@@ -28,332 +29,77 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية
+# الهوية البصرية
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
-    /* ===== الخطوط ===== */
-    .main-title, .signal-text, .price-value {
-        font-family: 'Orbitron', sans-serif !important;
-        letter-spacing: 3px;
-    }
-    .main-subtitle, .price-label, .signal-confidence, .footer {
-        font-family: 'Inter', sans-serif !important;
-        letter-spacing: 1px;
-    }
-
-    /* ===== خلفية الصفحة ===== */
-    html, body, .stApp {
-        background: #0a0a0a !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    .stApp {
-        position: relative !important;
-        background: #0a0a0a !important;
-        min-height: 100vh !important;
-    }
-
-    /* ===== الصورة الخلفية ===== */
+    .main-title, .signal-text, .price-value { font-family: 'Orbitron', sans-serif !important; letter-spacing: 3px; }
+    .main-subtitle, .price-label, .signal-confidence, .footer { font-family: 'Inter', sans-serif !important; letter-spacing: 1px; }
+    html, body, .stApp { background: #0a0a0a !important; margin: 0 !important; padding: 0 !important; }
+    .stApp { position: relative !important; background: #0a0a0a !important; min-height: 100vh !important; }
     .stApp::before {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
+        content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background: url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png') !important;
-        background-size: cover !important;
-        background-position: center !important;
-        background-attachment: fixed !important;
-        opacity: 0.25 !important;
-        pointer-events: none !important;
-        z-index: 0 !important;
-        filter: brightness(0.9) contrast(1.1) !important;
+        background-size: cover !important; background-position: center !important;
+        opacity: 0.25 !important; pointer-events: none !important; z-index: 0 !important;
     }
-
-    /* ===== توهج خلفي متحرك ===== */
     .stApp::after {
-        content: '';
-        position: fixed;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
+        content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
         background: radial-gradient(ellipse at 30% 20%, rgba(255,215,0,0.03) 0%, transparent 50%),
                     radial-gradient(ellipse at 70% 80%, rgba(255,215,0,0.02) 0%, transparent 50%);
-        pointer-events: none;
-        z-index: 0;
-        animation: bgPulse 10s ease-in-out infinite;
+        pointer-events: none; z-index: 0; animation: bgPulse 10s ease-in-out infinite;
     }
-    @keyframes bgPulse {
-        0%, 100% { opacity: 0.5; transform: scale(1) rotate(0deg); }
-        50% { opacity: 1; transform: scale(1.05) rotate(0.5deg); }
-    }
-
-    /* ===== جميع المحتويات فوق الخلفية ===== */
-    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, 
-    .entry-zone, .target-zone, .stop-loss-level, .reversal-alert,
-    .currency-card, .news-card, .explanation-box, .stButton button,
-    .stSelectbox, .stTextInput, .stNumberInput, .stDataFrame,
-    .stMetric, .stMarkdown, .stPlotlyChart, .stTabs, .stExpander {
-        position: relative !important;
-        z-index: 1 !important;
-    }
-
-    /* ===== الشريط الجانبي ===== */
-    .css-1d391kg, .css-1d391kg * {
-        background: rgba(10, 10, 10, 0.85) !important;
-        backdrop-filter: blur(10px) !important;
-        border-right: 1px solid rgba(255, 215, 0, 0.05) !important;
-    }
-
-    /* ===== الهيدر المصغر ===== */
-    .main-header {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        padding: 10px 25px !important;
-        min-height: 55px !important;
-        background: rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(8px) !important;
-        border-radius: 12px !important;
-        margin-bottom: 15px !important;
-        border: 1px solid rgba(255, 215, 0, 0.08) !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
-    }
-    .main-header .main-title {
-        font-size: 1.2rem !important;
-        color: #ffd700 !important;
-        font-weight: 700 !important;
-        letter-spacing: 2px !important;
-        text-shadow: 0 0 20px rgba(255,215,0,0.05) !important;
-    }
-    .main-header .pyramid-icon {
-        font-size: 0.9rem !important;
-        color: #ffd700 !important;
-    }
-    .main-header .main-subtitle {
-        font-size: 0.55rem !important;
-        color: #666 !important;
-        letter-spacing: 1px !important;
-        margin-top: 2px !important;
-    }
-
-    /* ===== البطاقات ===== */
-    .price-card, .signal-box, .suggested-trade, .trade-row, 
-    .entry-zone, .target-zone, .stop-loss-level, .reversal-alert {
-        background: rgba(10, 10, 10, 0.75) !important;
-        backdrop-filter: blur(6px) !important;
-        -webkit-backdrop-filter: blur(6px) !important;
-        border: 1px solid rgba(255, 215, 0, 0.10) !important;
-        box-shadow: 0 4px 30px rgba(0,0,0,0.5) !important;
-        border-radius: 12px !important;
-    }
-    .price-card {
-        border-color: rgba(255, 215, 0, 0.15) !important;
-    }
-    .price-value {
-        color: #fff !important;
-        text-shadow: 0 0 40px rgba(255,215,0,0.05);
-    }
-    .price-label {
-        color: #888 !important;
-        text-transform: uppercase;
-        font-size: 0.7rem;
-        letter-spacing: 2px;
-    }
-
-    /* ===== الإشارة ===== */
-    .signal-box {
-        border: 2px solid #ffd700 !important;
-        box-shadow: 0 0 40px rgba(255,215,0,0.05) !important;
-    }
-    .signal-text {
-        text-shadow: 0 0 40px currentColor;
-    }
-
-    /* ===== الصفقة المقترحة ===== */
-    .suggested-trade {
-        border: 2px solid #00ff88 !important;
-        background: rgba(0, 10, 5, 0.80) !important;
-    }
-
-    /* ===== الأهداف والاستوب ===== */
-    .target-zone {
-        border-left: 4px solid #ffd700 !important;
-        background: rgba(255,215,0,0.04) !important;
-        padding: 8px 12px;
-        margin: 4px 0;
-    }
-    .target-zone:last-child {
-        border-left-color: #00ff88 !important;
-    }
-    .stop-loss-level {
-        border-left: 4px solid #ff4444 !important;
-        background: rgba(255,68,68,0.04) !important;
-        padding: 8px 12px;
-        margin: 4px 0;
-    }
-    .entry-zone {
-        border-left: 4px solid #00ff88 !important;
-        background: rgba(0,255,136,0.04) !important;
-        padding: 8px 12px;
-        margin: 4px 0;
-    }
-
-    /* ===== صفوف الصفقات ===== */
-    .trade-row {
-        border-left: 4px solid #ffd700 !important;
-        padding: 10px 15px;
-        margin: 5px 0;
-    }
-
-    /* ===== التذييل ===== */
-    .footer {
-        text-align: center;
-        padding: 15px;
-        color: #444;
-        font-size: 0.65rem;
-        border-top: 1px solid rgba(255,215,0,0.05);
-        margin-top: 30px;
-        letter-spacing: 1px;
-    }
-    .footer .brand {
-        color: #ffd700;
-        font-weight: 600;
-    }
-
-    /* ===== الأزرار ===== */
-    .stButton button {
-        background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important;
-        color: #000 !important;
-        font-weight: 700 !important;
-        border-radius: 10px !important;
-        border: none !important;
-        padding: 8px 16px !important;
-        width: 100% !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(255,215,0,0.08) !important;
-        font-size: 0.8rem !important;
-    }
-    .stButton button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 25px rgba(255,215,0,0.2) !important;
-    }
-
-    /* ===== شرح القرار ===== */
-    .explanation-box {
-        background: rgba(10, 10, 10, 0.80) !important;
-        border: 1px solid rgba(255,215,0,0.05) !important;
-        border-radius: 10px !important;
-        padding: 15px !important;
-        margin: 8px 0 !important;
-        color: #bbb !important;
-        font-size: 0.9rem !important;
-        line-height: 1.6 !important;
-    }
-
-    /* ===== الأخبار ===== */
-    .news-card {
-        background: rgba(10, 10, 10, 0.65) !important;
-        border-left: 3px solid #ffd700 !important;
-        border-radius: 8px !important;
-        padding: 10px 15px !important;
-        margin: 5px 0 !important;
-        border: 1px solid rgba(255,215,0,0.05) !important;
-    }
-    .news-title {
-        color: #eee !important;
-        font-weight: 500 !important;
-        font-size: 0.9rem !important;
-    }
-    .news-date {
-        color: #666 !important;
-        font-size: 0.7rem !important;
-    }
-
-    /* ===== التنبيهات ===== */
-    .reversal-alert {
-        border: 1px solid #ff4444 !important;
-        background: rgba(255,68,68,0.04) !important;
-        padding: 10px 15px !important;
-        margin: 5px 0 !important;
-        border-radius: 8px !important;
-        font-size: 0.85rem !important;
-    }
-
-    /* ===== الحالة ===== */
-    .status-open { color: #00ff88 !important; font-weight: bold; }
-    .status-closed { color: #ff4444 !important; font-weight: bold; }
-
-    /* ===== الشارات ===== */
-    .pattern-badge {
-        display: inline-block;
-        background: rgba(255, 215, 0, 0.08) !important;
-        border: 1px solid rgba(255, 215, 0, 0.12) !important;
-        border-radius: 16px !important;
-        padding: 3px 12px !important;
-        margin: 2px !important;
-        font-size: 0.7rem !important;
-        color: #ffd700 !important;
-    }
-    .tbs-badge {
-        display: inline-block;
-        background: rgba(255, 136, 0, 0.10) !important;
-        border: 1px solid rgba(255, 136, 0, 0.15) !important;
-        border-radius: 16px !important;
-        padding: 3px 12px !important;
-        margin: 2px !important;
-        font-size: 0.7rem !important;
-        color: #ff8800 !important;
-        font-weight: bold;
-    }
-
-    /* ===== أزرار المؤشرات ===== */
-    .indicator-toggle {
-        background: rgba(255,215,0,0.05) !important;
-        border: 1px solid rgba(255,215,0,0.08) !important;
-        border-radius: 8px !important;
-        padding: 4px 8px !important;
-        font-size: 0.7rem !important;
-        color: #aaa !important;
-        cursor: pointer !important;
-        text-align: center !important;
-    }
-    .indicator-toggle:hover {
-        background: rgba(255,215,0,0.10) !important;
-        border-color: #ffd700 !important;
-    }
+    @keyframes bgPulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert, .news-card, .explanation-box, .stButton button, .stSelectbox, .stDataFrame, .stMetric, .stPlotlyChart, .stTabs { position: relative !important; z-index: 1 !important; }
+    .css-1d391kg, .css-1d391kg * { background: rgba(10,10,10,0.85) !important; backdrop-filter: blur(10px) !important; border-right: 1px solid rgba(255,215,0,0.05) !important; }
+    .main-header { display: flex; justify-content: flex-end; align-items: center; padding: 10px 25px !important; min-height: 55px !important; background: rgba(0,0,0,0.5) !important; backdrop-filter: blur(8px) !important; border-radius: 12px !important; margin-bottom: 15px !important; border: 1px solid rgba(255,215,0,0.08) !important; }
+    .main-header .main-title { font-size: 1.2rem !important; color: #ffd700 !important; font-weight: 700 !important; letter-spacing: 2px !important; }
+    .main-header .main-subtitle { font-size: 0.55rem !important; color: #666 !important; letter-spacing: 1px !important; }
+    .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert { background: rgba(10,10,10,0.75) !important; backdrop-filter: blur(6px) !important; border: 1px solid rgba(255,215,0,0.10) !important; border-radius: 12px !important; box-shadow: 0 4px 30px rgba(0,0,0,0.5) !important; }
+    .price-value { color: #fff !important; }
+    .price-label { color: #888 !important; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 2px; }
+    .signal-box { border: 2px solid #ffd700 !important; }
+    .suggested-trade { border: 2px solid #00ff88 !important; background: rgba(0,10,5,0.80) !important; }
+    .target-zone { border-left: 4px solid #ffd700 !important; background: rgba(255,215,0,0.04) !important; padding: 8px 12px; margin: 4px 0; }
+    .target-zone:last-child { border-left-color: #00ff88 !important; }
+    .stop-loss-level { border-left: 4px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 8px 12px; margin: 4px 0; }
+    .entry-zone { border-left: 4px solid #00ff88 !important; background: rgba(0,255,136,0.04) !important; padding: 8px 12px; margin: 4px 0; }
+    .trade-row { border-left: 4px solid #ffd700 !important; padding: 10px 15px; margin: 5px 0; }
+    .footer { text-align: center; padding: 15px; color: #444; font-size: 0.65rem; border-top: 1px solid rgba(255,215,0,0.05); margin-top: 30px; letter-spacing: 1px; }
+    .footer .brand { color: #ffd700; font-weight: 600; }
+    .stButton button { background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important; color: #000 !important; font-weight: 700 !important; border-radius: 10px !important; border: none !important; padding: 8px 16px !important; width: 100% !important; transition: all 0.3s ease !important; }
+    .stButton button:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 25px rgba(255,215,0,0.2) !important; }
+    .explanation-box { background: rgba(10,10,10,0.80) !important; border: 1px solid rgba(255,215,0,0.05) !important; border-radius: 10px !important; padding: 15px !important; margin: 8px 0 !important; color: #bbb !important; font-size: 0.9rem !important; line-height: 1.6 !important; }
+    .news-card { background: rgba(10,10,10,0.65) !important; border-left: 3px solid #ffd700 !important; border-radius: 8px !important; padding: 10px 15px !important; margin: 5px 0 !important; }
+    .news-title { color: #eee !important; font-weight: 500 !important; font-size: 0.9rem !important; }
+    .news-date { color: #666 !important; font-size: 0.7rem !important; }
+    .reversal-alert { border: 1px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 10px 15px !important; margin: 5px 0 !important; border-radius: 8px !important; font-size: 0.85rem !important; }
+    .pattern-badge { display: inline-block; background: rgba(255,215,0,0.08) !important; border: 1px solid rgba(255,215,0,0.12) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ffd700 !important; }
+    .tbs-badge { display: inline-block; background: rgba(255,136,0,0.10) !important; border: 1px solid rgba(255,136,0,0.15) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ff8800 !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# الهيدر المصغر – BLACK PYRAMID (يمين)
+# الهيدر
 # ==========================================
 st.markdown("""
 <div class="main-header">
     <div style="text-align: right;">
-        <div class="main-title">
-            <span class="pyramid-icon">▲</span>
-            BLACK PYRAMID
-            <span class="pyramid-icon">▲</span>
-        </div>
+        <div class="main-title"><span>▲</span> BLACK PYRAMID <span>▲</span></div>
         <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔑 إعدادات API – باستخدام المفتاح الجديد
+# API Keys
 # ==========================================
 GOLD_API_KEY = "goldapi-e2e53584d1ec7f76897b93bb0a88420f-io"
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # اختياري
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 # ==========================================
-# قائمة الأزواج (تم حذف الأزواج المطلوبة)
+# قائمة الأزواج (جميع الأزواج بما فيها الذهب والفضة والبيتكوين والإيثيريوم)
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -471,9 +217,7 @@ def get_spot_price(symbol="GC=F"):
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                price = float(data.get('price', 0))
-                change = float(data.get('change_percent', 0))
-                return price, change
+                return float(data.get('price', 0)), float(data.get('change_percent', 0))
         except:
             pass
     try:
@@ -489,16 +233,28 @@ def get_spot_price(symbol="GC=F"):
     return None, None
 
 @st.cache_data(ttl=300)
-def get_historical_data(symbol, period="1mo", interval="1h"):
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval)
-        if df.empty:
-            return None
-        df.columns = [col.lower() for col in df.columns]
-        return df
-    except:
-        return None
+def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
+    alternative_symbols = {
+        "GC=F": ["XAUUSD=X", "GOLD"],
+        "SI=F": ["XAGUSD=X", "SILVER"],
+        "DX-Y.NYB": ["DX=F", "DXY"],
+        "BTC-USD": ["BTCUSD=X"],
+        "ETH-USD": ["ETHUSD=X"]
+    }
+    symbols_to_try = [symbol] + alternative_symbols.get(symbol, [])
+    for attempt in range(max_retries):
+        for sym in symbols_to_try:
+            try:
+                ticker = yf.Ticker(sym)
+                df = ticker.history(period=period, interval=interval)
+                if not df.empty:
+                    df.columns = [col.lower() for col in df.columns]
+                    return df
+            except:
+                continue
+        if attempt < max_retries - 1:
+            time.sleep(2)
+    return None
 
 @st.cache_data(ttl=60)
 def get_all_forex():
@@ -557,11 +313,10 @@ def calc_rsi(data, period=14):
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 def calc_atr(df, period=14):
-    high = df['high']; low = df['low']; close = df['close']
+    high, low, close = df['high'], df['low'], df['close']
     tr1 = high - low
     tr2 = abs(high - close.shift())
     tr3 = abs(low - close.shift())
@@ -579,12 +334,10 @@ def calc_macd(data):
 def calc_bollinger_bands(data, period=20, std_dev=2):
     sma = data.rolling(window=period).mean()
     std = data.rolling(window=period).std()
-    upper = sma + (std * std_dev)
-    lower = sma - (std * std_dev)
-    return upper, sma, lower
+    return sma + (std * std_dev), sma, sma - (std * std_dev)
 
 def calc_adx(df, period=14):
-    high = df['high']; low = df['low']; close = df['close']
+    high, low, close = df['high'], df['low'], df['close']
     plus_dm = high.diff()
     minus_dm = low.diff()
     plus_dm[plus_dm < 0] = 0
@@ -594,11 +347,10 @@ def calc_adx(df, period=14):
     plus_di = 100 * (plus_dm.ewm(span=period).mean() / atr)
     minus_di = 100 * (abs(minus_dm).ewm(span=period).mean() / atr)
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    adx = dx.rolling(window=period).mean()
-    return adx, plus_di, minus_di
+    return dx.rolling(window=period).mean(), plus_di, minus_di
 
 def calc_ichimoku(df):
-    high = df['high']; low = df['low']; close = df['close']
+    high, low, close = df['high'], df['low'], df['close']
     tenkan = (high.rolling(window=9).max() + low.rolling(window=9).min()) / 2
     kijun = (high.rolling(window=26).max() + low.rolling(window=26).min()) / 2
     senkou_a = ((tenkan + kijun) / 2).shift(26)
@@ -614,8 +366,7 @@ def calc_mfi(df, period=14):
     money_flow = typical_price * df['volume']
     positive_flow = money_flow.where(typical_price > typical_price.shift(), 0).rolling(window=period).sum()
     negative_flow = money_flow.where(typical_price < typical_price.shift(), 0).rolling(window=period).sum()
-    mfi = 100 - (100 / (1 + positive_flow / negative_flow))
-    return mfi
+    return 100 - (100 / (1 + positive_flow / negative_flow))
 
 def calc_fibonacci_levels(high, low, current_price):
     diff = high - low
@@ -630,47 +381,29 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# دوال السيولة و SMR
+# Liquidity & SMR
 # ==========================================
 def detect_liquidity_levels(df, lookback=50):
-    """
-    تحديد مستويات السيولة:
-    - Buy Side Liquidity (BSL): أعلى قمة خلال الفترة
-    - Sell Side Liquidity (SSL): أدنى قاع خلال الفترة
-    """
-    high = df['high'].rolling(window=lookback).max()
-    low = df['low'].rolling(window=lookback).min()
-    return high, low
+    return df['high'].rolling(window=lookback).max(), df['low'].rolling(window=lookback).min()
 
 def detect_smart_money_reversal(df, lookback=20):
-    """
-    كشف انعكاسات Smart Money (SMR):
-    - SMR Bullish: كسر قاع سابق (SSL) ثم صعود
-    - SMR Bearish: كسر قمة سابقة (BSL) ثم هبوط
-    """
     df = df.copy()
     df['smr_bullish'] = False
     df['smr_bearish'] = False
-    
     for i in range(lookback, len(df)):
         high_liquidity = df['high'].iloc[i-lookback:i].max()
         low_liquidity = df['low'].iloc[i-lookback:i].min()
-        
-        # اختراق BSL (قمة سابقة) ثم هبوط → SMR Bearish
         if df['high'].iloc[i] > high_liquidity and df['close'].iloc[i] < df['open'].iloc[i]:
             df.loc[df.index[i], 'smr_bearish'] = True
-        # اختراق SSL (قاع سابق) ثم صعود → SMR Bullish
         if df['low'].iloc[i] < low_liquidity and df['close'].iloc[i] > df['open'].iloc[i]:
             df.loc[df.index[i], 'smr_bullish'] = True
-    
     return df
 
 # ==========================================
-# تحليل SMC/ICT مع السيولة و SMR
+# SMC/ICT مع Liquidity و SMR
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
-    # أعمدة SMC الأساسية
     df['order_block_bullish'] = False
     df['order_block_bearish'] = False
     df['fvg_bullish'] = False
@@ -686,21 +419,16 @@ def analyze_smc_ict(df):
     df['tbs_bullish'] = False
     df['tbs_bearish'] = False
     
-    # أعمدة السيولة الجديدة
-    df['bsl'] = np.nan   # Buy Side Liquidity
-    df['ssl'] = np.nan   # Sell Side Liquidity
+    df['bsl'] = np.nan
+    df['ssl'] = np.nan
     df['smr_bullish'] = False
     df['smr_bearish'] = False
     
-    # حساب مستويات السيولة
     bsl, ssl = detect_liquidity_levels(df, lookback=50)
     df['bsl'] = bsl
     df['ssl'] = ssl
-    
-    # حساب SMR
     df = detect_smart_money_reversal(df, lookback=20)
     
-    # باقي التحليل SMC
     for i in range(3, len(df)):
         if df['close'].iloc[i] > df['open'].iloc[i]:
             body = df['close'].iloc[i] - df['open'].iloc[i]
@@ -779,11 +507,10 @@ def detect_tbs(df, lookback=20, body_multiplier=1.5):
     return None, None, None, None
 
 # ==========================================
-# اكتشاف النماذج الفنية
+# أنماط
 # ==========================================
 def find_peaks_troughs(series, order=5):
-    peaks = []
-    troughs = []
+    peaks, troughs = [], []
     for i in range(order, len(series) - order):
         if all(series[i] > series[i-j] for j in range(1, order+1)) and all(series[i] > series[i+j] for j in range(1, order+1)):
             peaks.append((i, series[i]))
@@ -799,12 +526,11 @@ def detect_head_shoulders(df, lookback=50):
     if len(peaks) >= 3:
         head_idx = np.argmax([p[1] for p in peaks])
         if head_idx > 0 and head_idx < len(peaks) - 1:
-            left_shoulder = peaks[head_idx - 1][1]
+            left = peaks[head_idx - 1][1]
             head = peaks[head_idx][1]
-            right_shoulder = peaks[head_idx + 1][1]
-            if head > left_shoulder and head > right_shoulder:
-                if abs(left_shoulder - right_shoulder) / left_shoulder < 0.05:
-                    return "HEAD_AND_SHOULDERS", 5
+            right = peaks[head_idx + 1][1]
+            if head > left and head > right and abs(left - right) / left < 0.05:
+                return "HEAD_AND_SHOULDERS", 5
     return None, 0
 
 def detect_double_top_bottom(df, lookback=50):
@@ -842,24 +568,24 @@ def detect_triangle_pattern(df, lookback=40):
 def analyze_chart_patterns(df):
     patterns = []
     total_score = 0
-    pattern, score = detect_head_shoulders(df)
-    if pattern:
-        patterns.append({"pattern": pattern, "score": score, "direction": "BEARISH"})
-        total_score += score
-    pattern, score = detect_double_top_bottom(df)
-    if pattern:
-        direction = "BEARISH" if "DOUBLE_TOP" in pattern else "BULLISH"
-        patterns.append({"pattern": pattern, "score": score, "direction": direction})
-        total_score += score
-    pattern, score = detect_triangle_pattern(df)
-    if pattern:
-        direction = "BULLISH" if "ASCENDING" in pattern else "BEARISH"
-        patterns.append({"pattern": pattern, "score": score, "direction": direction})
-        total_score += score
+    p, s = detect_head_shoulders(df)
+    if p:
+        patterns.append({"pattern": p, "score": s, "direction": "BEARISH"})
+        total_score += s
+    p, s = detect_double_top_bottom(df)
+    if p:
+        direction = "BEARISH" if "DOUBLE_TOP" in p else "BULLISH"
+        patterns.append({"pattern": p, "score": s, "direction": direction})
+        total_score += s
+    p, s = detect_triangle_pattern(df)
+    if p:
+        direction = "BULLISH" if "ASCENDING" in p else "BEARISH"
+        patterns.append({"pattern": p, "score": s, "direction": direction})
+        total_score += s
     return patterns, total_score
 
 # ==========================================
-# نظام التسجيل المتكامل (مع SMR و Stop Loss المحسّن)
+# الإشارة المتكاملة (مع SMR و Stop Loss المحسّن)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -875,11 +601,9 @@ def generate_advanced_signal(df, current_price, symbol=""):
     details = {}
     weights = {
         'rsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3,
-        'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3,
-        'smr': 3   # وزن لـ Smart Money Reversal
+        'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3, 'smr': 3
     }
 
-    # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -891,7 +615,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
-    # MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
             scores['BUY'] += weights['macd']
@@ -902,7 +625,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD'] = "محايد"
 
-    # Bollinger Bands
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
             scores['BUY'] += weights['bb']
@@ -913,7 +635,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['BB'] = "وسط النطاق"
 
-    # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
             scores['BUY'] += weights['vwap']
@@ -922,7 +643,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
             scores['SELL'] += weights['vwap']
             details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
-    # ADX
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
@@ -934,7 +654,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
-    # Ichimoku
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
@@ -946,7 +665,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
-    # SMC
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']
         details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
@@ -980,7 +698,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
-    # SMR
     if last_smc.get('smr_bullish', False):
         scores['BUY'] += weights['smr']
         details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
@@ -990,7 +707,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMR'] = "لا توجد إشارة SMR"
 
-    # Patterns
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
@@ -1002,7 +718,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['Pattern'] = "لا توجد نماذج"
 
-    # TBS
     if tbs_type == "BULLISH":
         scores['BUY'] += weights['tbs']
         details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
@@ -1012,7 +727,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['TBS'] = "لا توجد إشارة TBS"
 
-    # MFI
     if 'mfi' in df.columns and not pd.isna(last['mfi']):
         mfi = last['mfi']
         if mfi < 20:
@@ -1024,7 +738,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
-    # Fibonacci
     recent_high = df['high'].iloc[-50:].max()
     recent_low = df['low'].iloc[-50:].min()
     fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
@@ -1051,7 +764,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
         signal = "WAIT"
         confidence = 50 + (net_score / total_weight) * 50
 
-    # مرشح التقلب
     if 'atr' in df.columns and len(df) > 50:
         current_atr = last['atr']
         avg_atr = df['atr'].iloc[-50:].mean()
@@ -1063,7 +775,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
-    # ===== حساب الاستوب والأهداف (محسّن) =====
+    # ===== Stop Loss and Targets (محسّن) =====
     stop_loss = None
     entry_price = None
     targets = {}
@@ -1071,7 +783,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
     if signal in ["BUY", "SELL"] and confidence >= 60:
         atr_value = last['atr'] if not pd.isna(last['atr']) else 10
         
-        # حساب كتل الأوامر (Order Blocks) – بديل عن `planner`
         blocks = []
         start_idx = max(3, len(df) - 30)
         for i in range(start_idx, len(df) - 1):
@@ -1094,13 +805,12 @@ def generate_advanced_signal(df, current_price, symbol=""):
             ob_low = min([block[1] for block in order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.8)
             stop_loss = max(recent_low, ob_low, current_price - atr_value * 2.0)
             stop_loss = min(stop_loss, current_price - atr_value * 0.5)
-        else:  # SELL
+        else:
             recent_high = df['high'].iloc[-20:].max()
             ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.8)
             stop_loss = min(recent_high, ob_high, current_price + atr_value * 2.0)
             stop_loss = max(stop_loss, current_price + atr_value * 0.5)
         
-        # تأمين مسافة لا تقل عن 0.3 * ATR
         min_distance = atr_value * 0.3
         if signal == "BUY" and (entry_price - stop_loss) < min_distance:
             stop_loss = entry_price - min_distance
@@ -1132,18 +842,16 @@ def generate_advanced_signal(df, current_price, symbol=""):
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# كشف الانعكاسات
+# كشف الانعكاس
 # ==========================================
 def detect_reversal(df, trade):
     if df is None or len(df) < 20:
         return False, "بيانات غير كافية"
-
     last = df.iloc[-1]
     prev = df.iloc[-2]
     direction = trade["direction"]
     entry = trade["entry"]
     current_price = last['close']
-
     signals = []
     
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
@@ -1263,7 +971,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# دالة جمع إشارات جميع الأزواج مع تفاصيل الصفقة
+# جمع إشارات جميع الأزواج مع تفاصيل الصفقة
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
@@ -1329,7 +1037,7 @@ def get_all_signals_with_trades():
     return pd.DataFrame(results)
 
 # ==========================================
-# إدارة الصفقات (نفس النسخة الأصلية)
+# إدارة الصفقات
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -1408,7 +1116,7 @@ class TradeManager:
         return None
 
 # ==========================================
-# الواجهة الرئيسية
+# الشريط الجانبي
 # ==========================================
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
@@ -1480,11 +1188,21 @@ with st.sidebar:
 # ==========================================
 # جلب البيانات للزوج المختار
 # ==========================================
-current_price, change = get_spot_price(selected_symbol)
+for attempt in range(3):
+    current_price, change = get_spot_price(selected_symbol)
+    if current_price is not None:
+        break
+    time.sleep(1)
+
 df = get_historical_data(selected_symbol, period="1mo", interval="1h")
+
 if df is None:
-    st.error("⚠️ تعذر تحميل البيانات")
+    st.error("⚠️ تعذر تحميل البيانات بعد عدة محاولات. يرجى التحقق من اتصال الإنترنت أو اختيار زوج آخر.")
+    if st.button("🔄 إعادة محاولة تحميل البيانات", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
     st.stop()
+
 if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
@@ -1507,7 +1225,7 @@ df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
 # ==========================================
-# توليد الإشارة المتكاملة
+# توليد الإشارة
 # ==========================================
 signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
@@ -1533,7 +1251,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# زر تحديث البيانات
+# زر تحديث
 # ==========================================
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
@@ -1562,9 +1280,9 @@ if st.session_state.show_indicators:
     cols = st.columns(5)
     last = df.iloc[-1]
     cols[0].metric("RSI", f"{last['rsi']:.1f}")
-    cols[1].metric("ATR", f"${last['atr']:.2f}")
+    cols[1].metric("ATR", f"${last['atr']:.2f}" if "Gold" in selected_pair_name else f"{last['atr']:.4f}")
     cols[2].metric("ADX", f"{last['adx']:.1f}")
-    cols[3].metric("VWAP", f"${last['vwap']:.2f}")
+    cols[3].metric("VWAP", f"${last['vwap']:.2f}" if "Gold" in selected_pair_name else f"{last['vwap']:.4f}")
     cols[4].metric("MFI", f"{last['mfi']:.1f}")
 else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
@@ -1599,6 +1317,8 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         lot_size = risk_per_trade / (risk_amount * 100) if risk_amount > 0 else 0.01
         lot_size = round(lot_size, 2)
         
+        trailing_dist = last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else (3 if "Gold" in selected_pair_name else 0.0003)
+        
         trade_data = {
             "direction": signal,
             "entry": entry_price,
@@ -1606,7 +1326,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
             "stop_loss": stop_loss,
             "take_profit": targets['target2'],
             "trailing_enabled": True,
-            "trailing_distance": last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else 3,
+            "trailing_distance": trailing_dist,
             "notes": f"مقترحة من الإشارة المتكاملة (الثقة {confidence:.0f}%)"
         }
         trade_id = trade_manager.add_trade(trade_data)
@@ -1617,7 +1337,7 @@ else:
     st.info("⏳ لا توجد صفقة مقترحة حالياً (انتظر إشارة قوية)")
 
 # ==========================================
-# عرض النماذج و TBS
+# النماذج و TBS
 # ==========================================
 if patterns:
     st.markdown("#### 📐 النماذج المكتشفة")
@@ -1665,7 +1385,7 @@ with st.expander("📝 شرح القرار", expanded=True):
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
-# ⭐ جميع الصفقات المقترحة (عبر جميع الأزواج)
+# جميع الصفقات المقترحة
 # ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
@@ -1784,9 +1504,9 @@ if st.session_state.show_form:
     with st.form("new_trade_form"):
         st.subheader("➕ تفاصيل الصفقة")
         direction = st.selectbox("الاتجاه", ["BUY", "SELL"])
-        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f")
-        stop = st.number_input("وقف الخسارة", value=float(current_price - 20), format="%.2f")
-        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970")
+        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f" if "Gold" in selected_pair_name else "%.4f")
+        stop = st.number_input("وقف الخسارة", value=float(current_price - 20 if "Gold" in selected_pair_name else 0.001), format="%.2f" if "Gold" in selected_pair_name else "%.4f")
+        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970" if "Gold" in selected_pair_name else "1.1050, 1.1080, 1.1120")
         lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
         submitted = st.form_submit_button("إضافة الصفقة")
         if submitted and entry > 0 and stop > 0:
@@ -1796,7 +1516,7 @@ if st.session_state.show_form:
                 "entry": entry,
                 "lots": lots,
                 "stop_loss": stop,
-                "take_profit": targets_list[0] if targets_list else entry + 40,
+                "take_profit": targets_list[0] if targets_list else (entry + 40 if "Gold" in selected_pair_name else entry + 0.002),
                 "trailing_enabled": False,
                 "trailing_distance": 0,
                 "notes": "تمت إضافتها يدوياً"
@@ -1807,7 +1527,7 @@ if st.session_state.show_form:
             st.rerun()
 
 # ==========================================
-# الأخبار الاقتصادية والتقويم
+# الأخبار
 # ==========================================
 st.markdown("---")
 st.markdown("### 📰 الأخبار الاقتصادية والتقويم")
@@ -1844,7 +1564,7 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=d
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
 
-# إضافة BSL/SSL على الرسم البياني
+# BSL/SSL
 if not df_smc['bsl'].isna().all():
     fig.add_hline(y=df_smc['bsl'].iloc[-1], line_dash="dash", line_color="rgba(0,255,0,0.5)", row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=df_smc['bsl'].iloc[-1], text="BSL", showarrow=True, arrowhead=1, row=1, col=1)
@@ -1852,21 +1572,21 @@ if not df_smc['ssl'].isna().all():
     fig.add_hline(y=df_smc['ssl'].iloc[-1], line_dash="dash", line_color="rgba(255,0,0,0.5)", row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=df_smc['ssl'].iloc[-1], text="SSL", showarrow=True, arrowhead=1, row=1, col=1)
 
-# إشارات SMC
+# SMC signals
 if df_smc['order_block_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
 if df_smc['order_block_bearish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
 
-# إشارات SMR
+# SMR signals
 if df_smc['smr_bullish'].iloc[-1]:
-    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1] + 5, text="SMR ▲", showarrow=True, arrowhead=1, row=1, col=1, font_color="green")
+    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1] + (5 if "Gold" in selected_pair_name else 0.001), text="SMR ▲", showarrow=True, arrowhead=1, row=1, col=1, font_color="green")
 if df_smc['smr_bearish'].iloc[-1]:
-    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1] - 5, text="SMR ▼", showarrow=True, arrowhead=1, row=1, col=1, font_color="red")
+    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1] - (5 if "Gold" in selected_pair_name else 0.001), text="SMR ▼", showarrow=True, arrowhead=1, row=1, col=1, font_color="red")
 
 if tbs_type:
     fig.add_hline(y=tbs_level, line_dash="dot", line_color="orange", opacity=0.7, row=1, col=1)
-    fig.add_annotation(x=df.index[-1], y=tbs_level, text=f"TBS Old Level", showarrow=True, arrowhead=1, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=tbs_level, text="TBS Old Level", showarrow=True, arrowhead=1, row=1, col=1)
     fig.add_hline(y=tbs_entry, line_dash="dash", line_color="yellow", opacity=0.5, row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=tbs_entry, text="TBS Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
