@@ -1,6 +1,7 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002
-# يعتمد على yfinance فقط مع إعادة محاولة قوية
+# تاريخ التحديث: 2026-08-27
+# المصدر: GoldAPI + yfinance
 # ==========================================
 
 import streamlit as st
@@ -95,8 +96,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# API Keys (تم إزالة GoldAPI و Alpha Vantage)
+# API Keys – باستخدام المفتاح الجديد
 # ==========================================
+GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 # ==========================================
@@ -164,7 +166,7 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 
 # ==========================================
-# دوال جلب البيانات (yfinance فقط مع إعادة محاولة قوية)
+# دوال جلب البيانات (GoldAPI + yfinance)
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -209,22 +211,51 @@ def time_remaining(dt):
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
     """
-    جلب السعر الفوري من yfinance مع إعادة محاولة
+    جلب السعر الفوري:
+    - GoldAPI للذهب والفضة (دقيق)
+    - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI
     """
-    for attempt in range(3):
+    # محاولة GoldAPI للذهب والفضة
+    if symbol == "GC=F" and GOLD_API_KEY:
         try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period="1d", interval="5m")
-            if not data.empty:
-                last = data.iloc[-1]
-                first = data.iloc[0]
-                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                return float(last['Close']), float(change)
+            url = "https://www.goldapi.io/api/XAU/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                price = float(data.get('price', 0))
+                change = float(data.get('change_percent', 0))
+                return price, change
+        except Exception as e:
+            pass
+    
+    if symbol == "SI=F" and GOLD_API_KEY:
+        try:
+            url = "https://www.goldapi.io/api/XAG/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                price = float(data.get('price', 0))
+                change = float(data.get('change_percent', 0))
+                return price, change
         except:
-            time.sleep(1)
+            pass
+    
+    # البديل: yfinance
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d", interval="5m")
+        if not data.empty:
+            last = data.iloc[-1]
+            first = data.iloc[0]
+            change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+            return float(last['Close']), float(change)
+    except:
+        pass
     return None, None
 
 @st.cache_data(ttl=300)
