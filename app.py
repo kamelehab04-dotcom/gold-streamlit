@@ -1,8 +1,8 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002 (مُحدّث)
+# BLACK PYRAMID – الإصدار 2002 (النسخة الديناميكية)
 # تاريخ التحديث: 2026-08-28
 # المصدر: GoldAPI + yfinance
-# التحديث: تصحيح علاقة الدولار بالأزواج
+# التحديث: تصحيح ديناميكي باستخدام معامل الارتباط مع DXY
 # ==========================================
 
 import streamlit as st
@@ -93,7 +93,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • DXY-Aligned</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • DXY Dynamic Correlation</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -143,22 +143,6 @@ PAIRS = {
 }
 
 # ==========================================
-# الأزواج التي تتأثر عكسياً بـ DXY
-# ==========================================
-DXY_INVERSE_PAIRS = {
-    "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "EUR/GBP", 
-    "EUR/AUD", "EUR/NZD", "GBP/AUD", "GBP/NZD", "AUD/NZD",
-    "XAU/USD (Gold)", "XAG/USD (Silver)"
-}
-
-DXY_DIRECT_PAIRS = {
-    "USD/JPY", "USD/CHF", "USD/CAD", "EUR/JPY", "EUR/CHF", 
-    "EUR/CAD", "GBP/JPY", "GBP/CHF", "GBP/CAD", "AUD/JPY",
-    "AUD/CHF", "AUD/CAD", "NZD/JPY", "NZD/CHF", "NZD/CAD",
-    "CAD/JPY", "CAD/CHF"
-}
-
-# ==========================================
 # تهيئة حالة الجلسة
 # ==========================================
 if "df" not in st.session_state:
@@ -185,6 +169,8 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 if "dxy_signal_cache" not in st.session_state:
     st.session_state.dxy_signal_cache = None
+if "dxy_data_cache" not in st.session_state:
+    st.session_state.dxy_data_cache = None
 
 # ==========================================
 # دوال جلب البيانات
@@ -345,6 +331,25 @@ def get_economic_news():
     except:
         pass
     return []
+
+# ==========================================
+# دالة معامل الارتباط مع DXY (الجديدة)
+# ==========================================
+def get_dxy_correlation(df_pair, df_dxy, lookback=30):
+    """
+    تحسب معامل الارتباط بين الزوج ومؤشر الدولار على آخر lookback فترة.
+    ترجع القيمة بين -1 و 1.
+    """
+    if df_pair is None or df_dxy is None or len(df_pair) < lookback or len(df_dxy) < lookback:
+        return 0.0
+    # محاذاة البيانات على نفس التواريخ
+    common_index = df_pair.index.intersection(df_dxy.index)
+    if len(common_index) < lookback:
+        return 0.0
+    pair_close = df_pair.loc[common_index, 'close']
+    dxy_close = df_dxy.loc[common_index, 'close']
+    corr = pair_close.tail(lookback).corr(dxy_close.tail(lookback))
+    return corr
 
 # ==========================================
 # المؤشرات الأساسية
@@ -637,9 +642,9 @@ def reverse_signal(signal):
         return "WAIT"
 
 # ==========================================
-# الإشارة المتكاملة (مُحدّثة)
+# الإشارة المتكاملة (مُحدّثة مع الارتباط الديناميكي)
 # ==========================================
-def generate_advanced_signal(df, current_price, symbol="", dxy_signal=None):
+def generate_advanced_signal(df, current_price, symbol="", dxy_signal=None, dxy_correlation=0.0):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
 
@@ -656,6 +661,7 @@ def generate_advanced_signal(df, current_price, symbol="", dxy_signal=None):
         'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3, 'smr': 3
     }
 
+    # ... (نفس المؤشرات السابقة) ...
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -807,29 +813,25 @@ def generate_advanced_signal(df, current_price, symbol="", dxy_signal=None):
     total_weight = sum(weights.values())
     
     # ==========================================
-    # 🔥 تصحيح علاقة الدولار (DXY)
+    # 🔥 تصحيح ديناميكي باستخدام معامل الارتباط مع DXY
     # ==========================================
-    if dxy_signal is not None:
-        # الأزواج العكسية مع DXY
-        if symbol in DXY_INVERSE_PAIRS or any(pair in symbol for pair in DXY_INVERSE_PAIRS):
-            if dxy_signal == "SELL":
-                # دولار ضعيف → الزوج المفروض BUY
-                if net_score < 0:
-                    details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY بيع (دولار ضعيف)"
-                    net_score = -net_score
-            elif dxy_signal == "BUY":
-                # دولار قوي → الزوج المفروض SELL
-                if net_score > 0:
-                    details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY شراء (دولار قوي)"
-                    net_score = -net_score
-        
-        # الأزواج المباشرة مع DXY
-        elif symbol in DXY_DIRECT_PAIRS or any(pair in symbol for pair in DXY_DIRECT_PAIRS):
+    if dxy_signal is not None and dxy_signal != "WAIT" and abs(dxy_correlation) > 0.3:
+        # إذا كان الارتباط سالباً (عكسي) والزوج يعطي إشارة معاكسة للدولار
+        if dxy_correlation < -0.3:
+            # عكسي: إذا كان DXY بيع، يجب أن يكون الزوج شراء والعكس
+            if dxy_signal == "SELL" and net_score < 0:
+                details['DXY_Correction'] = f"🔄 عكس الإشارة (ارتباط عكسي: {dxy_correlation:.2f})"
+                net_score = -net_score
+            elif dxy_signal == "BUY" and net_score > 0:
+                details['DXY_Correction'] = f"🔄 عكس الإشارة (ارتباط عكسي: {dxy_correlation:.2f})"
+                net_score = -net_score
+        elif dxy_correlation > 0.3:
+            # مباشر: يجب أن يكون الزوج بنفس اتجاه DXY
             if dxy_signal == "SELL" and net_score > 0:
-                details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY بيع (ضعف)"
+                details['DXY_Correction'] = f"🔄 عكس الإشارة (ارتباط مباشر: {dxy_correlation:.2f})"
                 net_score = -net_score
             elif dxy_signal == "BUY" and net_score < 0:
-                details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY شراء (قوة)"
+                details['DXY_Correction'] = f"🔄 عكس الإشارة (ارتباط مباشر: {dxy_correlation:.2f})"
                 net_score = -net_score
 
     if net_score >= 5:
@@ -1049,21 +1051,18 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# جمع إشارات جميع الأزواج مع تفاصيل الصفقة (مُحدّث)
+# جمع إشارات جميع الأزواج (مع الارتباط الديناميكي)
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
     results = []
     
-    # تحليل DXY أولاً
+    # تحليل DXY أولاً والحصول على بياناته
+    df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
     dxy_signal = None
-    try:
-        df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
-        if df_dxy is not None and len(df_dxy) > 100:
-            current_dxy = df_dxy['close'].iloc[-1]
-            dxy_signal, _, _, _, _, _, _, _, _ = generate_advanced_signal(df_dxy, current_dxy, "DX-Y.NYB", dxy_signal=None)
-    except:
-        pass
+    if df_dxy is not None and len(df_dxy) > 100:
+        current_dxy = df_dxy['close'].iloc[-1]
+        dxy_signal, _, _, _, _, _, _, _, _ = generate_advanced_signal(df_dxy, current_dxy, "DX-Y.NYB", dxy_signal=None)
     
     for pair_name, symbol in PAIRS.items():
         try:
@@ -1071,6 +1070,9 @@ def get_all_signals_with_trades():
             if df is None or len(df) < 100:
                 continue
             current_price = df['close'].iloc[-1]
+            
+            # حساب معامل الارتباط مع DXY
+            dxy_correlation = get_dxy_correlation(df, df_dxy, lookback=30)
             
             df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
             df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -1088,9 +1090,8 @@ def get_all_signals_with_trades():
             df['chikou'] = chikou
             df['mfi'] = calc_mfi(df)
             
-            # تمرير إشارة DXY للتصحيح
             signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(
-                df, current_price, symbol, dxy_signal
+                df, current_price, symbol, dxy_signal, dxy_correlation
             )
             
             if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
@@ -1111,15 +1112,17 @@ def get_all_signals_with_trades():
                     "risk_reward": f"1:{targets.get('risk_reward_3', 0):.1f}"
                 }
             
-            # حساب التوافق مع DXY
+            # تحديد التوافق مع DXY بناءً على معامل الارتباط
             dxy_aligned = "N/A"
-            if dxy_signal is not None and dxy_signal != "WAIT" and signal != "WAIT":
-                if symbol in DXY_INVERSE_PAIRS or any(pair in symbol for pair in DXY_INVERSE_PAIRS):
+            if dxy_signal is not None and dxy_signal != "WAIT" and signal != "WAIT" and abs(dxy_correlation) > 0.3:
+                if dxy_correlation < -0.3:
+                    # عكسي: يجب أن يكون معاكساً لـ DXY
                     if (dxy_signal == "SELL" and signal == "BUY") or (dxy_signal == "BUY" and signal == "SELL"):
                         dxy_aligned = "✅ متوافق"
                     else:
                         dxy_aligned = "⚠️ غير متوافق"
-                elif symbol in DXY_DIRECT_PAIRS or any(pair in symbol for pair in DXY_DIRECT_PAIRS):
+                elif dxy_correlation > 0.3:
+                    # مباشر: يجب أن يكون بنفس اتجاه DXY
                     if dxy_signal == signal:
                         dxy_aligned = "✅ متوافق"
                     else:
@@ -1137,7 +1140,8 @@ def get_all_signals_with_trades():
                 "الهدف 2": fmt.format(trade_details.get('target2')) if trade_details.get('target2') else "N/A",
                 "الهدف 3": fmt.format(trade_details.get('target3')) if trade_details.get('target3') else "N/A",
                 "نسبة المخاطرة": trade_details.get('risk_reward', "N/A"),
-                "توافق DXY": dxy_aligned
+                "توافق DXY": dxy_aligned,
+                "معامل الارتباط": round(dxy_correlation, 3)
             })
         except Exception as e:
             continue
@@ -1259,9 +1263,8 @@ with st.sidebar:
             else: return "⚪ انتظار"
         df_signals["الإشارة"] = df_signals["الإشارة"].apply(color_signal)
         
-        # عرض مع عمود التوافق مع DXY
         st.dataframe(
-            df_signals[["الزوج", "الإشارة", "الثقة", "النتيجة", "السعر", "توافق DXY"]],
+            df_signals[["الزوج", "الإشارة", "الثقة", "النتيجة", "السعر", "توافق DXY", "معامل الارتباط"]],
             column_config={
                 "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
                 "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
@@ -1269,6 +1272,7 @@ with st.sidebar:
                 "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
                 "السعر": st.column_config.TextColumn("السعر"),
                 "توافق DXY": st.column_config.TextColumn("DXY", width="small"),
+                "معامل الارتباط": st.column_config.NumberColumn("Corr", format="%.2f"),
             },
             hide_index=True,
             use_container_width=True,
@@ -1318,16 +1322,15 @@ if current_price is None:
     change = 0
 
 # ==========================================
-# جلب إشارة DXY للتصحيح
+# جلب بيانات DXY وإشارته وارتباطه
 # ==========================================
+df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
 dxy_signal = None
-try:
-    df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
-    if df_dxy is not None and len(df_dxy) > 100:
-        current_dxy = df_dxy['close'].iloc[-1]
-        dxy_signal, _, _, _, _, _, _, _, _ = generate_advanced_signal(df_dxy, current_dxy, "DX-Y.NYB", dxy_signal=None)
-except:
-    pass
+dxy_correlation = 0.0
+if df_dxy is not None and len(df_dxy) > 100:
+    current_dxy = df_dxy['close'].iloc[-1]
+    dxy_signal, _, _, _, _, _, _, _, _ = generate_advanced_signal(df_dxy, current_dxy, "DX-Y.NYB", dxy_signal=None)
+    dxy_correlation = get_dxy_correlation(df, df_dxy, lookback=30)
 
 # حساب المؤشرات
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
@@ -1347,10 +1350,10 @@ df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
 # ==========================================
-# توليد الإشارة (مع تصحيح DXY)
+# توليد الإشارة (مع تصحيح DXY الديناميكي)
 # ==========================================
 signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(
-    df, current_price, selected_symbol, dxy_signal
+    df, current_price, selected_symbol, dxy_signal, dxy_correlation
 )
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
@@ -1375,14 +1378,18 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# عرض إشارة DXY
+# عرض إشارة DXY ومعامل الارتباط
 # ==========================================
 if dxy_signal:
     dxy_color = "#00ff88" if dxy_signal == "BUY" else "#ff4444" if dxy_signal == "SELL" else "#ffaa00"
+    corr_color = "#00ff88" if abs(dxy_correlation) > 0.3 else "#ffaa00"
     st.markdown(f"""
     <div style="background: rgba(10,10,10,0.5); border-radius: 8px; padding: 8px 15px; margin: 5px 0; border: 1px solid rgba(255,215,0,0.08);">
         <span style="color: #888; font-size: 0.8rem;">📊 DXY Signal:</span>
         <span style="color: {dxy_color}; font-weight: bold; font-size: 0.9rem;">{dxy_signal}</span>
+        <span style="color: #888; font-size: 0.8rem; margin-left: 15px;">🔗 Correlation:</span>
+        <span style="color: {corr_color}; font-weight: bold; font-size: 0.9rem;">{dxy_correlation:.2f}</span>
+        <span style="color: #666; font-size: 0.7rem; margin-left: 10px;">(قوي {'عكسي' if dxy_correlation < -0.3 else 'مباشر' if dxy_correlation > 0.3 else 'ضعيف'})</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1432,15 +1439,15 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
     
-    # عرض التوافق مع DXY
+    # التوافق مع DXY
     dxy_status = ""
-    if dxy_signal and dxy_signal != "WAIT":
-        if selected_pair_name in DXY_INVERSE_PAIRS:
+    if dxy_signal and dxy_signal != "WAIT" and abs(dxy_correlation) > 0.3:
+        if dxy_correlation < -0.3:
             if (dxy_signal == "SELL" and signal == "BUY") or (dxy_signal == "BUY" and signal == "SELL"):
                 dxy_status = "✅ متوافق مع DXY"
             else:
                 dxy_status = "⚠️ غير متوافق مع DXY"
-        elif selected_pair_name in DXY_DIRECT_PAIRS:
+        elif dxy_correlation > 0.3:
             if dxy_signal == signal:
                 dxy_status = "✅ متوافق مع DXY"
             else:
@@ -1536,7 +1543,7 @@ with st.expander("📝 شرح القرار", expanded=True):
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
-# جميع الصفقات المقترحة (مُحدّث)
+# جميع الصفقات المقترحة
 # ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
@@ -1546,7 +1553,7 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
     df_trades = df_all[(df_all["الإشارة"].isin(["BUY", "SELL"])) & (df_all["الثقة"] >= 60)]
     
     if not df_trades.empty:
-        cols_to_show = ["الزوج", "الإشارة", "الثقة", "سعر الدخول", "وقف الخسارة", "الهدف 1", "الهدف 2", "الهدف 3", "نسبة المخاطرة", "توافق DXY"]
+        cols_to_show = ["الزوج", "الإشارة", "الثقة", "سعر الدخول", "وقف الخسارة", "الهدف 1", "الهدف 2", "الهدف 3", "نسبة المخاطرة", "توافق DXY", "معامل الارتباط"]
         def style_signal(val):
             if val == "BUY":
                 return "🟢 شراء"
@@ -1568,6 +1575,7 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
                 "الهدف 3": st.column_config.TextColumn("هدف 3"),
                 "نسبة المخاطرة": st.column_config.TextColumn("R/R"),
                 "توافق DXY": st.column_config.TextColumn("DXY", width="small"),
+                "معامل الارتباط": st.column_config.NumberColumn("Corr", format="%.2f"),
             },
             hide_index=True,
             use_container_width=True
@@ -1765,7 +1773,6 @@ st.plotly_chart(fig, use_container_width=True)
 if selected_symbol == "GC=F":
     st.markdown("---")
     st.markdown("### 🔗 تحليل الارتباط: الذهب vs الدولار")
-    df_dxy = get_historical_data("DX-Y.NYB", "1mo", "1h")
     if df_dxy is not None and not df_dxy.empty:
         df_dxy_aligned = df_dxy.reindex(df.index, method='nearest')
         df_dxy_aligned = df_dxy_aligned.ffill()
@@ -1788,6 +1795,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets • <span style="color:#00ff88;">DXY-Aligned ✅</span>
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets • <span style="color:#00ff88;">DXY Dynamic Correlation ✅</span>
 </div>
 """, unsafe_allow_html=True)
