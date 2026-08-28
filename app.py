@@ -1,11 +1,11 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (مطور)
-# تاريخ التحديث: 2026-08-28
-# الإضافات: 
-# - نظام تحليل الأخبار وتأثيرها على السوق
-# - مفاتيح API جديدة (NewsAPI, Alpha Vantage)
-# - تحليل معنويات السوق
-# - تنبيهات الأخبار العاجلة
+# تاريخ التحديث: 2026-08-29
+# الإضافات الجديدة:
+# - مؤشرات قوة العملات (Currency Strength Indices)
+# - تحليل الارتباط بين العملات والذهب
+# - عرض رسوم بيانية تفاعلية للمؤشرات
+# - تحديث تلقائي للمؤشرات عند تحديث الإشارات
 # ==========================================
 
 import streamlit as st
@@ -40,7 +40,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 BLACK PYRAMID – الهوية البصرية
+# 🖤 BLACK PYRAMID – الهوية البصرية (اختصار للCSS)
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -108,7 +108,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • News Analysis</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • News Analysis • Currency Indices</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -176,6 +176,8 @@ if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
 if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
+if "currency_indices" not in st.session_state:
+    st.session_state.currency_indices = None
 
 # ==========================================
 # دوال جلب البيانات
@@ -282,10 +284,52 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
     return None
 
 # ==========================================
-# نظام تحليل الأخبار المتقدم (بالمفاتيح الجديدة)
+# دوال حساب مؤشرات العملات (الجديدة)
 # ==========================================
+@st.cache_data(ttl=300)
+def calculate_currency_indices(data_dict, base_date=None):
+    """
+    حساب مؤشرات قوة العملات الرئيسية (EUR, GBP, JPY, CHF, AUD, NZD, CAD)
+    بناءً على متوسط أسعار إغلاق الأزواج المتاحة.
+    data_dict: قاموس {symbol: DataFrame} يحتوي على بيانات كل زوج.
+    base_date: تاريخ الأساس (افتراضي: أول نقطة بيانات مشتركة).
+    """
+    indices = {}
+    # تعريف الأزواج المكونة لكل مؤشر (مع مراعاة توفر البيانات)
+    currency_pairs = {
+        'EUR': ['EURUSD=X', 'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURNZD=X', 'EURCAD=X'],
+        'GBP': ['GBPUSD=X', 'GBPEUR=X', 'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPNZD=X', 'GBPCAD=X'],
+        'JPY': ['USDJPY=X', 'EURJPY=X', 'GBPJPY=X', 'AUDJPY=X', 'NZDJPY=X', 'CADJPY=X', 'CHFJPY=X'],
+        'CHF': ['USDCHF=X', 'EURCHF=X', 'GBPCHF=X', 'AUDCHF=X', 'NZDCHF=X', 'CADCHF=X', 'JPYCHF=X'],
+        'AUD': ['AUDUSD=X', 'AUDJPY=X', 'AUDCHF=X', 'AUDNZD=X', 'AUDCAD=X', 'AUDGBP=X', 'AUDEUR=X'],
+        'NZD': ['NZDUSD=X', 'NZDJPY=X', 'NZDCHF=X', 'NZDCAD=X', 'NZDEUR=X', 'NZDGBP=X', 'NZDAUD=X'],
+        'CAD': ['USDCAD=X', 'CADJPY=X', 'CADCHF=X', 'CADAUD=X', 'CADNZD=X', 'CADEUR=X', 'CADGBP=X']
+    }
+    
+    for currency, pair_list in currency_pairs.items():
+        valid_series = []
+        for pair in pair_list:
+            if pair in data_dict and data_dict[pair] is not None and not data_dict[pair].empty:
+                valid_series.append(data_dict[pair]['close'])
+        if valid_series:
+            # محاذاة الفهارس عبر جميع السلاسل
+            common_idx = valid_series[0].index
+            for ser in valid_series[1:]:
+                common_idx = common_idx.intersection(ser.index)
+            if len(common_idx) > 10:
+                # حساب المتوسط البسيط
+                avg_series = pd.DataFrame({f'{pair}': ser.loc[common_idx] for pair, ser in zip(pair_list, valid_series)}).mean(axis=1)
+                # تطبيع إلى 100 عند تاريخ الأساس
+                if base_date is None:
+                    base_value = avg_series.iloc[0]
+                else:
+                    base_value = avg_series.loc[base_date] if base_date in avg_series.index else avg_series.iloc[0]
+                indices[currency] = (avg_series / base_value) * 100
+    return indices
 
-# الكلمات المفتاحية الإيجابية والسلبية
+# ==========================================
+# نظام تحليل الأخبار المتقدم
+# ==========================================
 POSITIVE_KEYWORDS = [
     "higher", "increase", "growth", "positive", "strong", "beat", "surplus",
     "rally", "bullish", "up", "gain", "profit", "support", "stimulus",
@@ -461,7 +505,7 @@ def get_economic_calendar():
     ]
 
 # ==========================================
-# المؤشرات الأساسية
+# المؤشرات الأساسية (RSI, ATR, MACD, BB, ADX, Ichimoku, VWAP, MFI)
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -1161,7 +1205,7 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# جمع إشارات جميع الأزواج
+# جمع إشارات جميع الأزواج (معدلة لحساب المؤشرات)
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
@@ -1170,64 +1214,81 @@ def get_all_signals_with_trades():
     analyzed_news = analyze_news_impact(articles) if articles else []
     news_sentiment = get_market_sentiment(analyzed_news) if analyzed_news else ("NEUTRAL", 0)
     
+    # جلب البيانات لجميع الأزواج
+    data_dict = {}
     for pair_name, symbol in PAIRS.items():
         try:
             df = get_historical_data(symbol, period="1mo", interval="1h")
-            if df is None or len(df) < 100:
-                continue
-            current_price = df['close'].iloc[-1]
-            
-            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-            df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-            df['rsi'] = calc_rsi(df['close'])
-            df['atr'] = calc_atr(df)
-            df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
-            df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
-            df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
-            df['vwap'] = calc_vwap(df)
-            tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
-            df['tenkan'] = tenkan
-            df['kijun'] = kijun
-            df['senkou_a'] = senkou_a
-            df['senkou_b'] = senkou_b
-            df['chikou'] = chikou
-            df['mfi'] = calc_mfi(df)
-            
-            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, symbol, news_sentiment)
-            
-            if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
-                price_str = f"${current_price:,.2f}"
-                fmt = "${:,.2f}"
-            else:
-                price_str = f"{current_price:.4f}"
-                fmt = "{:.4f}"
-            
-            trade_details = {}
-            if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
-                trade_details = {
-                    "entry": entry_price,
-                    "stop_loss": stop_loss,
-                    "target1": targets.get('target1'),
-                    "target2": targets.get('target2'),
-                    "target3": targets.get('target3'),
-                    "risk_reward": f"1:{targets.get('risk_reward_3', 0):.1f}"
-                }
-            
-            results.append({
-                "الزوج": pair_name,
-                "الإشارة": signal,
-                "الثقة": round(confidence, 1),
-                "النتيجة": net_score,
-                "السعر": price_str,
-                "سعر الدخول": fmt.format(entry_price) if entry_price else "N/A",
-                "وقف الخسارة": fmt.format(stop_loss) if stop_loss else "N/A",
-                "الهدف 1": fmt.format(trade_details.get('target1')) if trade_details.get('target1') else "N/A",
-                "الهدف 2": fmt.format(trade_details.get('target2')) if trade_details.get('target2') else "N/A",
-                "الهدف 3": fmt.format(trade_details.get('target3')) if trade_details.get('target3') else "N/A",
-                "نسبة المخاطرة": trade_details.get('risk_reward', "N/A")
-            })
-        except Exception as e:
+            if df is not None and len(df) > 100:
+                data_dict[symbol] = df
+        except:
             continue
+    
+    # حساب مؤشرات العملات
+    if data_dict:
+        indices = calculate_currency_indices(data_dict)
+        if indices:
+            indices_df = pd.DataFrame(indices)
+            st.session_state.currency_indices = indices_df
+    
+    # تحليل كل زوج وحساب الإشارات
+    for pair_name, symbol in PAIRS.items():
+        if symbol not in data_dict:
+            continue
+        df = data_dict[symbol]
+        current_price = df['close'].iloc[-1]
+        
+        # حساب المؤشرات الفنية للزوج
+        df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+        df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+        df['rsi'] = calc_rsi(df['close'])
+        df['atr'] = calc_atr(df)
+        df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
+        df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
+        df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
+        df['vwap'] = calc_vwap(df)
+        tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
+        df['tenkan'] = tenkan
+        df['kijun'] = kijun
+        df['senkou_a'] = senkou_a
+        df['senkou_b'] = senkou_b
+        df['chikou'] = chikou
+        df['mfi'] = calc_mfi(df)
+        
+        signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, symbol, news_sentiment)
+        
+        if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
+            price_str = f"${current_price:,.2f}"
+            fmt = "${:,.2f}"
+        else:
+            price_str = f"{current_price:.4f}"
+            fmt = "{:.4f}"
+        
+        trade_details = {}
+        if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
+            trade_details = {
+                "entry": entry_price,
+                "stop_loss": stop_loss,
+                "target1": targets.get('target1'),
+                "target2": targets.get('target2'),
+                "target3": targets.get('target3'),
+                "risk_reward": f"1:{targets.get('risk_reward_3', 0):.1f}"
+            }
+        
+        results.append({
+            "الزوج": pair_name,
+            "الإشارة": signal,
+            "الثقة": round(confidence, 1),
+            "النتيجة": net_score,
+            "السعر": price_str,
+            "سعر الدخول": fmt.format(entry_price) if entry_price else "N/A",
+            "وقف الخسارة": fmt.format(stop_loss) if stop_loss else "N/A",
+            "الهدف 1": fmt.format(trade_details.get('target1')) if trade_details.get('target1') else "N/A",
+            "الهدف 2": fmt.format(trade_details.get('target2')) if trade_details.get('target2') else "N/A",
+            "الهدف 3": fmt.format(trade_details.get('target3')) if trade_details.get('target3') else "N/A",
+            "نسبة المخاطرة": trade_details.get('risk_reward', "N/A")
+        })
+    
     return pd.DataFrame(results), analyzed_news, news_sentiment
 
 # ==========================================
@@ -1689,6 +1750,52 @@ else:
     st.info("اضغط 'تحديث الكل' في الشريط الجانبي لعرض جميع الصفقات المقترحة.")
 
 # ==========================================
+# ⭐ عرض مؤشرات قوة العملات (الجديدة)
+# ==========================================
+st.markdown("---")
+st.markdown("### 🌐 مؤشرات قوة العملات")
+
+if st.session_state.currency_indices is not None and not st.session_state.currency_indices.empty:
+    indices_df = st.session_state.currency_indices
+    
+    # عرض القيم الحالية
+    latest_values = indices_df.iloc[-1]
+    cols_cur = st.columns(len(latest_values))
+    for i, (currency, value) in enumerate(latest_values.items()):
+        cols_cur[i].metric(f"{currency}", f"{value:.2f}")
+    
+    # رسم بياني للمؤشرات
+    fig_indices = go.Figure()
+    for col in indices_df.columns:
+        fig_indices.add_trace(go.Scatter(x=indices_df.index, y=indices_df[col], name=col, mode='lines'))
+    fig_indices.update_layout(height=400, template='plotly_dark', title="تطور مؤشرات العملات (الأساس 100)",
+                              xaxis_title="التاريخ", yaxis_title="القيمة")
+    st.plotly_chart(fig_indices, use_container_width=True)
+    
+    # تحليل الارتباط مع الذهب (إذا كان الزوج المختار هو الذهب)
+    if selected_symbol == "GC=F" and "EUR" in indices_df.columns:
+        st.markdown("#### 📊 ارتباط الذهب بمؤشرات العملات")
+        gold_df = df['close'].reindex(indices_df.index, method='nearest')
+        gold_series = gold_df
+        correlations = {}
+        for col in indices_df.columns:
+            corr = gold_series.corr(indices_df[col])
+            correlations[col] = corr
+        corr_df = pd.DataFrame(list(correlations.items()), columns=["العملة", "معامل الارتباط"])
+        st.dataframe(corr_df, use_container_width=True, hide_index=True)
+        
+        # رسم بياني للارتباط
+        fig_corr_cur = go.Figure()
+        for col in indices_df.columns:
+            fig_corr_cur.add_trace(go.Scatter(x=indices_df.index, y=indices_df[col], name=col))
+        fig_corr_cur.add_trace(go.Scatter(x=indices_df.index, y=gold_series / gold_series.iloc[0] * 100, name="XAU (معياري)", line=dict(dash='dash')))
+        fig_corr_cur.update_layout(height=400, template='plotly_dark', title="المقارنة مع الذهب (معياري)")
+        st.plotly_chart(fig_corr_cur, use_container_width=True)
+    
+else:
+    st.info("قم بتحديث الإشارات لحساب مؤشرات العملات (اضغط 'تحديث الكل' في الشريط الجانبي).")
+
+# ==========================================
 # إدارة الصفقات
 # ==========================================
 st.markdown("---")
@@ -1904,6 +2011,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • News Analysis • Integrated Signals • Stop Loss & Targets
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • News Analysis • Currency Indices • Integrated Signals • Stop Loss & Targets
 </div>
 """, unsafe_allow_html=True)
