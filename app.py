@@ -1,7 +1,7 @@
 # ============================================================
-# BLACK PYRAMID v2003 – Advanced Trading Intelligence Engine
-# تاريخ التحديث: 2026-08-28
-# الهيكل: Regime + Confirmation + Risk + Backtesting
+# BLACK PYRAMID v2003 â€“ Advanced Trading Intelligence Engine
+# Last updated: 2026-08-28
+# Architecture: Regime + Confirmation + Risk + Backtesting
 # ============================================================
 
 import streamlit as st
@@ -18,17 +18,17 @@ import time
 from typing import Dict, Tuple, List, Optional
 
 # ============================================================
-# إعداد الصفحة
+# Page setup
 # ============================================================
 st.set_page_config(
     page_title="Black Pyramid v2003",
-    page_icon="▲",
+    page_icon="â–²",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ============================================================
-# الهوية البصرية – محسّنة
+# Visual identity â€“ enhanced
 # ============================================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -87,17 +87,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# الهيدر
+# Header
 # ============================================================
 st.markdown("""
 <div class="main-header">
     <div style="text-align: right;">
         <div class="main-title">
-            <span class="pyramid-icon">▲</span>
+            <span class="pyramid-icon">â–²</span>
             BLACK PYRAMID v2003
-            <span class="pyramid-icon">▲</span>
+            <span class="pyramid-icon">â–²</span>
         </div>
-        <div class="main-subtitle">Regime • Structure • Liquidity • SMC • MTF • DXY • Risk • Backtest</div>
+        <div class="main-subtitle">Regime â€¢ Structure â€¢ Liquidity â€¢ SMC â€¢ MTF â€¢ DXY â€¢ Risk â€¢ Backtest</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -109,7 +109,12 @@ GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 BACKTEST_LOOKBACK = 500
-MIN_CONFIDENCE = 45
+# Daily trading profile: more opportunities, but still filtered
+MIN_CONFIDENCE = 42
+BUY_THRESHOLD = 8
+SELL_THRESHOLD = -8
+COOLDOWN_BARS = 4
+MAX_TRADES_PER_DAY = 3
 
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -147,7 +152,7 @@ PAIRS = {
 }
 
 # ============================================================
-# تهيئة حالة الجلسة
+# Session state initialization
 # ============================================================
 if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
@@ -157,9 +162,15 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 if "show_form" not in st.session_state:
     st.session_state.show_form = False
+if "active_trades" not in st.session_state:
+    st.session_state.active_trades = {}
+if "closed_trades" not in st.session_state:
+    st.session_state.closed_trades = []
+if "trade_stats" not in st.session_state:
+    st.session_state.trade_stats = {"day": None, "count": 0, "last_closed_bar": {}}
 
 # ============================================================
-# دوال جلب البيانات
+# Data retrieval functions
 # ============================================================
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
@@ -225,25 +236,25 @@ def get_market_status():
     open_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
     close_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
     if wd == 5:
-        return "CLOSED", "عطلة نهاية الأسبوع", open_time + timedelta(days=1), close_time
+        return "CLOSED", "Weekend", open_time + timedelta(days=1), close_time
     if wd == 6:
-        return ("OPEN", "السوق مفتوح (الأحد)", close_time, close_time) if now >= open_time else ("CLOSED", "انتظار الافتتاح", open_time, close_time)
+        return ("OPEN", "Market Open (Sunday)", close_time, close_time) if now >= open_time else ("CLOSED", "Waiting for Open", open_time, close_time)
     if 0 <= wd <= 3:
         if close_time <= now < open_time:
-            return "CLOSED", "الاستراحة اليومية", open_time, close_time
-        return "OPEN", "السوق مفتوح", close_time if now < close_time else close_time + timedelta(days=1), close_time
+            return "CLOSED", "Daily Break", open_time, close_time
+        return "OPEN", "Market Open", close_time if now < close_time else close_time + timedelta(days=1), close_time
     if wd == 4:
         if now < close_time:
-            return "OPEN", "السوق مفتوح (الجمعة)", close_time, close_time
-        return "CLOSED", "نهاية الأسبوع", open_time + timedelta(days=2), close_time
-    return "UNKNOWN", "غير معروف", None, None
+            return "OPEN", "Market Open (Friday)", close_time, close_time
+        return "CLOSED", "Weekend", open_time + timedelta(days=2), close_time
+    return "UNKNOWN", "Unknown", None, None
 
 def time_remaining(dt):
     if dt is None:
         return "N/A"
     diff = dt - datetime.now(pytz.timezone('US/Eastern'))
     if diff.total_seconds() < 0:
-        return "انتهى"
+        return "Expired"
     h = int(diff.total_seconds() // 3600)
     m = int((diff.total_seconds() % 3600) // 60)
     return f"{h}h {m}m"
@@ -252,7 +263,7 @@ def format_time(dt):
     return dt.strftime("%Y-%m-%d %H:%M:%S %Z") if dt else "N/A"
 
 # ============================================================
-# المؤشرات الأساسية (محسّنة)
+# Core indicators (enhanced)
 # ============================================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -282,15 +293,25 @@ def calc_adx_correct(df, period=14):
     high, low, close = df['high'], df['low'], df['close']
     up_move = high.diff()
     down_move = -low.diff()
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
-    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(window=period).mean()
-    plus_di = 100 * (pd.Series(plus_dm).rolling(window=period).mean() / atr)
-    minus_di = 100 * (pd.Series(minus_dm).rolling(window=period).mean() / atr)
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = dx.rolling(window=period).mean()
-    return adx, plus_di, minus_di
+    plus_dm = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+        index=df.index, dtype=float
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+        index=df.index, dtype=float
+    )
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs()
+    ], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1/period, adjust=False, min_periods=period).mean() / atr.replace(0, np.nan)
+    minus_di = 100 * minus_dm.ewm(alpha=1/period, adjust=False, min_periods=period).mean() / atr.replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx = dx.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+    return adx.fillna(0), plus_di.fillna(0), minus_di.fillna(0)
 
 def calc_ichimoku(df):
     high, low, close = df['high'], df['low'], df['close']
@@ -318,7 +339,7 @@ def calc_mfi(df, period=14):
     return 100 - (100 / (1 + pos / neg))
 
 # ============================================================
-# الأدوات الهيكلية (Structure, Liquidity, SMC)
+# Structure, Liquidity and SMC tools
 # ============================================================
 def find_swings(df, order=5):
     highs = df['high'].values
@@ -389,7 +410,7 @@ def detect_smc_ict(df):
     return df
 
 # ============================================================
-# TBS (Turtle Body Soup) – تصحيح
+# TBS (Turtle Body Soup) â€“ corrected
 # ============================================================
 def detect_tbs_correct(df, lookback=20, body_mult=1.5):
     if len(df) < lookback + 2:
@@ -408,7 +429,7 @@ def detect_tbs_correct(df, lookback=20, body_mult=1.5):
     return None, None, None, None
 
 # ============================================================
-# DXY Correlation (على Returns)
+# DXY Correlation (using returns)
 # ============================================================
 def get_dxy_correlation(df_pair, df_dxy, lookback=50):
     if df_pair is None or df_dxy is None:
@@ -426,7 +447,7 @@ def get_dxy_correlation(df_pair, df_dxy, lookback=50):
     return float(corr) if not pd.isna(corr) else 0.0
 
 # ============================================================
-# DXY Filter (بدون قلب الإشارة)
+# DXY Filter (without reversing the signal)
 # ============================================================
 def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
     adjustment = 0
@@ -483,7 +504,7 @@ def detect_regime(df):
     return regime
 
 # ============================================================
-# MTF Engine (محسّن)
+# MTF Engine (enhanced)
 # ============================================================
 def mtf_analysis(df, symbol):
     timeframes = ['15m', '1h', '4h']
@@ -525,13 +546,13 @@ def mtf_analysis(df, symbol):
     return consensus, count, results
 
 # ============================================================
-# المحرك الرئيسي للإشارة (v2003) – مصحح بالكامل
+# Main signal engine (v2003) â€“ fully corrected
 # ============================================================
 def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     if df is None or len(df) < 100:
         return "WAIT", 0, {}, {}, None, None, None, None, None, None, (None,None,None,None)
     
-    # حساب المؤشرات
+    # Calculate indicators
     df['ema20'] = df['close'].ewm(20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(50, adjust=False).mean()
     df['rsi'] = calc_rsi(df['close'])
@@ -565,7 +586,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     last = df.iloc[-1]
     current_price = last['close']
     
-    # ========== نظام العوامل ==========
+    # ========== Factor system ==========
     factors = {
         "structure": 0.0,
         "liquidity": 0.0,
@@ -582,42 +603,42 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     # 1. Structure
     if last_smc.get('bos_bullish', False) or last_smc.get('mss_bullish', False):
         factors['structure'] += 25.0
-        details['Structure'] = "BOS/MSS صاعد"
+        details['Structure'] = "Bullish BOS/MSS"
     elif last_smc.get('bos_bearish', False) or last_smc.get('mss_bearish', False):
         factors['structure'] -= 25.0
-        details['Structure'] = "BOS/MSS هابط"
+        details['Structure'] = "Bearish BOS/MSS"
     else:
-        details['Structure'] = "محايد"
+        details['Structure'] = "Neutral"
     
     # 2. Liquidity
     if last_smc.get('liquidity_sweep_bullish', False):
         factors['liquidity'] += 20.0
-        details['Liquidity'] = "اجتياح سيولة شراء"
+        details['Liquidity'] = "Buy-side liquidity sweep"
     elif last_smc.get('liquidity_sweep_bearish', False):
         factors['liquidity'] -= 20.0
-        details['Liquidity'] = "اجتياح سيولة بيع"
+        details['Liquidity'] = "Sell-side liquidity sweep"
     else:
-        details['Liquidity'] = "لا يوجد اجتياح"
+        details['Liquidity'] = "No sweep detected"
     
     # 3. SMC
     if last_smc.get('ob_bullish', False) or last_smc.get('fvg_bullish', False):
         factors['smc'] += 20.0
-        details['SMC'] = "OB/FVG شراء"
+        details['SMC'] = "Bullish OB/FVG"
     elif last_smc.get('ob_bearish', False) or last_smc.get('fvg_bearish', False):
         factors['smc'] -= 20.0
-        details['SMC'] = "OB/FVG بيع"
+        details['SMC'] = "Bearish OB/FVG"
     else:
-        details['SMC'] = "لا توجد إشارة SMC"
+        details['SMC'] = "No SMC signal"
     
     # 4. MTF
     if mtf_consensus == "BUY":
         factors['mtf'] += 15.0
-        details['MTF'] = f"صاعد ({mtf_count} أطر)"
+        details['MTF'] = f"Bullish ({mtf_count} timeframes)"
     elif mtf_consensus == "SELL":
         factors['mtf'] -= 15.0
-        details['MTF'] = f"هابط ({mtf_count} أطر)"
+        details['MTF'] = f"Bearish ({mtf_count} timeframes)"
     else:
-        details['MTF'] = "محايد"
+        details['MTF'] = "Neutral"
     
     # 5. DXY
     if dxy_signal is not None and dxy_signal != "WAIT":
@@ -626,20 +647,20 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
             raw_direction = "BUY" if factors['structure'] > 0 else "SELL"
         adjusted, status, adj = apply_dxy_filter(raw_direction, 0, dxy_signal, dxy_correlation)
         factors['dxy'] = float(adj)
-        details['DXY'] = f"{status} (تعديل: {adj})"
+        details['DXY'] = f"{status} (طھط¹ط¯ظٹظ„: {adj})"
     else:
-        details['DXY'] = "لا توجد إشارة DXY"
+        details['DXY'] = "No DXY signal"
     
     # 6. Momentum
     if last['rsi'] < 30:
         factors['momentum'] += 10.0
-        details['Momentum'] = f"مفرط بيع RSI={last['rsi']:.1f}"
+        details['Momentum'] = f"Oversold RSI={last['rsi']:.1f}"
     elif last['rsi'] > 70:
         factors['momentum'] -= 10.0
-        details['Momentum'] = f"مفرط شراء RSI={last['rsi']:.1f}"
+        details['Momentum'] = f"Overbought RSI={last['rsi']:.1f}"
     else:
         factors['momentum'] += (50 - last['rsi']) / 10.0
-        details['Momentum'] = f"RSI محايد {last['rsi']:.1f}"
+        details['Momentum'] = f"RSI Neutral {last['rsi']:.1f}"
     if last['macd'] > last['macd_signal']:
         factors['momentum'] += 5.0
     else:
@@ -649,40 +670,40 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     atr_ratio = last['atr'] / df['atr'].iloc[-20:].mean() if df['atr'].iloc[-20:].mean() > 0 else 1.0
     if atr_ratio > 1.5:
         factors['volatility'] -= 10.0
-        details['Volatility'] = "تقلب عالٍ"
+        details['Volatility'] = "High volatility"
     elif atr_ratio < 0.7:
         factors['volatility'] += 5.0
-        details['Volatility'] = "تقلب منخفض"
+        details['Volatility'] = "Low Volatility"
     else:
-        details['Volatility'] = "تقلب طبيعي"
+        details['Volatility'] = "Normal volatility"
     
     # 8. Pattern
     if tbs_type == "BULLISH":
         factors['pattern'] += 20.0
-        details['Pattern'] = f"TBS شراء"
+        details['Pattern'] = f"TBS BUY"
     elif tbs_type == "BEARISH":
         factors['pattern'] -= 20.0
-        details['Pattern'] = f"TBS بيع"
+        details['Pattern'] = f"TBS SELL"
     else:
-        details['Pattern'] = "لا يوجد TBS"
+        details['Pattern'] = "No TBS"
     
     # 9. Volume / MFI
     if last['mfi'] < 20:
         factors['volume'] += 5.0
-        details['Volume'] = f"MFI مفرط بيع {last['mfi']:.1f}"
+        details['Volume'] = f"MFI Oversold {last['mfi']:.1f}"
     elif last['mfi'] > 80:
         factors['volume'] -= 5.0
-        details['Volume'] = f"MFI مفرط شراء {last['mfi']:.1f}"
+        details['Volume'] = f"MFI Overbought {last['mfi']:.1f}"
     else:
-        details['Volume'] = f"MFI محايد {last['mfi']:.1f}"
+        details['Volume'] = f"MFI Neutral {last['mfi']:.1f}"
     
     total_score = sum(factors.values())
     
-    # تحديد الإشارة
-    if total_score >= 15:
+    # Determine signal
+    if total_score >= BUY_THRESHOLD:
         signal = "BUY"
         confidence = min(90, 50 + total_score * 0.5)
-    elif total_score <= -15:
+    elif total_score <= SELL_THRESHOLD:
         signal = "SELL"
         confidence = min(90, 50 + abs(total_score) * 0.5)
     else:
@@ -691,7 +712,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     
     confidence = max(0, min(100, confidence))
     
-    # تعديل الثقة حسب النظام
+    # Adjust confidence by regime
     if "HIGH_VOL" in regime:
         confidence *= 0.9
     elif "LOW_VOL" in regime:
@@ -737,60 +758,87 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
 # ============================================================
 # Backtesting Engine
 # ============================================================
+def _bar_exit(direction, bar, stop, tp):
+    # Conservative handling: if both SL and TP are touched in one candle,
+    # count the stop first because intrabar order is unknown.
+    if direction == "BUY":
+        if bar['low'] <= stop:
+            return "SL", stop
+        if bar['high'] >= tp:
+            return "TP", tp
+    else:
+        if bar['high'] >= stop:
+            return "SL", stop
+        if bar['low'] <= tp:
+            return "TP", tp
+    return None, None
+
+
 def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
-    if df is None or len(df) < lookback:
+    if df is None or len(df) < 150:
         return {}
-    test_df = df.iloc[-lookback:].copy()
-    trades = []
-    for i in range(100, len(test_df)):
-        window = test_df.iloc[:i]
+    test_df = df.iloc[-min(lookback, len(df)):].copy()
+    trades, active = [], None
+    daily_count = {}
+
+    for i in range(100, len(test_df) - 1):
+        bar = test_df.iloc[i]
+        day = str(bar.name.date()) if hasattr(bar.name, 'date') else str(i)
+
+        if active is not None:
+            result, exit_price = _bar_exit(active['direction'], bar, active['stop'], active['tp'])
+            if result:
+                risk = abs(active['entry'] - active['stop'])
+                reward = abs(exit_price - active['entry']) / risk if risk > 0 else 0
+                trades.append({
+                    'result': 'win' if result == 'TP' else 'loss',
+                    'r': reward if result == 'TP' else -1,
+                    'direction': active['direction'],
+                    'entry_i': active['entry_i'],
+                    'exit_i': i
+                })
+                active = None
+            else:
+                continue
+
+        if daily_count.get(day, 0) >= MAX_TRADES_PER_DAY:
+            continue
+
+        window = test_df.iloc[:i+1].copy()
         signal, conf, _, _, _, _, _, _, sl, entry, targets, _ = generate_signal_v2003(
             window, symbol, dxy_signal=None, dxy_correlation=0.0
         )
-        if signal == "WAIT" or conf < MIN_CONFIDENCE:
+        if signal == "WAIT" or conf < MIN_CONFIDENCE or sl is None or not targets:
             continue
-        if signal == "BUY":
-            entry_price = window['close'].iloc[-1]
-            stop = sl if sl else entry_price - 20
-            tp = targets.get('target2', entry_price + 40)
-            for j in range(i, len(test_df)):
-                price = test_df['close'].iloc[j]
-                if price <= stop:
-                    trades.append({'result': 'loss', 'r': -1})
-                    break
-                elif price >= tp:
-                    trades.append({'result': 'win', 'r': 2})
-                    break
-        else:
-            entry_price = window['close'].iloc[-1]
-            stop = sl if sl else entry_price + 20
-            tp = targets.get('target2', entry_price - 40)
-            for j in range(i, len(test_df)):
-                price = test_df['close'].iloc[j]
-                if price >= stop:
-                    trades.append({'result': 'loss', 'r': -1})
-                    break
-                elif price <= tp:
-                    trades.append({'result': 'win', 'r': 2})
-                    break
+
+        next_open = float(test_df['open'].iloc[i+1])
+        stop = float(sl)
+        tp = float(targets.get('target2'))
+        if (signal == 'BUY' and stop >= next_open) or (signal == 'SELL' and stop <= next_open):
+            continue
+
+        active = {
+            'direction': signal, 'entry': next_open, 'stop': stop,
+            'tp': tp, 'entry_i': i + 1
+        }
+        daily_count[day] = daily_count.get(day, 0) + 1
+
     if not trades:
         return {}
     wins = [t for t in trades if t['result'] == 'win']
     losses = [t for t in trades if t['result'] == 'loss']
-    win_rate = len(wins) / len(trades) * 100
-    avg_r = sum(t['r'] for t in trades) / len(trades)
-    profit_factor = abs(sum(t['r'] for t in wins) / sum(abs(t['r']) for t in losses)) if losses else float('inf')
+    gross_win = sum(t['r'] for t in wins)
+    gross_loss = abs(sum(t['r'] for t in losses))
     return {
         'total_trades': len(trades),
-        'win_rate': win_rate,
-        'avg_r': avg_r,
-        'profit_factor': profit_factor,
-        'wins': len(wins),
-        'losses': len(losses)
+        'win_rate': len(wins) / len(trades) * 100,
+        'avg_r': sum(t['r'] for t in trades) / len(trades),
+        'profit_factor': gross_win / gross_loss if gross_loss > 0 else float('inf'),
+        'wins': len(wins), 'losses': len(losses)
     }
 
 # ============================================================
-# جمع الإشارات لجميع الأزواج
+# Collect signals for all instruments
 # ============================================================
 @st.cache_data(ttl=120)
 def get_all_signals():
@@ -820,20 +868,20 @@ def get_all_signals():
                 fmt = "{:.4f}"
             
             results.append({
-                "الزوج": pair_name,
-                "الإشارة": signal,
-                "الثقة": round(conf, 1),
-                "النتيجة": score,
-                "السعر": price_str,
-                "سعر الدخول": fmt.format(entry) if entry else "N/A",
-                "وقف الخسارة": fmt.format(sl) if sl else "N/A",
-                "الهدف 1": fmt.format(targets.get('target1')) if targets else "N/A",
-                "الهدف 2": fmt.format(targets.get('target2')) if targets else "N/A",
-                "الهدف 3": fmt.format(targets.get('target3')) if targets else "N/A",
-                "نسبة المخاطرة": f"1:{targets.get('risk_reward',0):.1f}" if targets else "N/A",
-                "توافق DXY": details.get('DXY', 'N/A'),
-                "معامل الارتباط": round(corr, 3),
-                "النظام": regime,
+                "Instrument": pair_name,
+                "Signal": signal,
+                "Confidence": round(conf, 1),
+                "Score": score,
+                "Price": price_str,
+                "Entry Price": fmt.format(entry) if entry else "N/A",
+                "Stop Loss": fmt.format(sl) if sl else "N/A",
+                "Target 1": fmt.format(targets.get('target1')) if targets else "N/A",
+                "Target 2": fmt.format(targets.get('target2')) if targets else "N/A",
+                "Target 3": fmt.format(targets.get('target3')) if targets else "N/A",
+                "Risk:Reward": f"1:{targets.get('risk_reward',0):.1f}" if targets else "N/A",
+                "DXY Alignment": details.get('DXY', 'N/A'),
+                "Correlation": round(corr, 3),
+                "Regime": regime,
                 "MTF": mtf_cons,
                 "Win Rate": f"{bt.get('win_rate', 0):.1f}%" if bt else "N/A",
                 "Profit Factor": f"{bt.get('profit_factor', 0):.2f}" if bt else "N/A"
@@ -843,75 +891,138 @@ def get_all_signals():
     return pd.DataFrame(results)
 
 # ============================================================
-# واجهة Streamlit
+# Active Trade Manager â€“ one locked trade per symbol
+# ============================================================
+def _today_key(ts):
+    return ts.strftime("%Y-%m-%d")
+
+
+def can_open_trade(symbol, bar_index, now):
+    stats = st.session_state.trade_stats
+    today = _today_key(now)
+    if stats["day"] != today:
+        stats["day"] = today
+        stats["count"] = 0
+        stats["last_closed_bar"] = {}
+    if symbol in st.session_state.active_trades:
+        return False
+    if stats["count"] >= MAX_TRADES_PER_DAY:
+        return False
+    last_closed = stats["last_closed_bar"].get(symbol, -10**9)
+    return (bar_index - last_closed) >= COOLDOWN_BARS
+
+
+def open_active_trade(symbol, pair_name, direction, entry, stop, targets, confidence, bar_index):
+    st.session_state.active_trades[symbol] = {
+        "symbol": symbol, "pair": pair_name, "direction": direction,
+        "entry": float(entry), "stop": float(stop),
+        "tp1": float(targets['target1']), "tp2": float(targets['target2']),
+        "tp3": float(targets['target3']), "confidence": float(confidence),
+        "opened_at": datetime.now().isoformat(), "opened_bar": int(bar_index),
+        "status": "OPEN"
+    }
+    st.session_state.trade_stats["count"] += 1
+
+
+def update_active_trade(symbol, df):
+    trade = st.session_state.active_trades.get(symbol)
+    if not trade or df is None or df.empty:
+        return None
+    bar = df.iloc[-1]
+    if trade["direction"] == "BUY":
+        hit_sl = bar['low'] <= trade['stop']
+        hit_tp3 = bar['high'] >= trade['tp3']
+    else:
+        hit_sl = bar['high'] >= trade['stop']
+        hit_tp3 = bar['low'] <= trade['tp3']
+
+    # Conservative: unknown intrabar order -> SL wins if both touched.
+    result = None
+    exit_price = None
+    if hit_sl:
+        result, exit_price = "SL", trade['stop']
+    elif hit_tp3:
+        result, exit_price = "TP3", trade['tp3']
+
+    if result:
+        closed = trade.copy()
+        closed.update({"closed_at": datetime.now().isoformat(), "result": result, "exit": float(exit_price)})
+        st.session_state.closed_trades.append(closed)
+        del st.session_state.active_trades[symbol]
+        st.session_state.trade_stats["last_closed_bar"][symbol] = len(df) - 1
+        return closed
+    return None
+
+# ============================================================
+# Streamlit interface
 # ============================================================
 with st.sidebar:
-    st.markdown("### 📊 حالة السوق")
+    st.markdown("### ًں“ٹ Market Status")
     status, status_text, next_event, close_time = get_market_status()
     if status == "OPEN":
-        st.markdown(f"🟢 **{status_text}**")
-        st.markdown(f"⏳ **يغلق في:** {time_remaining(next_event)}")
+        st.markdown(f"ًںں¢ **{status_text}**")
+        st.markdown(f"âڈ³ **Closes in:** {time_remaining(next_event)}")
     else:
-        st.markdown(f"🔴 **{status_text}**")
-        st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
+        st.markdown(f"ًں”´ **{status_text}**")
+        st.markdown(f"âڈ³ **Opens in:** {time_remaining(next_event)}")
     st.markdown("---")
     
-    st.markdown("### 📋 جميع الإشارات")
+    st.markdown("### ًں“‹ All Signals")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 تحديث الكل", use_container_width=True):
-            with st.spinner("جارٍ التحليل..."):
+        if st.button("ًں”„ Refresh All", use_container_width=True):
+            with st.spinner("Analyzing..."):
                 st.session_state.all_signals = get_all_signals()
                 st.session_state.last_update = datetime.now()
                 st.rerun()
     with col2:
-        if st.button("🗑️ مسح", use_container_width=True):
+        if st.button("ًں—‘ï¸ڈ Clear", use_container_width=True):
             st.session_state.all_signals = None
             st.rerun()
     
     if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
         df_sig = st.session_state.all_signals.copy()
-        df_sig["الإشارة"] = df_sig["الإشارة"].apply(lambda x: "🟢 شراء" if x=="BUY" else "🔴 بيع" if x=="SELL" else "⚪ انتظار")
+        df_sig["Signal"] = df_sig["Signal"].apply(lambda x: "ًںں¢ BUY" if x=="BUY" else "ًں”´ SELL" if x=="SELL" else "âڑھ WAIT")
         st.dataframe(
-            df_sig[["الزوج", "الإشارة", "الثقة", "النتيجة", "السعر", "توافق DXY"]],
+            df_sig[["Instrument", "Signal", "Confidence", "Score", "Price", "DXY Alignment"]],
             column_config={
-                "الزوج": "الزوج",
-                "الإشارة": "الإشارة",
-                "الثقة": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
-                "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
-                "السعر": "السعر",
-                "توافق DXY": "DXY"
+                "Instrument": "Instrument",
+                "Signal": "Signal",
+                "Confidence": st.column_config.NumberColumn("Confidence", format="%.1f%%"),
+                "Score": st.column_config.NumberColumn("Score", format="%d"),
+                "Price": "Price",
+                "DXY Alignment": "DXY"
             },
             hide_index=True,
             use_container_width=True,
             height=300
         )
-        buy = len(df_sig[df_sig["الإشارة"] == "🟢 شراء"])
-        sell = len(df_sig[df_sig["الإشارة"] == "🔴 بيع"])
+        buy = len(df_sig[df_sig["Signal"] == "ًںں¢ BUY"])
+        sell = len(df_sig[df_sig["Signal"] == "ًں”´ SELL"])
         wait = len(df_sig) - buy - sell
         c1, c2, c3 = st.columns(3)
-        c1.markdown(f"🟢 **{buy}** شراء")
-        c2.markdown(f"🔴 **{sell}** بيع")
-        c3.markdown(f"⚪ **{wait}** انتظار")
-        st.caption(f"🕐 {st.session_state.last_update.strftime('%H:%M:%S')}")
+        c1.markdown(f"ًںں¢ **{buy}** BUY")
+        c2.markdown(f"ًں”´ **{sell}** SELL")
+        c3.markdown(f"âڑھ **{wait}** WAIT")
+        st.caption(f"ًں•گ {st.session_state.last_update.strftime('%H:%M:%S')}")
     else:
-        st.info("اضغط 'تحديث الكل'")
+        st.info("Press 'Refresh All'")
     
     st.markdown("---")
-    st.markdown("### 🔍 اختر الزوج")
-    selected_pair = st.selectbox("للتحليل المتقدم", list(PAIRS.keys()), index=0)
+    st.markdown("### ًں”چ Select Instrument")
+    selected_pair = st.selectbox("For advanced analysis", list(PAIRS.keys()), index=0)
     selected_symbol = PAIRS[selected_pair]
     st.markdown("---")
-    if st.button("➕ صفقة جديدة", use_container_width=True):
+    if st.button("â‍• New Trade", use_container_width=True):
         st.session_state.show_form = not st.session_state.show_form
 
 # ============================================================
-# تحميل بيانات الزوج المختار
+# Load selected instrument data
 # ============================================================
 price, change = get_spot_price(selected_symbol)
-df = get_historical_data(selected_symbol, period="1mo", interval="1h")
+df = get_historical_data(selected_symbol, period="60d", interval="15m")
 if df is None:
-    st.error("فشل تحميل البيانات")
+    st.error("Failed to load data")
     st.stop()
 if price is None:
     price = df['close'].iloc[-1]
@@ -925,7 +1036,7 @@ if df_dxy is not None and len(df_dxy) > 100:
     dxy_signal, _, _, _, _, _, _, _, _, _, _, _ = generate_signal_v2003(df_dxy, "DX-Y.NYB")
     corr = get_dxy_correlation(df, df_dxy, lookback=50)
 
-# حساب المؤشرات للزوج المختار
+# Calculate indicators for selected instrument
 df['ema20'] = df['close'].ewm(20).mean()
 df['ema50'] = df['close'].ewm(50).mean()
 df['rsi'] = calc_rsi(df['close'])
@@ -941,13 +1052,28 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# توليد الإشارة للزوج المختار
+# Generate signal for selected instrument
 signal, confidence, score, details, factors, regime, mtf_cons, mtf_count, sl, entry, targets, tbs_info = generate_signal_v2003(
     df, selected_symbol, dxy_signal, corr
 )
 
+# Lock the trade: update first, then open only if no active trade exists.
+closed_now = update_active_trade(selected_symbol, df)
+if selected_symbol not in st.session_state.active_trades:
+    if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE and sl is not None and targets:
+        if can_open_trade(selected_symbol, len(df) - 1, datetime.now()):
+            open_active_trade(selected_symbol, selected_pair, signal, entry, sl, targets, confidence, len(df) - 1)
+
+active_trade = st.session_state.active_trades.get(selected_symbol)
+if active_trade:
+    signal = active_trade["direction"]
+    confidence = active_trade["confidence"]
+    entry = active_trade["entry"]
+    sl = active_trade["stop"]
+    targets = {"target1": active_trade["tp1"], "target2": active_trade["tp2"], "target3": active_trade["tp3"], "risk_reward": 2.0}
+
 # ============================================================
-# عرض السعر والمؤشرات
+# Display price and indicators
 # ============================================================
 if "Gold" in selected_pair or "Silver" in selected_pair or "Bitcoin" in selected_pair or "Ethereum" in selected_pair:
     price_fmt = "${:,.2f}"
@@ -969,75 +1095,75 @@ if dxy_signal:
     dxy_col = "#00ff88" if dxy_signal=="BUY" else "#ff4444" if dxy_signal=="SELL" else "#ffaa00"
     st.markdown(f"""
     <div style="background:rgba(10,10,10,0.5);border-radius:8px;padding:8px 15px;margin:5px 0;border:1px solid rgba(255,215,0,0.08);">
-        <span style="color:#888;font-size:0.8rem;">📊 DXY Signal: </span>
+        <span style="color:#888;font-size:0.8rem;">ًں“ٹ DXY Signal: </span>
         <span style="color:{dxy_col};font-weight:bold;font-size:0.9rem;">{dxy_signal}</span>
-        <span style="color:#888;font-size:0.8rem;margin-left:15px;">🔗 Correlation: </span>
+        <span style="color:#888;font-size:0.8rem;margin-left:15px;">ًں”— Correlation: </span>
         <span style="color:{'#00ff88' if abs(corr)>0.3 else '#ffaa00'};font-weight:bold;font-size:0.9rem;">{corr:.2f}</span>
-        <span style="color:#666;font-size:0.7rem;margin-left:10px;">({('عكسي قوي' if corr < -0.6 else 'مباشر قوي' if corr > 0.6 else 'متوسط' if abs(corr)>0.3 else 'ضعيف')})</span>
+        <span style="color:#666;font-size:0.7rem;margin-left:10px;">({('Strong inverse' if corr < -0.6 else 'Strong direct' if corr > 0.6 else 'Moderate' if abs(corr)>0.3 else 'Weak')})</span>
     </div>
     """, unsafe_allow_html=True)
 
 # Regime
 regime_badge = ""
 if "TRENDING" in regime:
-    regime_badge = '<span class="regime-badge regime-trending">📈 اتجاه</span>'
+    regime_badge = '<span class="regime-badge regime-trending">ًں“ˆ Trending</span>'
 elif "RANGING" in regime:
-    regime_badge = '<span class="regime-badge regime-ranging">➖ تذبذب</span>'
+    regime_badge = '<span class="regime-badge regime-ranging">â‍– Ranging</span>'
 if "HIGH_VOL" in regime:
-    regime_badge += ' <span class="regime-badge regime-volatile">⚡ تقلب عال</span>'
+    regime_badge += ' <span class="regime-badge regime-volatile">âڑ، High Volatility</span>'
 elif "LOW_VOL" in regime:
-    regime_badge += ' <span class="regime-badge" style="background:rgba(0,150,255,0.15);color:#0096ff;border:1px solid rgba(0,150,255,0.20);">🌊 تقلب منخفض</span>'
-st.markdown(f"**النظام الحالي:** {regime_badge}", unsafe_allow_html=True)
+    regime_badge += ' <span class="regime-badge" style="background:rgba(0,150,255,0.15);color:#0096ff;border:1px solid rgba(0,150,255,0.20);">ًںŒٹ Low Volatility</span>'
+st.markdown(f"**Current Regime:** {regime_badge}", unsafe_allow_html=True)
 
 # ============================================================
-# عرض الصفقة المقترحة
+# Display suggested trade
 # ============================================================
 if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE:
-    direction_text = "شراء" if signal=="BUY" else "بيع"
+    direction_text = "BUY" if signal=="BUY" else "SELL"
     st.markdown(f"""
     <div class="suggested-trade">
-        <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
-        <b>📍 الدخول:</b> {price_fmt.format(entry)}<br>
-        <b>🛑 وقف الخسارة:</b> {price_fmt.format(sl)}<br>
-        <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_fmt.format(targets.get('target1'))}</div>
-        <div class="target-zone" style="border-left-color:#ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_fmt.format(targets.get('target2'))}</div>
-        <div class="target-zone" style="border-left-color:#00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_fmt.format(targets.get('target3'))}</div>
-        <b>📈 R:R</b> 1:{targets.get('risk_reward',0):.1f}
+        <b>Direction:</b> {direction_text} (Confidence: {confidence:.0f}%)<br>
+        <b>ًں“چ Entry:</b> {price_fmt.format(entry)}<br>
+        <b>ًں›‘ Stop Loss:</b> {price_fmt.format(sl)}<br>
+        <div class="target-zone"><b>ًںژ¯ Target 1 (1:1):</b> {price_fmt.format(targets.get('target1'))}</div>
+        <div class="target-zone" style="border-left-color:#ffaa00;"><b>ًںژ¯ Target 2 (1:1.5):</b> {price_fmt.format(targets.get('target2'))}</div>
+        <div class="target-zone" style="border-left-color:#00ff88;"><b>ًںژ¯ Target 3 (1:2):</b> {price_fmt.format(targets.get('target3'))}</div>
+        <b>ًں“ˆ R:R</b> 1:{targets.get('risk_reward',0):.1f}
     </div>
     """, unsafe_allow_html=True)
 
 # ============================================================
-# تفاصيل العوامل (تم إصلاح الخطأ هنا)
+# Factor details (error fixed)
 # ============================================================
-with st.expander("📊 تحليل العوامل المتكاملة", expanded=True):
+with st.expander("ًں“ٹ Integrated Factor Analysis", expanded=True):
     cols = st.columns(3)
     i = 0
     for factor, value in factors.items():
         col = cols[i % 3]
-        # استخدام format مع float بدلاً من int
+        # Use float formatting instead of int
         col.metric(factor.capitalize(), f"{value:+.1f}", delta_color="normal")
         i += 1
-    st.markdown("#### ملخص التفاصيل")
+    st.markdown("#### Details Summary")
     for k, v in details.items():
         st.write(f"**{k}:** {v}")
 
 # ============================================================
-# باك تست للزوج المختار
+# Backtest selected instrument
 # ============================================================
 bt = run_backtest(df, selected_symbol)
 if bt:
-    st.markdown("#### 📈 باك تست (آخر 500 شمعة)")
+    st.markdown("#### ًں“ˆ Backtest (Last 500 Bars)")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("عدد الصفقات", bt['total_trades'])
-    c2.metric("نسبة الربح", f"{bt['win_rate']:.1f}%")
-    c3.metric("متوسط R", f"{bt['avg_r']:.2f}")
+    c1.metric("Total Trades", bt['total_trades'])
+    c2.metric("Win Rate", f"{bt['win_rate']:.1f}%")
+    c3.metric("Average R", f"{bt['avg_r']:.2f}")
     c4.metric("Profit Factor", f"{bt['profit_factor']:.2f}")
 
 # ============================================================
-# الرسم البياني
+# Chart
 # ============================================================
 st.markdown("---")
-st.markdown("### 📈 Price Chart")
+st.markdown("### ًں“ˆ Price Chart")
 df_smc = detect_smc_ict(df)
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
 fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
@@ -1068,18 +1194,31 @@ fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# إدارة الصفقات (مبسطة)
+# Trade Management
 # ============================================================
 st.markdown("---")
-st.markdown("### 💼 إدارة الصفقات")
-# يمكن إضافة TradeManager لاحقاً
+st.markdown("### ًں’¼ Trade Management")
+if active_trade:
+    st.success(f"ًں”’ Active trade locked: {active_trade['direction']} â€” It will not change until TP3 or SL")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("ط§ظ„ط¯ط®ظˆظ„", price_fmt.format(active_trade['entry']))
+    c2.metric("SL", price_fmt.format(active_trade['stop']))
+    c3.metric("TP3", price_fmt.format(active_trade['tp3']))
+    c4.metric("Confidence at Open", f"{active_trade['confidence']:.0f}%")
+else:
+    st.info("No active trade â€” the system is scanning for a new opportunity within the daily limit and cooldown.")
+
+if st.session_state.closed_trades:
+    hist = pd.DataFrame(st.session_state.closed_trades[-20:])
+    st.dataframe(hist[["pair", "direction", "entry", "stop", "tp3", "exit", "result", "opened_at", "closed_at"]], hide_index=True, use_container_width=True)
+
 
 # ============================================================
-# تذييل
+# Footer
 # ============================================================
 st.markdown(f"""
 <div class="footer">
-    <span class="brand">▲ BLACK PYRAMID v2003</span> • Regime • Structure • Liquidity • SMC • MTF • DXY • Risk • Backtest<br>
+    <span class="brand">â–² BLACK PYRAMID v2003</span> â€¢ Regime â€¢ Structure â€¢ Liquidity â€¢ SMC â€¢ MTF â€¢ DXY â€¢ Risk â€¢ Backtest<br>
     {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
