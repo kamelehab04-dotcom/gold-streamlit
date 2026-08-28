@@ -1,7 +1,8 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002
-# تاريخ التحديث: 2026-08-27
+# BLACK PYRAMID – الإصدار 2002 (مُحدّث)
+# تاريخ التحديث: 2026-08-28
 # المصدر: GoldAPI + yfinance
+# التحديث: تصحيح علاقة الدولار بالأزواج
 # ==========================================
 
 import streamlit as st
@@ -76,6 +77,8 @@ st.markdown("""
     .reversal-alert { border: 1px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 10px 15px !important; margin: 5px 0 !important; border-radius: 8px !important; font-size: 0.85rem !important; }
     .pattern-badge { display: inline-block; background: rgba(255,215,0,0.08) !important; border: 1px solid rgba(255,215,0,0.12) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ffd700 !important; }
     .tbs-badge { display: inline-block; background: rgba(255,136,0,0.10) !important; border: 1px solid rgba(255,136,0,0.15) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ff8800 !important; font-weight: bold; }
+    .dxy-aligned { display: inline-block; background: rgba(0,255,136,0.10) !important; border: 1px solid rgba(0,255,136,0.20) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #00ff88 !important; font-weight: bold; }
+    .dxy-misaligned { display: inline-block; background: rgba(255,68,68,0.10) !important; border: 1px solid rgba(255,68,68,0.20) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ff4444 !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,19 +93,19 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • DXY-Aligned</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# API Keys – باستخدام المفتاح الجديد
+# API Keys
 # ==========================================
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 # ==========================================
-# قائمة الأزواج (جميع الأزواج)
+# قائمة الأزواج
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -140,6 +143,22 @@ PAIRS = {
 }
 
 # ==========================================
+# الأزواج التي تتأثر عكسياً بـ DXY
+# ==========================================
+DXY_INVERSE_PAIRS = {
+    "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "EUR/GBP", 
+    "EUR/AUD", "EUR/NZD", "GBP/AUD", "GBP/NZD", "AUD/NZD",
+    "XAU/USD (Gold)", "XAG/USD (Silver)"
+}
+
+DXY_DIRECT_PAIRS = {
+    "USD/JPY", "USD/CHF", "USD/CAD", "EUR/JPY", "EUR/CHF", 
+    "EUR/CAD", "GBP/JPY", "GBP/CHF", "GBP/CAD", "AUD/JPY",
+    "AUD/CHF", "AUD/CAD", "NZD/JPY", "NZD/CHF", "NZD/CAD",
+    "CAD/JPY", "CAD/CHF"
+}
+
+# ==========================================
 # تهيئة حالة الجلسة
 # ==========================================
 if "df" not in st.session_state:
@@ -164,9 +183,11 @@ if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
 if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
+if "dxy_signal_cache" not in st.session_state:
+    st.session_state.dxy_signal_cache = None
 
 # ==========================================
-# دوال جلب البيانات (GoldAPI + yfinance)
+# دوال جلب البيانات
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -213,12 +234,6 @@ def time_remaining(dt):
 
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
-    """
-    جلب السعر الفوري:
-    - GoldAPI للذهب والفضة (دقيق)
-    - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI
-    """
-    # محاولة GoldAPI للذهب والفضة
     if symbol == "GC=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAU/USD"
@@ -245,7 +260,6 @@ def get_spot_price(symbol="GC=F"):
         except:
             pass
     
-    # البديل: yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -260,9 +274,6 @@ def get_spot_price(symbol="GC=F"):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
-    """
-    جلب البيانات التاريخية من yfinance مع رموز بديلة وإعادة محاولة متعددة
-    """
     alternative_symbols = {
         "GC=F": ["XAUUSD=X", "GOLD"],
         "SI=F": ["XAGUSD=X", "SILVER"],
@@ -336,7 +347,7 @@ def get_economic_news():
     return []
 
 # ==========================================
-# المؤشرات الأساسية (نفسها)
+# المؤشرات الأساسية
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -615,9 +626,20 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# الإشارة المتكاملة
+# دالة عكس الإشارة
 # ==========================================
-def generate_advanced_signal(df, current_price, symbol=""):
+def reverse_signal(signal):
+    if signal == "BUY":
+        return "SELL"
+    elif signal == "SELL":
+        return "BUY"
+    else:
+        return "WAIT"
+
+# ==========================================
+# الإشارة المتكاملة (مُحدّثة)
+# ==========================================
+def generate_advanced_signal(df, current_price, symbol="", dxy_signal=None):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
 
@@ -784,6 +806,32 @@ def generate_advanced_signal(df, current_price, symbol=""):
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     
+    # ==========================================
+    # 🔥 تصحيح علاقة الدولار (DXY)
+    # ==========================================
+    if dxy_signal is not None:
+        # الأزواج العكسية مع DXY
+        if symbol in DXY_INVERSE_PAIRS or any(pair in symbol for pair in DXY_INVERSE_PAIRS):
+            if dxy_signal == "SELL":
+                # دولار ضعيف → الزوج المفروض BUY
+                if net_score < 0:
+                    details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY بيع (دولار ضعيف)"
+                    net_score = -net_score
+            elif dxy_signal == "BUY":
+                # دولار قوي → الزوج المفروض SELL
+                if net_score > 0:
+                    details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY شراء (دولار قوي)"
+                    net_score = -net_score
+        
+        # الأزواج المباشرة مع DXY
+        elif symbol in DXY_DIRECT_PAIRS or any(pair in symbol for pair in DXY_DIRECT_PAIRS):
+            if dxy_signal == "SELL" and net_score > 0:
+                details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY بيع (ضعف)"
+                net_score = -net_score
+            elif dxy_signal == "BUY" and net_score < 0:
+                details['DXY_Correction'] = "🔄 تم عكس الإشارة لأن DXY شراء (قوة)"
+                net_score = -net_score
+
     if net_score >= 5:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
@@ -937,13 +985,13 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد"]):
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "عكس"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
-            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط"]):
+            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط", "عكس"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
@@ -1001,11 +1049,22 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# جمع إشارات جميع الأزواج مع تفاصيل الصفقة
+# جمع إشارات جميع الأزواج مع تفاصيل الصفقة (مُحدّث)
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
     results = []
+    
+    # تحليل DXY أولاً
+    dxy_signal = None
+    try:
+        df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
+        if df_dxy is not None and len(df_dxy) > 100:
+            current_dxy = df_dxy['close'].iloc[-1]
+            dxy_signal, _, _, _, _, _, _, _, _ = generate_advanced_signal(df_dxy, current_dxy, "DX-Y.NYB", dxy_signal=None)
+    except:
+        pass
+    
     for pair_name, symbol in PAIRS.items():
         try:
             df = get_historical_data(symbol, period="1mo", interval="1h")
@@ -1029,7 +1088,10 @@ def get_all_signals_with_trades():
             df['chikou'] = chikou
             df['mfi'] = calc_mfi(df)
             
-            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, symbol)
+            # تمرير إشارة DXY للتصحيح
+            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(
+                df, current_price, symbol, dxy_signal
+            )
             
             if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
                 price_str = f"${current_price:,.2f}"
@@ -1049,6 +1111,20 @@ def get_all_signals_with_trades():
                     "risk_reward": f"1:{targets.get('risk_reward_3', 0):.1f}"
                 }
             
+            # حساب التوافق مع DXY
+            dxy_aligned = "N/A"
+            if dxy_signal is not None and dxy_signal != "WAIT" and signal != "WAIT":
+                if symbol in DXY_INVERSE_PAIRS or any(pair in symbol for pair in DXY_INVERSE_PAIRS):
+                    if (dxy_signal == "SELL" and signal == "BUY") or (dxy_signal == "BUY" and signal == "SELL"):
+                        dxy_aligned = "✅ متوافق"
+                    else:
+                        dxy_aligned = "⚠️ غير متوافق"
+                elif symbol in DXY_DIRECT_PAIRS or any(pair in symbol for pair in DXY_DIRECT_PAIRS):
+                    if dxy_signal == signal:
+                        dxy_aligned = "✅ متوافق"
+                    else:
+                        dxy_aligned = "⚠️ غير متوافق"
+            
             results.append({
                 "الزوج": pair_name,
                 "الإشارة": signal,
@@ -1060,7 +1136,8 @@ def get_all_signals_with_trades():
                 "الهدف 1": fmt.format(trade_details.get('target1')) if trade_details.get('target1') else "N/A",
                 "الهدف 2": fmt.format(trade_details.get('target2')) if trade_details.get('target2') else "N/A",
                 "الهدف 3": fmt.format(trade_details.get('target3')) if trade_details.get('target3') else "N/A",
-                "نسبة المخاطرة": trade_details.get('risk_reward', "N/A")
+                "نسبة المخاطرة": trade_details.get('risk_reward', "N/A"),
+                "توافق DXY": dxy_aligned
             })
         except Exception as e:
             continue
@@ -1181,14 +1258,17 @@ with st.sidebar:
             elif val == "SELL": return "🔴 بيع"
             else: return "⚪ انتظار"
         df_signals["الإشارة"] = df_signals["الإشارة"].apply(color_signal)
+        
+        # عرض مع عمود التوافق مع DXY
         st.dataframe(
-            df_signals[["الزوج", "الإشارة", "الثقة", "النتيجة", "السعر"]],
+            df_signals[["الزوج", "الإشارة", "الثقة", "النتيجة", "السعر", "توافق DXY"]],
             column_config={
                 "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
                 "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
                 "الثقة": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
                 "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
                 "السعر": st.column_config.TextColumn("السعر"),
+                "توافق DXY": st.column_config.TextColumn("DXY", width="small"),
             },
             hide_index=True,
             use_container_width=True,
@@ -1237,6 +1317,18 @@ if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
 
+# ==========================================
+# جلب إشارة DXY للتصحيح
+# ==========================================
+dxy_signal = None
+try:
+    df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
+    if df_dxy is not None and len(df_dxy) > 100:
+        current_dxy = df_dxy['close'].iloc[-1]
+        dxy_signal, _, _, _, _, _, _, _, _ = generate_advanced_signal(df_dxy, current_dxy, "DX-Y.NYB", dxy_signal=None)
+except:
+    pass
+
 # حساب المؤشرات
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -1255,9 +1347,11 @@ df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
 # ==========================================
-# توليد الإشارة
+# توليد الإشارة (مع تصحيح DXY)
 # ==========================================
-signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol)
+signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(
+    df, current_price, selected_symbol, dxy_signal
+)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # ==========================================
@@ -1279,6 +1373,18 @@ st.markdown(f"""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# عرض إشارة DXY
+# ==========================================
+if dxy_signal:
+    dxy_color = "#00ff88" if dxy_signal == "BUY" else "#ff4444" if dxy_signal == "SELL" else "#ffaa00"
+    st.markdown(f"""
+    <div style="background: rgba(10,10,10,0.5); border-radius: 8px; padding: 8px 15px; margin: 5px 0; border: 1px solid rgba(255,215,0,0.08);">
+        <span style="color: #888; font-size: 0.8rem;">📊 DXY Signal:</span>
+        <span style="color: {dxy_color}; font-weight: bold; font-size: 0.9rem;">{dxy_signal}</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ==========================================
 # زر تحديث
@@ -1326,6 +1432,20 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
     
+    # عرض التوافق مع DXY
+    dxy_status = ""
+    if dxy_signal and dxy_signal != "WAIT":
+        if selected_pair_name in DXY_INVERSE_PAIRS:
+            if (dxy_signal == "SELL" and signal == "BUY") or (dxy_signal == "BUY" and signal == "SELL"):
+                dxy_status = "✅ متوافق مع DXY"
+            else:
+                dxy_status = "⚠️ غير متوافق مع DXY"
+        elif selected_pair_name in DXY_DIRECT_PAIRS:
+            if dxy_signal == signal:
+                dxy_status = "✅ متوافق مع DXY"
+            else:
+                dxy_status = "⚠️ غير متوافق مع DXY"
+    
     st.markdown(f"""
     <div class="suggested-trade">
         <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
@@ -1334,7 +1454,8 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_format.format(targets['target1'])}</div>
         <div class="target-zone" style="border-left-color: #ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_format.format(targets['target2'])}</div>
         <div class="target-zone" style="border-left-color: #00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_format.format(targets['target3'])}</div>
-        <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> {risk_reward}
+        <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> {risk_reward}<br>
+        <b>📊 {dxy_status}</b>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1415,7 +1536,7 @@ with st.expander("📝 شرح القرار", expanded=True):
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
-# جميع الصفقات المقترحة
+# جميع الصفقات المقترحة (مُحدّث)
 # ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
@@ -1425,7 +1546,7 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
     df_trades = df_all[(df_all["الإشارة"].isin(["BUY", "SELL"])) & (df_all["الثقة"] >= 60)]
     
     if not df_trades.empty:
-        cols_to_show = ["الزوج", "الإشارة", "الثقة", "سعر الدخول", "وقف الخسارة", "الهدف 1", "الهدف 2", "الهدف 3", "نسبة المخاطرة"]
+        cols_to_show = ["الزوج", "الإشارة", "الثقة", "سعر الدخول", "وقف الخسارة", "الهدف 1", "الهدف 2", "الهدف 3", "نسبة المخاطرة", "توافق DXY"]
         def style_signal(val):
             if val == "BUY":
                 return "🟢 شراء"
@@ -1446,6 +1567,7 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
                 "الهدف 2": st.column_config.TextColumn("هدف 2"),
                 "الهدف 3": st.column_config.TextColumn("هدف 3"),
                 "نسبة المخاطرة": st.column_config.TextColumn("R/R"),
+                "توافق DXY": st.column_config.TextColumn("DXY", width="small"),
             },
             hide_index=True,
             use_container_width=True
@@ -1666,6 +1788,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets • <span style="color:#00ff88;">DXY-Aligned ✅</span>
 </div>
 """, unsafe_allow_html=True)
