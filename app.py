@@ -320,6 +320,15 @@ st.markdown("""
         background: rgba(255,215,0,0.10) !important;
         border-color: #ffd700 !important;
     }
+    
+    /* ===== جودة الإشارة ===== */
+    .signal-quality {
+        border-radius: 10px;
+        padding: 10px;
+        margin: 10px 0;
+        text-align: center;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -334,7 +343,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Patterns • TBS • MTF</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Patterns • TBS • MTF • Advanced Models</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -420,6 +429,8 @@ if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
 if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
+if "comprehensive_analysis" not in st.session_state:
+    st.session_state.comprehensive_analysis = None
 
 # ==========================================
 # دوال جلب البيانات
@@ -633,7 +644,461 @@ def calc_fibonacci_levels(high, low, current_price):
     }
 
 # ==========================================
-# تحليل SMC/ICT + TBS
+# النماذج المتقدمة
+# ==========================================
+
+# 1. نموذج تحليل التدفق (Order Flow Analysis)
+def analyze_order_flow(df):
+    """
+    تحليل تدفق الأوامر باستخدام حجم التداول والحركة السعرية
+    """
+    if len(df) < 50:
+        return {}
+    
+    results = {}
+    
+    # حساب متوسط الحجم
+    avg_volume = df['volume'].rolling(window=20).mean()
+    current_volume = df['volume'].iloc[-1]
+    volume_ratio = current_volume / avg_volume.iloc[-1]
+    
+    # تحليل حجم التداول مع الحركة السعرية
+    price_change = df['close'].pct_change().iloc[-1] * 100
+    candle_range = (df['high'].iloc[-1] - df['low'].iloc[-1]) / df['close'].iloc[-1] * 100
+    
+    # تحديد سيولة البائعين والمشترين
+    buy_volume = df['volume'].iloc[-1] * (df['close'].iloc[-1] - df['low'].iloc[-1]) / (df['high'].iloc[-1] - df['low'].iloc[-1])
+    sell_volume = df['volume'].iloc[-1] * (df['high'].iloc[-1] - df['close'].iloc[-1]) / (df['high'].iloc[-1] - df['low'].iloc[-1])
+    
+    results['volume_ratio'] = volume_ratio
+    results['buy_pressure'] = buy_volume / df['volume'].iloc[-1] * 100
+    results['sell_pressure'] = sell_volume / df['volume'].iloc[-1] * 100
+    results['volume_spike'] = volume_ratio > 1.5
+    results['accumulation'] = buy_volume > sell_volume * 1.3
+    results['distribution'] = sell_volume > buy_volume * 1.3
+    results['price_volume_divergence'] = (price_change > 0 and volume_ratio < 0.8) or (price_change < 0 and volume_ratio < 0.8)
+    
+    return results
+
+# 2. نموذج تحليل السيولة (Liquidity Analysis)
+def analyze_liquidity_zones(df):
+    """
+    تحليل مناطق السيولة والمستويات الرئيسية
+    """
+    if len(df) < 100:
+        return {}
+    
+    results = {}
+    
+    # تحديد القمم والقيعان الرئيسية
+    highs = df['high'].values
+    lows = df['low'].values
+    closes = df['close'].values
+    
+    # مناطق السيولة - المستويات التي تم اختبارها عدة مرات
+    liquidity_levels = []
+    for i in range(20, len(df) - 20):
+        high_level = highs[i]
+        low_level = lows[i]
+        
+        # التحقق من اختبار المستوى
+        high_tests = sum(1 for j in range(i-20, i+20) if abs(highs[j] - high_level) / high_level < 0.002)
+        low_tests = sum(1 for j in range(i-20, i+20) if abs(lows[j] - low_level) / low_level < 0.002)
+        
+        if high_tests >= 3:
+            liquidity_levels.append(('RESISTANCE', high_level, high_tests))
+        if low_tests >= 3:
+            liquidity_levels.append(('SUPPORT', low_level, low_tests))
+    
+    # تجميع المستويات المتقاربة
+    if liquidity_levels:
+        # ترتيب حسب القوة
+        liquidity_levels.sort(key=lambda x: x[2], reverse=True)
+        
+        # المستويات القوية
+        strong_levels = [level for level in liquidity_levels if level[2] >= 4][:5]
+        
+        results['strong_support'] = [level[1] for level in strong_levels if level[0] == 'SUPPORT']
+        results['strong_resistance'] = [level[1] for level in strong_levels if level[0] == 'RESISTANCE']
+        
+        # أقرب دعم ومقاومة للسعر الحالي
+        current_price = closes[-1]
+        supports = [level[1] for level in liquidity_levels if level[0] == 'SUPPORT' and level[1] < current_price]
+        resistances = [level[1] for level in liquidity_levels if level[0] == 'RESISTANCE' and level[1] > current_price]
+        
+        results['nearest_support'] = max(supports) if supports else None
+        results['nearest_resistance'] = min(resistances) if resistances else None
+    
+    return results
+
+# 3. نموذج تحليل الزخم المتقدم (Advanced Momentum)
+def advanced_momentum_analysis(df):
+    """
+    تحليل زخم متقدم باستخدام مؤشرات متعددة
+    """
+    if len(df) < 100:
+        return {}
+    
+    results = {}
+    
+    # RSI محسن مع متوسط متحرك
+    rsi = calc_rsi(df['close'])
+    if rsi is not None and len(rsi) > 5:
+        rsi_ma = rsi.rolling(window=5).mean()
+        rsi_current = rsi.iloc[-1]
+        rsi_ma_current = rsi_ma.iloc[-1]
+        
+        results['rsi'] = rsi_current
+        results['rsi_trend'] = "BULLISH" if rsi_current > rsi_ma_current else "BEARISH"
+        results['rsi_divergence'] = False
+        
+        # كشف الـ Divergence
+        if len(rsi) > 20:
+            last_20_rsi = rsi.iloc[-20:]
+            last_20_price = df['close'].iloc[-20:]
+            
+            # RSI divergence
+            rsi_min_idx = last_20_rsi.idxmin()
+            price_min_idx = last_20_price.idxmin()
+            
+            if rsi_min_idx != price_min_idx:
+                if rsi.loc[rsi_min_idx] < rsi.iloc[-10:].min() and df['close'].loc[price_min_idx] < df['close'].iloc[-1]:
+                    results['rsi_divergence'] = True
+                    results['divergence_type'] = "BULLISH"
+    
+    # MACD Divergence
+    macd, signal, hist = calc_macd(df['close'])
+    if macd is not None and len(macd) > 5:
+        macd_current = macd.iloc[-1]
+        signal_current = signal.iloc[-1]
+        hist_current = hist.iloc[-1]
+        
+        results['macd_cross'] = "BULLISH" if macd_current > signal_current else "BEARISH"
+        results['macd_hist_trend'] = "BULLISH" if hist_current > hist.iloc[-2] else "BEARISH"
+        
+        # MACD Divergence Detection
+        if len(macd) > 30:
+            last_30_macd = macd.iloc[-30:]
+            last_30_price = df['close'].iloc[-30:]
+            
+            macd_min = last_30_macd.min()
+            macd_max = last_30_macd.max()
+            price_min = last_30_price.min()
+            price_max = last_30_price.max()
+            
+            if macd_current < macd_min * 1.1 and df['close'].iloc[-1] > price_min * 1.02:
+                results['macd_divergence'] = "BULLISH"
+            elif macd_current > macd_max * 0.9 and df['close'].iloc[-1] < price_max * 0.98:
+                results['macd_divergence'] = "BEARISH"
+    
+    # Stochastic RSI
+    if rsi is not None and len(rsi) > 14:
+        stoch_rsi = (rsi - rsi.rolling(window=14).min()) / (rsi.rolling(window=14).max() - rsi.rolling(window=14).min()) * 100
+        stoch_rsi_ma = stoch_rsi.rolling(window=3).mean()
+        
+        if len(stoch_rsi) > 3:
+            results['stoch_rsi'] = stoch_rsi.iloc[-1] if not pd.isna(stoch_rsi.iloc[-1]) else 50
+            results['stoch_rsi_ma'] = stoch_rsi_ma.iloc[-1] if not pd.isna(stoch_rsi_ma.iloc[-1]) else 50
+            results['stoch_rsi_cross'] = "BULLISH" if stoch_rsi.iloc[-1] > stoch_rsi_ma.iloc[-1] else "BEARISH"
+    
+    return results
+
+# 4. نموذج تحليل التصحيح (Pullback Analysis)
+def analyze_pullback(df):
+    """
+    تحليل التصحيحات وتحديد نقاط الدخول المثالية
+    """
+    if len(df) < 100:
+        return {}
+    
+    results = {}
+    
+    # تحديد الاتجاه الرئيسي
+    ema20 = df['close'].ewm(span=20).mean()
+    ema50 = df['close'].ewm(span=50).mean()
+    ema200 = df['close'].ewm(span=200).mean()
+    
+    if len(ema20) > 0 and len(ema50) > 0 and len(ema200) > 0:
+        main_trend = "BULLISH" if ema20.iloc[-1] > ema50.iloc[-1] > ema200.iloc[-1] else "BEARISH"
+        results['main_trend'] = main_trend
+        
+        # تحديد قمة وقاع التصحيح
+        if main_trend == "BULLISH":
+            # في الاتجاه الصاعد، نبحث عن القيعان
+            recent_lows = df['low'].iloc[-50:].min()
+            current_low = df['low'].iloc[-1]
+            
+            # نسبة التصحيح
+            recent_high = df['high'].iloc[-50:].max()
+            if recent_high != recent_lows:
+                correction_pct = (recent_high - current_low) / (recent_high - recent_lows) * 100
+            else:
+                correction_pct = 0
+            
+            results['correction_pct'] = correction_pct
+            results['pullback_zone'] = "DEEP" if correction_pct > 61.8 else ("MID" if correction_pct > 38.2 else "SHALLOW")
+            
+            # مناطق دخول محتملة
+            fib_382 = recent_high - (recent_high - recent_lows) * 0.382
+            fib_500 = recent_high - (recent_high - recent_lows) * 0.5
+            fib_618 = recent_high - (recent_high - recent_lows) * 0.618
+            
+            results['fib_382'] = fib_382
+            results['fib_500'] = fib_500
+            results['fib_618'] = fib_618
+            
+            # تأكيد التصحيح
+            if correction_pct > 38.2 and correction_pct < 78.6:
+                # التحقق من وجود شمعة انعكاسية
+                last_candle = df.iloc[-1]
+                prev_candle = df.iloc[-2]
+                
+                if (last_candle['close'] > last_candle['open'] and 
+                    prev_candle['close'] < prev_candle['open'] and
+                    last_candle['low'] < prev_candle['low']):
+                    results['pullback_confirmed'] = True
+                    results['entry_signal'] = "BUY"
+            else:
+                results['pullback_confirmed'] = False
+        else:
+            # الاتجاه الهابط
+            recent_highs = df['high'].iloc[-50:].max()
+            current_high = df['high'].iloc[-1]
+            
+            recent_low = df['low'].iloc[-50:].min()
+            if recent_highs != recent_low:
+                retracement_pct = (current_high - recent_low) / (recent_highs - recent_low) * 100
+            else:
+                retracement_pct = 0
+            
+            results['retracement_pct'] = retracement_pct
+            results['pullback_zone'] = "DEEP" if retracement_pct > 61.8 else ("MID" if retracement_pct > 38.2 else "SHALLOW")
+            
+            # مناطق دخول محتملة
+            fib_382 = recent_low + (recent_highs - recent_low) * 0.382
+            fib_500 = recent_low + (recent_highs - recent_low) * 0.5
+            fib_618 = recent_low + (recent_highs - recent_low) * 0.618
+            
+            results['fib_382'] = fib_382
+            results['fib_500'] = fib_500
+            results['fib_618'] = fib_618
+            
+            if retracement_pct > 38.2 and retracement_pct < 78.6:
+                last_candle = df.iloc[-1]
+                prev_candle = df.iloc[-2]
+                
+                if (last_candle['close'] < last_candle['open'] and 
+                    prev_candle['close'] > prev_candle['open'] and
+                    last_candle['high'] > prev_candle['high']):
+                    results['pullback_confirmed'] = True
+                    results['entry_signal'] = "SELL"
+            else:
+                results['pullback_confirmed'] = False
+    
+    return results
+
+# 5. نموذج تحليل التدفق النقدي (Money Flow Index with Divergence)
+def analyze_money_flow_divergence(df):
+    """
+    تحليل متقدم لمؤشر التدفق النقدي مع اكتشاف الـ Divergence
+    """
+    if len(df) < 50:
+        return {}
+    
+    results = {}
+    
+    # حساب MFI
+    mfi = calc_mfi(df)
+    
+    if mfi is not None and len(mfi) > 30:
+        current_mfi = mfi.iloc[-1]
+        results['mfi'] = current_mfi
+        
+        # MFI Divergence
+        last_30_mfi = mfi.iloc[-30:]
+        last_30_price = df['close'].iloc[-30:]
+        
+        mfi_min_idx = last_30_mfi.idxmin()
+        mfi_max_idx = last_30_mfi.idxmax()
+        
+        price_min_idx = last_30_price.idxmin()
+        price_max_idx = last_30_price.idxmax()
+        
+        # Bullish Divergence (قاع سعري أقل مع قاع MFI أعلى)
+        if price_min_idx == last_30_price.idxmin():
+            if last_30_price.loc[price_min_idx] < last_30_price.iloc[-1]:
+                if last_30_mfi.loc[mfi_min_idx] > last_30_mfi.iloc[-1]:
+                    results['mfi_divergence'] = "BULLISH"
+                    results['mfi_divergence_strength'] = "STRONG" if last_30_mfi.loc[mfi_min_idx] > 30 else "WEAK"
+        
+        # Bearish Divergence (قمة سعرية أعلى مع قمة MFI أقل)
+        if price_max_idx == last_30_price.idxmax():
+            if last_30_price.loc[price_max_idx] > last_30_price.iloc[-1]:
+                if last_30_mfi.loc[mfi_max_idx] < last_30_mfi.iloc[-1]:
+                    results['mfi_divergence'] = "BEARISH"
+                    results['mfi_divergence_strength'] = "STRONG" if last_30_mfi.loc[mfi_max_idx] < 70 else "WEAK"
+        
+        # مناطق التشبع
+        results['mfi_overbought'] = current_mfi > 80
+        results['mfi_oversold'] = current_mfi < 20
+        
+        # اتجاه MFI
+        if len(mfi) > 5:
+            mfi_trend = "UP" if mfi.iloc[-1] > mfi.iloc[-5] else "DOWN"
+            results['mfi_trend'] = mfi_trend
+            
+            # توافق مع السعر
+            price_trend = "UP" if df['close'].iloc[-1] > df['close'].iloc[-5] else "DOWN"
+            results['mfi_price_aligned'] = mfi_trend == price_trend
+    
+    return results
+
+# 6. نموذج تحليل فجوات السعر (Gap Analysis)
+def analyze_price_gaps(df):
+    """
+    تحليل الفجوات السعرية وتأثيرها على الاتجاه
+    """
+    if len(df) < 30:
+        return {}
+    
+    results = {}
+    
+    gaps = []
+    for i in range(1, len(df)):
+        prev_close = df['close'].iloc[i-1]
+        current_open = df['open'].iloc[i]
+        
+        if current_open > prev_close * 1.002:  # فجوة صاعدة
+            gaps.append(('UP', current_open - prev_close, i))
+        elif current_open < prev_close * 0.998:  # فجوة هابطة
+            gaps.append(('DOWN', prev_close - current_open, i))
+    
+    results['gaps_count'] = len(gaps)
+    results['recent_gaps'] = gaps[-3:] if gaps else []
+    
+    # تحليل سد الفجوات
+    if gaps:
+        last_gap = gaps[-1]
+        current_price = df['close'].iloc[-1]
+        
+        if last_gap[0] == 'UP':
+            # الفجوة الصاعدة قد تُسد
+            gap_level = df['open'].iloc[last_gap[2]]
+            if current_price <= gap_level * 1.002:
+                results['gap_fill_probability'] = "HIGH"
+                results['gap_fill_level'] = gap_level
+            else:
+                results['gap_fill_probability'] = "LOW"
+                results['gap_support'] = gap_level
+        else:
+            # الفجوة الهابطة قد تُسد
+            gap_level = df['open'].iloc[last_gap[2]]
+            if current_price >= gap_level * 0.998:
+                results['gap_fill_probability'] = "HIGH"
+                results['gap_fill_level'] = gap_level
+            else:
+                results['gap_fill_probability'] = "LOW"
+                results['gap_resistance'] = gap_level
+    
+    return results
+
+# 7. التحليل الشامل (دمج جميع النماذج)
+def comprehensive_analysis(df, current_price):
+    """
+    تحليل شامل يدمج جميع النماذج المتقدمة
+    """
+    if df is None or len(df) < 100:
+        return {}
+    
+    results = {}
+    
+    # 1. تحليل التدفق
+    flow_analysis = analyze_order_flow(df)
+    results['order_flow'] = flow_analysis
+    
+    # 2. تحليل السيولة
+    liquidity_analysis = analyze_liquidity_zones(df)
+    results['liquidity'] = liquidity_analysis
+    
+    # 3. تحليل الزخم المتقدم
+    momentum_analysis = advanced_momentum_analysis(df)
+    results['momentum'] = momentum_analysis
+    
+    # 4. تحليل التصحيح
+    pullback_analysis = analyze_pullback(df)
+    results['pullback'] = pullback_analysis
+    
+    # 5. تحليل التدفق النقدي
+    mfi_analysis = analyze_money_flow_divergence(df)
+    results['money_flow'] = mfi_analysis
+    
+    # 6. تحليل الفجوات
+    gap_analysis = analyze_price_gaps(df)
+    results['gaps'] = gap_analysis
+    
+    # حساب النتيجة النهائية
+    signals = []
+    
+    # تجميع الإشارات من جميع النماذج
+    if flow_analysis.get('accumulation', False):
+        signals.append(('BUY', 'تراكم في التدفق'))
+    if flow_analysis.get('distribution', False):
+        signals.append(('SELL', 'توزيع في التدفق'))
+    
+    if momentum_analysis.get('rsi_divergence', False):
+        if momentum_analysis.get('divergence_type') == 'BULLISH':
+            signals.append(('BUY', 'Divergence RSI صاعد'))
+        else:
+            signals.append(('SELL', 'Divergence RSI هابط'))
+    
+    if momentum_analysis.get('macd_divergence') == 'BULLISH':
+        signals.append(('BUY', 'Divergence MACD صاعد'))
+    elif momentum_analysis.get('macd_divergence') == 'BEARISH':
+        signals.append(('SELL', 'Divergence MACD هابط'))
+    
+    if pullback_analysis.get('pullback_confirmed', False):
+        signals.append((pullback_analysis.get('entry_signal'), 'تصحيح مؤكد'))
+    
+    if mfi_analysis.get('mfi_divergence') == 'BULLISH':
+        signals.append(('BUY', 'Divergence MFI صاعد'))
+    elif mfi_analysis.get('mfi_divergence') == 'BEARISH':
+        signals.append(('SELL', 'Divergence MFI هابط'))
+    
+    if liquidity_analysis.get('nearest_support') and current_price <= liquidity_analysis['nearest_support'] * 1.005:
+        signals.append(('BUY', 'قرب مستوى دعم قوي'))
+    if liquidity_analysis.get('nearest_resistance') and current_price >= liquidity_analysis['nearest_resistance'] * 0.995:
+        signals.append(('SELL', 'قرب مستوى مقاومة قوي'))
+    
+    # تحليل الإشارات
+    buy_signals = [s for s in signals if s[0] == 'BUY']
+    sell_signals = [s for s in signals if s[0] == 'SELL']
+    
+    results['signal_summary'] = {
+        'buy_count': len(buy_signals),
+        'sell_count': len(sell_signals),
+        'buy_signals': buy_signals,
+        'sell_signals': sell_signals,
+        'total_signals': len(signals)
+    }
+    
+    # القرار النهائي
+    if len(buy_signals) > len(sell_signals) * 1.5 and len(buy_signals) >= 2:
+        results['final_signal'] = 'BUY'
+        results['signal_strength'] = min(100, len(buy_signals) / max(len(signals), 1) * 100)
+        results['signal_details'] = ', '.join([s[1] for s in buy_signals])
+    elif len(sell_signals) > len(buy_signals) * 1.5 and len(sell_signals) >= 2:
+        results['final_signal'] = 'SELL'
+        results['signal_strength'] = min(100, len(sell_signals) / max(len(signals), 1) * 100)
+        results['signal_details'] = ', '.join([s[1] for s in sell_signals])
+    else:
+        results['final_signal'] = 'WAIT'
+        results['signal_strength'] = 0
+        results['signal_details'] = 'لا يوجد إجماع كافٍ'
+    
+    return results
+
+# ==========================================
+# تحليل SMC/ICT + TBS (الكود الموجود)
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -805,6 +1270,183 @@ def analyze_chart_patterns(df):
         patterns.append({"pattern": pattern, "score": score, "direction": direction})
         total_score += score
     return patterns, total_score
+
+# ==========================================
+# دالة حساب الأهداف المحسنة
+# ==========================================
+def calculate_optimized_targets(df, signal, entry_price, stop_loss, current_price):
+    """
+    حساب أهداف محسنة باستخدام مستويات فيبوناتشي وSMC
+    """
+    if df is None or len(df) < 50:
+        return None
+    
+    atr_value = df['atr'].iloc[-1] if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else 10
+    risk = abs(entry_price - stop_loss)
+    
+    # حساب مستويات فيبوناتشي للامتداد
+    recent_high = df['high'].iloc[-50:].max()
+    recent_low = df['low'].iloc[-50:].min()
+    
+    targets = {}
+    
+    if signal == "BUY":
+        # أهداف محسنة باستخدام فيبوناتشي
+        fib_ext_1 = entry_price + risk * 1.0  # 1:1
+        fib_ext_2 = entry_price + risk * 1.618  # 1:1.618 (مستوى فيبوناتشي)
+        fib_ext_3 = entry_price + risk * 2.618  # 1:2.618 (مستوى فيبوناتشي)
+        
+        # مقاومة قريبة
+        resistance_levels = []
+        for i in range(1, 11):
+            level = recent_high + (recent_high - recent_low) * (i / 20)
+            resistance_levels.append(level)
+        
+        # اختيار الأهداف الأنسب
+        targets = {
+            'target1': min(fib_ext_1, resistance_levels[0] if resistance_levels else fib_ext_1),
+            'target2': min(fib_ext_2, resistance_levels[2] if len(resistance_levels) > 2 else fib_ext_2),
+            'target3': fib_ext_3,
+            'target_conservative': min(fib_ext_1, resistance_levels[0] if resistance_levels else fib_ext_1),
+            'risk_reward_1': 1.0,
+            'risk_reward_2': 1.618,
+            'risk_reward_3': 2.618,
+            'risk': risk
+        }
+        
+    else:  # SELL
+        fib_ext_1 = entry_price - risk * 1.0
+        fib_ext_2 = entry_price - risk * 1.618
+        fib_ext_3 = entry_price - risk * 2.618
+        
+        # دعم قريب
+        support_levels = []
+        for i in range(1, 11):
+            level = recent_low - (recent_high - recent_low) * (i / 20)
+            support_levels.append(level)
+        
+        targets = {
+            'target1': max(fib_ext_1, support_levels[0] if support_levels else fib_ext_1),
+            'target2': max(fib_ext_2, support_levels[2] if len(support_levels) > 2 else fib_ext_2),
+            'target3': fib_ext_3,
+            'target_conservative': max(fib_ext_1, support_levels[0] if support_levels else fib_ext_1),
+            'risk_reward_1': 1.0,
+            'risk_reward_2': 1.618,
+            'risk_reward_3': 2.618,
+            'risk': risk
+        }
+    
+    return targets
+
+# ==========================================
+# دالة حساب حجم اللوت
+# ==========================================
+def calculate_position_size(account_balance, risk_per_trade_pct, entry, stop_loss):
+    """
+    حساب حجم اللوت المناسب مع إدارة المخاطر
+    """
+    risk_amount = abs(entry - stop_loss)
+    if risk_amount == 0:
+        return 0.01
+    
+    # المخاطرة بالدولار
+    risk_dollars = account_balance * (risk_per_trade_pct / 100)
+    
+    # حجم اللوت (بافتراض أن النقطة = 0.1 دولار للوت الواحد)
+    lot_size = risk_dollars / (risk_amount * 100)
+    
+    # تحديد الحدود
+    min_lot = 0.01
+    max_lot = account_balance / 1000  # حد أقصى 0.1% من الحساب
+    
+    return round(min(max(lot_size, min_lot), max_lot), 2)
+
+# ==========================================
+# دالة حساب قوة الإشارة
+# ==========================================
+def calculate_signal_strength(df, current_price, signal, confidence, net_score, details, selected_symbol):
+    """
+    حساب قوة الإشارة مع مرشحات إضافية لزيادة الدقة
+    """
+    filters_passed = 0
+    total_filters = 6
+    filter_details = []
+    
+    # 1. مرشح التقلب (ATR)
+    if 'atr' in df.columns and len(df) > 20:
+        atr = df['atr'].iloc[-1]
+        avg_atr = df['atr'].iloc[-20:].mean()
+        if not pd.isna(atr) and not pd.isna(avg_atr):
+            if atr > avg_atr * 0.8:  # تقلب كافٍ للحركة
+                filters_passed += 1
+                filter_details.append("✓ تقلب كافٍ")
+            else:
+                filter_details.append("✗ تقلب منخفض")
+    
+    # 2. مرشح الاتجاه (ADX)
+    if 'adx' in df.columns:
+        adx = df['adx'].iloc[-1]
+        if not pd.isna(adx) and adx > 25:
+            filters_passed += 1
+            filter_details.append("✓ اتجاه قوي")
+        else:
+            filter_details.append("✗ اتجاه ضعيف")
+    
+    # 3. مرشح التصحيح (Fibonacci)
+    recent_high = df['high'].iloc[-50:].max()
+    recent_low = df['low'].iloc[-50:].min()
+    if recent_high != recent_low:
+        fib_618 = recent_high - (recent_high - recent_low) * 0.618
+        fib_382 = recent_high - (recent_high - recent_low) * 0.382
+        if signal == "BUY" and current_price <= fib_618:
+            filters_passed += 1
+            filter_details.append("✓ منطقة خصم (تحت 0.618)")
+        elif signal == "SELL" and current_price >= fib_382:
+            filters_passed += 1
+            filter_details.append("✓ منطقة قمة (فوق 0.382)")
+        else:
+            filter_details.append("✗ خارج منطقة الفيبوناتشي المثالية")
+    
+    # 4. مرشح التزامن مع الأطر الزمنية العليا
+    mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
+    if mtf_signal == signal and mtf_count >= 2:
+        filters_passed += 1
+        filter_details.append("✓ توافق مع الأطر العليا")
+    else:
+        filter_details.append("✗ عدم توافق مع الأطر العليا")
+    
+    # 5. مرشح النماذج (Patterns)
+    patterns, _ = analyze_chart_patterns(df)
+    if patterns:
+        for p in patterns:
+            if (signal == "BUY" and p['direction'] == "BULLISH") or (signal == "SELL" and p['direction'] == "BEARISH"):
+                filters_passed += 1
+                filter_details.append(f"✓ نمط {p['pattern']} متوافق")
+                break
+        else:
+            filter_details.append("✗ لا يوجد نمط متوافق")
+    else:
+        filter_details.append("✗ لا توجد نماذج")
+    
+    # 6. مرشح SMC (Order Blocks)
+    df_smc = analyze_smc_ict(df)
+    last_smc = df_smc.iloc[-1]
+    if signal == "BUY" and (last_smc.get('order_block_bullish', False) or last_smc.get('mss_bullish', False)):
+        filters_passed += 1
+        filter_details.append("✓ SMC داعم للشراء")
+    elif signal == "SELL" and (last_smc.get('order_block_bearish', False) or last_smc.get('mss_bearish', False)):
+        filters_passed += 1
+        filter_details.append("✓ SMC داعم للبيع")
+    else:
+        filter_details.append("✗ SMC غير داعم")
+    
+    # حساب نسبة التصفية
+    filter_ratio = filters_passed / total_filters
+    
+    # تعديل الثقة بناءً على المرشحات
+    adjusted_confidence = confidence * (0.5 + 0.5 * filter_ratio)
+    
+    return adjusted_confidence, filters_passed, total_filters, filter_details
 
 # ==========================================
 # نظام التسجيل المتكامل
@@ -985,6 +1627,26 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 confidence = confidence * 0.6
                 details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة)"
 
+    # ===== التحليل الشامل =====
+    comprehensive = comprehensive_analysis(df, current_price)
+    
+    # دمج النتائج مع الإشارة الأساسية
+    if comprehensive and comprehensive.get('final_signal') != 'WAIT':
+        comp_strength = comprehensive.get('signal_strength', 0)
+        
+        if comprehensive['final_signal'] == signal:
+            # توافق مع الإشارة الأساسية
+            confidence = min(100, confidence + comp_strength * 0.3)
+            details['Comprehensive_Agreement'] = f"✅ توافق مع التحليل الشامل (+{comp_strength * 0.3:.0f}%)"
+        elif comprehensive['final_signal'] != 'WAIT':
+            # تضارب مع الإشارة الأساسية
+            confidence = confidence * 0.8
+            details['Comprehensive_Conflict'] = f"⚠️ تضارب مع التحليل الشامل ({comprehensive['signal_details']})"
+        else:
+            details['Comprehensive_Neutral'] = "⚪ التحليل الشامل محايد"
+    else:
+        details['Comprehensive_Neutral'] = "⚪ لا توجد إشارات شاملة كافية"
+
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
@@ -1026,27 +1688,34 @@ def generate_advanced_signal(df, current_price, symbol=""):
             stop_loss = min(stop_loss, current_price + atr_value * 1.2)
             stop_loss = max(stop_loss, current_price + atr_value * 0.2)
         
-        risk = abs(entry_price - stop_loss) if stop_loss else atr_value
-        if signal == "BUY":
-            targets = {
-                'target1': entry_price + risk * 1.0,
-                'target2': entry_price + risk * 1.5,
-                'target3': entry_price + risk * 2.0,
-                'risk_reward_1': 1.0,
-                'risk_reward_2': 1.5,
-                'risk_reward_3': 2.0,
-                'risk': risk
-            }
+        # استخدام الأهداف المحسنة
+        optimized_targets = calculate_optimized_targets(df, signal, entry_price, stop_loss, current_price)
+        if optimized_targets:
+            targets = optimized_targets
         else:
-            targets = {
-                'target1': entry_price - risk * 1.0,
-                'target2': entry_price - risk * 1.5,
-                'target3': entry_price - risk * 2.0,
-                'risk_reward_1': 1.0,
-                'risk_reward_2': 1.5,
-                'risk_reward_3': 2.0,
-                'risk': risk
-            }
+            risk = abs(entry_price - stop_loss) if stop_loss else atr_value
+            if signal == "BUY":
+                targets = {
+                    'target1': entry_price + risk * 1.0,
+                    'target2': entry_price + risk * 1.5,
+                    'target3': entry_price + risk * 2.0,
+                    'target_conservative': entry_price + risk * 0.8,
+                    'risk_reward_1': 1.0,
+                    'risk_reward_2': 1.5,
+                    'risk_reward_3': 2.0,
+                    'risk': risk
+                }
+            else:
+                targets = {
+                    'target1': entry_price - risk * 1.0,
+                    'target2': entry_price - risk * 1.5,
+                    'target3': entry_price - risk * 2.0,
+                    'target_conservative': entry_price - risk * 0.8,
+                    'risk_reward_1': 1.0,
+                    'risk_reward_2': 1.5,
+                    'risk_reward_3': 2.0,
+                    'risk': risk
+                }
     
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
@@ -1118,13 +1787,13 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي"]):
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "Divergence", "تراكم", "تصحيح", "دعم"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
-            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS"]):
+            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "توزيع", "مقاومة"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
@@ -1137,10 +1806,11 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     if stop_loss and entry_price and targets:
         explanation += f"\n\n📍 **سعر الدخول المقترح:** {entry_price:.4f}"
         explanation += f"\n🛑 **وقف الخسارة:** {stop_loss:.4f} (المسافة: {abs(entry_price - stop_loss):.4f})"
-        explanation += f"\n🎯 **الأهداف:**"
+        explanation += f"\n🎯 **الأهداف المحسنة:**"
+        explanation += f"\n   - الهدف المحافظ (0.8:1): {targets.get('target_conservative', targets.get('target1', 0)):.4f}"
         explanation += f"\n   - الهدف 1 (1:1): {targets['target1']:.4f}"
-        explanation += f"\n   - الهدف 2 (1:1.5): {targets['target2']:.4f}"
-        explanation += f"\n   - الهدف 3 (1:2): {targets['target3']:.4f}"
+        explanation += f"\n   - الهدف 2 (1:{targets.get('risk_reward_2', 1.5):.1f}): {targets['target2']:.4f}"
+        explanation += f"\n   - الهدف 3 (1:{targets.get('risk_reward_3', 2.0):.1f}): {targets['target3']:.4f}"
     
     explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
     if patterns:
@@ -1180,6 +1850,150 @@ def get_mtf_signal(symbol, current_price):
         return "SELL", sell_count - buy_count
     else:
         return "NEUTRAL", 0
+
+# ==========================================
+# عرض التحليل الشامل
+# ==========================================
+def display_advanced_analysis(comprehensive_analysis):
+    """
+    عرض نتائج التحليل المتقدم بشكل منظم
+    """
+    if not comprehensive_analysis:
+        return
+    
+    st.markdown("---")
+    st.markdown("### 🔬 التحليل الشامل المتقدم")
+    
+    # عرض ملخص الإشارات
+    if 'signal_summary' in comprehensive_analysis:
+        summary = comprehensive_analysis['signal_summary']
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("إشارات شراء", summary['buy_count'])
+        with col2:
+            st.metric("إشارات بيع", summary['sell_count'])
+        with col3:
+            st.metric("مجموع الإشارات", summary['total_signals'])
+        
+        # عرض القرار النهائي
+        if comprehensive_analysis.get('final_signal') != 'WAIT':
+            signal = comprehensive_analysis['final_signal']
+            strength = comprehensive_analysis.get('signal_strength', 0)
+            details = comprehensive_analysis.get('signal_details', '')
+            
+            if signal == 'BUY':
+                st.success(f"🟢 **القرار النهائي: شراء** (القوة: {strength:.0f}%) - {details}")
+            else:
+                st.error(f"🔴 **القرار النهائي: بيع** (القوة: {strength:.0f}%) - {details}")
+        else:
+            st.warning("⚪ **القرار النهائي: انتظار** - لا يوجد إجماع كافٍ")
+    
+    # عرض تفاصيل كل نموذج
+    tabs = st.tabs(["📊 التدفق", "💧 السيولة", "📈 الزخم", "🔄 التصحيح", "💰 التدفق النقدي", "📉 الفجوات"])
+    
+    with tabs[0]:
+        if 'order_flow' in comprehensive_analysis and comprehensive_analysis['order_flow']:
+            flow = comprehensive_analysis['order_flow']
+            col1, col2, col3 = st.columns(3)
+            col1.metric("نسبة حجم التداول", f"{flow.get('volume_ratio', 0):.2f}x")
+            col2.metric("ضغط الشراء", f"{flow.get('buy_pressure', 0):.0f}%")
+            col3.metric("ضغط البيع", f"{flow.get('sell_pressure', 0):.0f}%")
+            
+            if flow.get('accumulation', False):
+                st.success("✅ تراكم في التدفق - دعم للشراء")
+            if flow.get('distribution', False):
+                st.error("🔻 توزيع في التدفق - دعم للبيع")
+            if flow.get('volume_spike', False):
+                st.warning("⚠️ ارتفاع مفاجئ في حجم التداول")
+            if flow.get('price_volume_divergence', False):
+                st.warning("⚠️ تباعد بين السعر والحجم")
+    
+    with tabs[1]:
+        if 'liquidity' in comprehensive_analysis and comprehensive_analysis['liquidity']:
+            liquidity = comprehensive_analysis['liquidity']
+            
+            if liquidity.get('nearest_support'):
+                st.success(f"🟢 أقرب دعم: {liquidity['nearest_support']:.4f}")
+            if liquidity.get('nearest_resistance'):
+                st.error(f"🔴 أقرب مقاومة: {liquidity['nearest_resistance']:.4f}")
+            
+            if liquidity.get('strong_support'):
+                st.info(f"🟢 دعم قوي: {', '.join([f'{s:.4f}' for s in liquidity['strong_support'][:3]])}")
+            if liquidity.get('strong_resistance'):
+                st.info(f"🔴 مقاومة قوية: {', '.join([f'{r:.4f}' for r in liquidity['strong_resistance'][:3]])}")
+    
+    with tabs[2]:
+        if 'momentum' in comprehensive_analysis and comprehensive_analysis['momentum']:
+            momentum = comprehensive_analysis['momentum']
+            col1, col2 = st.columns(2)
+            col1.metric("RSI", f"{momentum.get('rsi', 0):.1f}")
+            col2.metric("Stoch RSI", f"{momentum.get('stoch_rsi', 0):.1f}")
+            
+            if momentum.get('rsi_divergence', False):
+                div_type = momentum.get('divergence_type', '')
+                if div_type == 'BULLISH':
+                    st.success("✅ RSI Divergence صاعد")
+                else:
+                    st.error("🔻 RSI Divergence هابط")
+            
+            if momentum.get('macd_divergence'):
+                st.info(f"📊 MACD Divergence: {momentum['macd_divergence']}")
+            
+            if 'macd_cross' in momentum:
+                st.write(f"MACD Cross: {momentum['macd_cross']}")
+    
+    with tabs[3]:
+        if 'pullback' in comprehensive_analysis and comprehensive_analysis['pullback']:
+            pullback = comprehensive_analysis['pullback']
+            col1, col2 = st.columns(2)
+            col1.metric("الاتجاه الرئيسي", pullback.get('main_trend', 'N/A'))
+            col2.metric("منطقة التصحيح", pullback.get('pullback_zone', 'N/A'))
+            
+            if pullback.get('pullback_confirmed', False):
+                st.success(f"✅ تصحيح مؤكد - إشارة {pullback.get('entry_signal', '')}")
+            else:
+                st.info("⏳ انتظر تأكيد التصحيح")
+            
+            if 'fib_382' in pullback:
+                st.write(f"📈 مستويات فيبوناتشي:")
+                st.write(f"- 38.2%: {pullback['fib_382']:.4f}")
+                st.write(f"- 50%: {pullback['fib_500']:.4f}")
+                st.write(f"- 61.8%: {pullback['fib_618']:.4f}")
+    
+    with tabs[4]:
+        if 'money_flow' in comprehensive_analysis and comprehensive_analysis['money_flow']:
+            mfi = comprehensive_analysis['money_flow']
+            col1, col2 = st.columns(2)
+            col1.metric("MFI", f"{mfi.get('mfi', 0):.1f}")
+            col2.metric("اتجاه MFI", mfi.get('mfi_trend', 'N/A'))
+            
+            if mfi.get('mfi_overbought', False):
+                st.error("🔴 MFI في منطقة تشبع شرائي")
+            if mfi.get('mfi_oversold', False):
+                st.success("🟢 MFI في منطقة تشبع بيعي")
+            
+            if mfi.get('mfi_divergence'):
+                div_strength = mfi.get('mfi_divergence_strength', '')
+                if mfi['mfi_divergence'] == 'BULLISH':
+                    st.success(f"✅ MFI Divergence صاعد ({div_strength})")
+                else:
+                    st.error(f"🔻 MFI Divergence هابط ({div_strength})")
+    
+    with tabs[5]:
+        if 'gaps' in comprehensive_analysis and comprehensive_analysis['gaps']:
+            gaps = comprehensive_analysis['gaps']
+            st.write(f"عدد الفجوات: {gaps.get('gaps_count', 0)}")
+            
+            if gaps.get('recent_gaps'):
+                st.write("آخر الفجوات:")
+                for gap in gaps['recent_gaps']:
+                    st.write(f"- {gap[0]}: {gap[1]:.4f}")
+            
+            if 'gap_fill_probability' in gaps:
+                st.info(f"احتمالية سد الفجوة: {gaps['gap_fill_probability']}")
+                if 'gap_fill_level' in gaps:
+                    st.write(f"مستوى سد الفجوة: {gaps['gap_fill_level']:.4f}")
 
 # ==========================================
 # دالة جمع إشارات جميع الأزواج
@@ -1470,44 +2284,82 @@ st.markdown("---")
 # عرض الصفقة المقترحة
 # ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
+    # حساب قوة الإشارة المحسنة
+    adjusted_confidence, filters_passed, total_filters, filter_details = calculate_signal_strength(
+        df, current_price, signal, confidence, net_score, details, selected_symbol
+    )
+    
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
-    risk_reward = f"1:{targets['risk_reward_3']:.1f}"
+    
+    # حساب حجم اللوت المناسب
+    account_balance = 100000  # يمكن جعلها متغيراً قابلاً للتعديل
+    risk_per_trade_pct = 2
+    lot_size = calculate_position_size(account_balance, risk_per_trade_pct, entry_price, stop_loss)
+    
+    # عرض الفلاتر
+    st.markdown("#### 🔍 مرشحات الدقة")
+    cols = st.columns(len(filter_details) if len(filter_details) <= 6 else 3)
+    for idx, detail in enumerate(filter_details):
+        is_pass = "✅" if "✓" in detail else "❌"
+        cols[idx % len(cols)].markdown(f"{is_pass} {detail.replace('✓ ', '').replace('✗ ', '')}")
+    
+    st.markdown(f"**نسبة التصفية:** {filters_passed}/{total_filters} ({filters_passed/total_filters*100:.0f}%)")
+    st.markdown(f"**الثقة المعدلة:** {adjusted_confidence:.0f}%")
+    
+    # تحديد جودة الإشارة
+    if adjusted_confidence >= 75 and filters_passed >= 5:
+        quality = "🌟🌟🌟 ممتازة"
+        quality_color = "#00ff88"
+    elif adjusted_confidence >= 65 and filters_passed >= 4:
+        quality = "🌟🌟 جيدة"
+        quality_color = "#ffaa00"
+    elif adjusted_confidence >= 55 and filters_passed >= 3:
+        quality = "🌟 مقبولة"
+        quality_color = "#ff8800"
+    else:
+        quality = "⚠️ ضعيفة - تجنب"
+        quality_color = "#ff4444"
     
     st.markdown(f"""
-    <div class="suggested-trade">
-        <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
+    <div style="background: rgba(10,10,10,0.6); border-radius: 10px; padding: 10px; margin: 10px 0; border: 1px solid {quality_color};">
+        <b style="color: {quality_color};">جودة الإشارة: {quality}</b>
+        <br><span style="color: #888; font-size: 0.8rem;">الثقة المعدلة: {adjusted_confidence:.0f}% | المرشحات المتجاوزة: {filters_passed}/{total_filters}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown(f"""
+    <div class="suggested-trade" style="border-color: {'#00ff88' if adjusted_confidence >= 70 else '#ffaa00'};">
+        <b>الاتجاه:</b> {direction_text} (الثقة: {adjusted_confidence:.0f}%)<br>
         <b>📍 سعر الدخول المقترح:</b> {price_format.format(entry_price)}<br>
         <b>🛑 وقف الخسارة:</b> {price_format.format(stop_loss)} (المسافة: {abs(entry_price - stop_loss):.2f} نقطة)<br>
+        <div class="target-zone"><b>🎯 الهدف المحافظ (1:0.8):</b> {price_format.format(targets.get('target_conservative', targets.get('target1', 0)))}</div>
         <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_format.format(targets['target1'])}</div>
-        <div class="target-zone" style="border-left-color: #ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_format.format(targets['target2'])}</div>
-        <div class="target-zone" style="border-left-color: #00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_format.format(targets['target3'])}</div>
-        <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> {risk_reward}
+        <div class="target-zone" style="border-left-color: #ffaa00;"><b>🎯 الهدف 2 (1:{targets.get('risk_reward_2', 1.618):.2f}):</b> {price_format.format(targets['target2'])}</div>
+        <div class="target-zone" style="border-left-color: #00ff88;"><b>🎯 الهدف 3 (1:{targets.get('risk_reward_3', 2.618):.2f}):</b> {price_format.format(targets['target3'])}</div>
+        <b>📊 حجم اللوت المقترح:</b> {lot_size} (مخاطرة {risk_per_trade_pct}% من الحساب)<br>
+        <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> 1:{targets.get('risk_reward_3', 2.618):.2f}
+        <br><span style="color: {'#00ff88' if adjusted_confidence >= 70 else '#ffaa00'}; font-size:0.8rem;">
+            {'✅ إشارة عالية الجودة' if adjusted_confidence >= 70 else '⚠️ إشارة متوسطة الجودة - انتظر تأكيداً إضافياً'}
+        </span>
     </div>
     """, unsafe_allow_html=True)
     
     if st.button("➕ إضافة هذه الصفقة", use_container_width=True):
         trade_manager = TradeManager()
-        account_balance = 100000
-        risk_per_trade_pct = 2
-        risk_per_trade = account_balance * (risk_per_trade_pct / 100)
-        risk_amount = abs(entry_price - stop_loss)
-        lot_size = risk_per_trade / (risk_amount * 100) if risk_amount > 0 else 0.01
-        lot_size = round(lot_size, 2)
-        
         trade_data = {
             "direction": signal,
             "entry": entry_price,
-            "lots": max(lot_size, 0.01),
+            "lots": lot_size,
             "stop_loss": stop_loss,
             "take_profit": targets['target2'],
             "trailing_enabled": True,
             "trailing_distance": last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else 3,
-            "notes": f"مقترحة من الإشارة المتكاملة (الثقة {confidence:.0f}%)"
+            "notes": f"مقترحة من الإشارة المتكاملة (الثقة {adjusted_confidence:.0f}%) | التصفية: {filters_passed}/{total_filters}"
         }
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
         st.rerun()
-
+    
 else:
     st.info("⏳ لا توجد صفقة مقترحة حالياً (انتظر إشارة قوية)")
 
@@ -1551,6 +2403,12 @@ st.markdown(f"""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# عرض التحليل الشامل
+# ==========================================
+comprehensive = comprehensive_analysis(df, current_price)
+display_advanced_analysis(comprehensive)
 
 # ==========================================
 # شرح القرار
@@ -1713,6 +2571,16 @@ if stop_loss and entry_price:
     fig.add_hline(y=entry_price, line_dash="dash", line_color="green", opacity=0.7, row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=entry_price, text="Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
+# إضافة مستويات الدعم والمقاومة من التحليل الشامل
+if comprehensive and 'liquidity' in comprehensive:
+    liquidity = comprehensive['liquidity']
+    if liquidity.get('nearest_support'):
+        fig.add_hline(y=liquidity['nearest_support'], line_dash="dot", line_color="rgba(0, 255, 136, 0.4)", 
+                      annotation_text="Support", row=1, col=1)
+    if liquidity.get('nearest_resistance'):
+        fig.add_hline(y=liquidity['nearest_resistance'], line_dash="dot", line_color="rgba(255, 68, 68, 0.4)", 
+                      annotation_text="Resistance", row=1, col=1)
+
 fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
@@ -1753,6 +2621,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets
+    SMC/ICT • Patterns • TBS • MTF • Advanced Models • Order Flow • Liquidity Zones • Momentum Divergence
 </div>
 """, unsafe_allow_html=True)
