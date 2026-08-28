@@ -109,9 +109,8 @@ GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
 BACKTEST_LOOKBACK = 500
-MIN_CONFIDENCE = 45  # خفضناها لظهور الصفقات
+MIN_CONFIDENCE = 45
 
-# قائمة الأزواج
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
     "XAG/USD (Silver)": "SI=F",
@@ -438,7 +437,7 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
         return net_score, "WEAK_CORRELATION", 0
     if correlation <= -0.60:
         if (signal == "BUY" and dxy_signal == "SELL") or (signal == "SELL" and dxy_signal == "BUY"):
-            adjustment = 5  # زيادة التأثير
+            adjustment = 5
             status = "STRONGLY_ALIGNED"
         else:
             adjustment = -6
@@ -555,7 +554,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     
     # TBS
     tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs_correct(df)
-    tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)  # تعريف tbs_info
+    tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     
     # Regime
     regime = detect_regime(df)
@@ -568,119 +567,118 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     
     # ========== نظام العوامل ==========
     factors = {
-        "structure": 0,
-        "liquidity": 0,
-        "smc": 0,
-        "mtf": 0,
-        "dxy": 0,
-        "momentum": 0,
-        "volatility": 0,
-        "pattern": 0,
-        "volume": 0
+        "structure": 0.0,
+        "liquidity": 0.0,
+        "smc": 0.0,
+        "mtf": 0.0,
+        "dxy": 0.0,
+        "momentum": 0.0,
+        "volatility": 0.0,
+        "pattern": 0.0,
+        "volume": 0.0
     }
     details = {}
     
     # 1. Structure
     if last_smc.get('bos_bullish', False) or last_smc.get('mss_bullish', False):
-        factors['structure'] += 25
+        factors['structure'] += 25.0
         details['Structure'] = "BOS/MSS صاعد"
     elif last_smc.get('bos_bearish', False) or last_smc.get('mss_bearish', False):
-        factors['structure'] -= 25
+        factors['structure'] -= 25.0
         details['Structure'] = "BOS/MSS هابط"
     else:
         details['Structure'] = "محايد"
     
     # 2. Liquidity
     if last_smc.get('liquidity_sweep_bullish', False):
-        factors['liquidity'] += 20
+        factors['liquidity'] += 20.0
         details['Liquidity'] = "اجتياح سيولة شراء"
     elif last_smc.get('liquidity_sweep_bearish', False):
-        factors['liquidity'] -= 20
+        factors['liquidity'] -= 20.0
         details['Liquidity'] = "اجتياح سيولة بيع"
     else:
         details['Liquidity'] = "لا يوجد اجتياح"
     
     # 3. SMC
     if last_smc.get('ob_bullish', False) or last_smc.get('fvg_bullish', False):
-        factors['smc'] += 20
+        factors['smc'] += 20.0
         details['SMC'] = "OB/FVG شراء"
     elif last_smc.get('ob_bearish', False) or last_smc.get('fvg_bearish', False):
-        factors['smc'] -= 20
+        factors['smc'] -= 20.0
         details['SMC'] = "OB/FVG بيع"
     else:
         details['SMC'] = "لا توجد إشارة SMC"
     
     # 4. MTF
     if mtf_consensus == "BUY":
-        factors['mtf'] += 15
+        factors['mtf'] += 15.0
         details['MTF'] = f"صاعد ({mtf_count} أطر)"
     elif mtf_consensus == "SELL":
-        factors['mtf'] -= 15
+        factors['mtf'] -= 15.0
         details['MTF'] = f"هابط ({mtf_count} أطر)"
     else:
         details['MTF'] = "محايد"
     
-    # 5. DXY – باستخدام الفلتر الجديد مع زيادة الوزن
+    # 5. DXY
     if dxy_signal is not None and dxy_signal != "WAIT":
         raw_direction = "BUY" if factors['structure'] + factors['liquidity'] + factors['smc'] + factors['mtf'] > 0 else "SELL"
         if raw_direction == "WAIT":
             raw_direction = "BUY" if factors['structure'] > 0 else "SELL"
         adjusted, status, adj = apply_dxy_filter(raw_direction, 0, dxy_signal, dxy_correlation)
-        # adj أصبح أكبر (5 أو -6) لذا نضعه مباشرة
-        factors['dxy'] = adj
+        factors['dxy'] = float(adj)
         details['DXY'] = f"{status} (تعديل: {adj})"
     else:
         details['DXY'] = "لا توجد إشارة DXY"
     
     # 6. Momentum
     if last['rsi'] < 30:
-        factors['momentum'] += 10
+        factors['momentum'] += 10.0
         details['Momentum'] = f"مفرط بيع RSI={last['rsi']:.1f}"
     elif last['rsi'] > 70:
-        factors['momentum'] -= 10
+        factors['momentum'] -= 10.0
         details['Momentum'] = f"مفرط شراء RSI={last['rsi']:.1f}"
     else:
-        factors['momentum'] += (50 - last['rsi']) / 10
+        factors['momentum'] += (50 - last['rsi']) / 10.0
         details['Momentum'] = f"RSI محايد {last['rsi']:.1f}"
     if last['macd'] > last['macd_signal']:
-        factors['momentum'] += 5
+        factors['momentum'] += 5.0
     else:
-        factors['momentum'] -= 5
+        factors['momentum'] -= 5.0
     
     # 7. Volatility
-    atr_ratio = last['atr'] / df['atr'].iloc[-20:].mean() if df['atr'].iloc[-20:].mean() > 0 else 1
+    atr_ratio = last['atr'] / df['atr'].iloc[-20:].mean() if df['atr'].iloc[-20:].mean() > 0 else 1.0
     if atr_ratio > 1.5:
-        factors['volatility'] -= 10
+        factors['volatility'] -= 10.0
         details['Volatility'] = "تقلب عالٍ"
     elif atr_ratio < 0.7:
-        factors['volatility'] += 5
+        factors['volatility'] += 5.0
         details['Volatility'] = "تقلب منخفض"
     else:
         details['Volatility'] = "تقلب طبيعي"
     
     # 8. Pattern
     if tbs_type == "BULLISH":
-        factors['pattern'] += 20
+        factors['pattern'] += 20.0
         details['Pattern'] = f"TBS شراء"
     elif tbs_type == "BEARISH":
-        factors['pattern'] -= 20
+        factors['pattern'] -= 20.0
         details['Pattern'] = f"TBS بيع"
     else:
         details['Pattern'] = "لا يوجد TBS"
     
     # 9. Volume / MFI
     if last['mfi'] < 20:
-        factors['volume'] += 5
+        factors['volume'] += 5.0
         details['Volume'] = f"MFI مفرط بيع {last['mfi']:.1f}"
     elif last['mfi'] > 80:
-        factors['volume'] -= 5
+        factors['volume'] -= 5.0
         details['Volume'] = f"MFI مفرط شراء {last['mfi']:.1f}"
     else:
         details['Volume'] = f"MFI محايد {last['mfi']:.1f}"
     
     total_score = sum(factors.values())
     
-    # تحديد الإشارة – خفضنا العتبة إلى 15
+    # تحديد الإشارة
     if total_score >= 15:
         signal = "BUY"
         confidence = min(90, 50 + total_score * 0.5)
@@ -693,7 +691,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     
     confidence = max(0, min(100, confidence))
     
-    # تعديل تأثير التقلب العالي (أصبح 0.9 بدلاً من 0.8)
+    # تعديل الثقة حسب النظام
     if "HIGH_VOL" in regime:
         confidence *= 0.9
     elif "LOW_VOL" in regime:
@@ -704,7 +702,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     entry_price = current_price
     targets = {}
     if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE:
-        atr_val = last['atr'] if not pd.isna(last['atr']) else 10
+        atr_val = last['atr'] if not pd.isna(last['atr']) else 10.0
         if signal == "BUY":
             struct_low = df['low'].iloc[-10:].min()
             ob_low = df['low'].iloc[-5:].min()
@@ -1009,15 +1007,15 @@ if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE:
     """, unsafe_allow_html=True)
 
 # ============================================================
-# تفاصيل العوامل
+# تفاصيل العوامل (تم إصلاح الخطأ هنا)
 # ============================================================
 with st.expander("📊 تحليل العوامل المتكاملة", expanded=True):
     cols = st.columns(3)
     i = 0
     for factor, value in factors.items():
         col = cols[i % 3]
-        color = "#00ff88" if value > 0 else "#ff4444" if value < 0 else "#ffaa00"
-        col.metric(factor.capitalize(), f"{value:+d}", delta_color="normal")
+        # استخدام format مع float بدلاً من int
+        col.metric(factor.capitalize(), f"{value:+.1f}", delta_color="normal")
         i += 1
     st.markdown("#### ملخص التفاصيل")
     for k, v in details.items():
