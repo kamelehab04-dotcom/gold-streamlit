@@ -1,11 +1,11 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2004 (Pro)
+# BLACK PYRAMID – الإصدار 2005 (Stable Signals)
 # تاريخ التحديث: 2026-08-29
-# التحديثات الاحترافية:
-# - VRSI (Volume-Weighted RSI) بدلاً من RSI التقليدي (فترة 14، مستويات 80/20)
-# - تعزيز VWAP مع شرح Session-based
-# - إضافة مستويات فيبوناتشي 78.6% و 88.6%
-# - تحديث لوحة التحكم لتعكس الإعدادات الجديدة
+# التحديثات:
+# - إشارات ثابتة تعتمد على الاتجاه العام (EMA50/100 + ADX)
+# - تأكيد الدخول من كسر دعم/مقاومة أو SMC
+# - لا تتغير الإشارة مع كل شمعة جديدة
+# - الحفاظ على VRSI، فيبوناتشي المتقدم، مؤشرات العملات، إلخ.
 # ==========================================
 
 import streamlit as st
@@ -40,7 +40,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 الهوية البصرية (نفس السابق مع تحديث بسيط)
+# 🖤 الهوية البصرية (نفس السابق)
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -102,14 +102,14 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div style="text-align: right;">
-        <div class="main-title">▲ BLACK PYRAMID PRO ▲</div>
-        <div class="main-subtitle">VRSI • VWAP Session • Fibonacci 78.6% & 88.6% • Smart Money • Auto-Risk</div>
+        <div class="main-title">▲ BLACK PYRAMID PRO v2005 ▲</div>
+        <div class="main-subtitle">Stable Signals • Trend-Based • SMC Confirmation • Auto-Risk • VRSI • Fibonacci Pro</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# قائمة الأزواج (كما هي)
+# قائمة الأزواج
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -178,6 +178,8 @@ if "currency_indices" not in st.session_state:
     st.session_state.currency_indices = None
 if "account_balance" not in st.session_state:
     st.session_state.account_balance = 100000
+if "signal_lock" not in st.session_state:
+    st.session_state.signal_lock = {}  # لتخزين الإشارات الثابتة لكل زوج
 
 # ==========================================
 # دوال جلب البيانات (نفس السابق)
@@ -287,7 +289,7 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
     return None
 
 # ==========================================
-# مؤشرات العملات (نفس السابق مع إمكانية تخصيص الأوزان)
+# مؤشرات العملات (مع أوزان قابلة للتعديل)
 # ==========================================
 @st.cache_data(ttl=300)
 def calculate_currency_indices(data_dict, base_date=None, weights=None):
@@ -331,55 +333,21 @@ def calculate_currency_indices(data_dict, base_date=None, weights=None):
     return indices
 
 # ==========================================
-# المؤشرات الاحترافية (الجديدة والمعدلة)
+# المؤشرات الأساسية (VRSI, ATR, MACD, BB, ADX, Ichimoku, MFI, VWAP, Fibonacci Pro)
 # ==========================================
-
-# 1. VRSI – Volume-Weighted RSI (بديل RSI التقليدي)
 def calc_vrsi(data, volume, period=14):
-    """
-    حساب مؤشر القوة النسبية الموزون بالحجم.
-    data: سلسلة الأسعار (close)
-    volume: سلسلة الحجم
-    period: الفترة (افتراضي 14)
-    """
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
-    
-    # ترجيح RSI بالحجم النسبي
     vol_ma = volume.rolling(window=period).mean()
     vol_ratio = volume / vol_ma
-    vol_ratio = vol_ratio.fillna(1).clip(0.5, 2)  # الحد من الترجيح الشاذ
+    vol_ratio = vol_ratio.fillna(1).clip(0.5, 2)
     vrsi = rsi * vol_ratio
     vrsi = vrsi.clip(0, 100)
     return vrsi
 
-# 2. VWAP (نفس السابق لكن مع تأكيد Session-based)
-def calc_vwap(df):
-    """حساب VWAP التراكمي (الجلسة)"""
-    return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
-
-# 3. Fibonacci المحسّن مع مستويات 78.6% و 88.6%
-def calc_fibonacci_levels_pro(high, low, current_price):
-    diff = high - low
-    if diff == 0:
-        return {}
-    return {
-        'fib_0': high,
-        'fib_236': high - diff * 0.236,
-        'fib_382': high - diff * 0.382,
-        'fib_500': high - diff * 0.5,
-        'fib_618': high - diff * 0.618,
-        'fib_786': high - diff * 0.786,   # المستوى الذهبي المخفي
-        'fib_886': high - diff * 0.886,   # المستوى التوافقي
-        'fib_100': low
-    }
-
-# ==========================================
-# باقي المؤشرات الأساسية (ATR, MACD, BB, ADX, Ichimoku, MFI)
-# ==========================================
 def calc_atr(df, period=14):
     high, low, close = df['high'], df['low'], df['close']
     tr1 = high - low
@@ -423,12 +391,30 @@ def calc_ichimoku(df):
     chikou = close.shift(-26)
     return tenkan, kijun, senkou_a, senkou_b, chikou
 
+def calc_vwap(df):
+    return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
+
 def calc_mfi(df, period=14):
     typical_price = (df['high'] + df['low'] + df['close']) / 3
     money_flow = typical_price * df['volume']
     positive_flow = money_flow.where(typical_price > typical_price.shift(), 0).rolling(window=period).sum()
     negative_flow = money_flow.where(typical_price < typical_price.shift(), 0).rolling(window=period).sum()
     return 100 - (100 / (1 + positive_flow / negative_flow))
+
+def calc_fibonacci_levels_pro(high, low, current_price):
+    diff = high - low
+    if diff == 0:
+        return {}
+    return {
+        'fib_0': high,
+        'fib_236': high - diff * 0.236,
+        'fib_382': high - diff * 0.382,
+        'fib_500': high - diff * 0.5,
+        'fib_618': high - diff * 0.618,
+        'fib_786': high - diff * 0.786,
+        'fib_886': high - diff * 0.886,
+        'fib_100': low
+    }
 
 # ==========================================
 # Liquidity, SMR, SMC, TBS, Patterns (نفس السابق)
@@ -678,185 +664,86 @@ def get_economic_calendar():
             {"time": "16:30", "event": "محضر اجتماع FOMC", "impact": "HIGH", "previous": "-", "forecast": "-"}]
 
 # ==========================================
-# الإشارة المتكاملة (محدثة لاستخدام VRSI و فيبوناتشي المحسّن)
+# الإشارة الثابتة (المعدلة)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, currency_indices=None, params=None):
+    """
+    إشارة ثابتة تعتمد على الاتجاه العام ومناطق الدعم/المقاومة.
+    لا تتغير مع تقلب الشموع الصغيرة.
+    """
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
 
     p = params or {}
-    vrsi_period = p.get('vrsi_period', 14)
-    adx_threshold = p.get('adx_threshold', 25)
-    bb_period = p.get('bb_period', 20)
-    bb_std = p.get('bb_std', 2)
     confidence_threshold = p.get('confidence_threshold', 60)
-
-    df_smc = analyze_smc_ict(df)
-    last_smc = df_smc.iloc[-1]
-    patterns, _ = analyze_chart_patterns(df)
-    tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
-
-    last = df.iloc[-1]
-    scores = {'BUY': 0, 'SELL': 0}
-    details = {}
-    weights = {'vrsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3, 'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3, 'smr': 3, 'currency': 3, 'fibonacci': 2}
-
-    # ===== VRSI (بدلاً من RSI) =====
-    if 'vrsi' in df.columns and not pd.isna(last['vrsi']):
-        vrsi = last['vrsi']
-        if vrsi < 20:
-            scores['BUY'] += weights['vrsi']
-            details['VRSI'] = f"مفرط البيع بالحجم ({vrsi:.1f}) +{weights['vrsi']}"
-        elif vrsi > 80:
-            scores['SELL'] += weights['vrsi']
-            details['VRSI'] = f"مفرط الشراء بالحجم ({vrsi:.1f}) +{weights['vrsi']}"
-        else:
-            details['VRSI'] = f"محايد ({vrsi:.1f})"
-
-    # MACD
-    if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
-        if last['macd'] > last['macd_signal'] and last['macd'] > 0:
-            scores['BUY'] += weights['macd']; details['MACD'] = f"إيجابي +{weights['macd']}"
-        elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
-            scores['SELL'] += weights['macd']; details['MACD'] = f"سلبي +{weights['macd']}"
-        else: details['MACD'] = "محايد"
-
-    # Bollinger
-    if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
-        if current_price <= last['bb_lower'] * 1.005:
-            scores['BUY'] += weights['bb']; details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
-        elif current_price >= last['bb_upper'] * 0.995:
-            scores['SELL'] += weights['bb']; details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
-        else: details['BB'] = "وسط النطاق"
-
-    # VWAP (مع شرح)
-    if 'vwap' in df.columns and not pd.isna(last['vwap']):
-        if current_price > last['vwap']:
-            scores['BUY'] += weights['vwap']; details['VWAP'] = f"فوق VWAP (مؤسسات شراء) +{weights['vwap']}"
-        else:
-            scores['SELL'] += weights['vwap']; details['VWAP'] = f"تحت VWAP (مؤسسات بيع) +{weights['vwap']}"
-
-    # ADX
-    if 'adx' in df.columns and not pd.isna(last['adx']):
-        if last['adx'] > adx_threshold:
-            if df['close'].iloc[-1] > df['close'].iloc[-5]:
-                scores['BUY'] += 1; details['ADX'] = f"اتجاه قوي صاعد +1"
-            else:
-                scores['SELL'] += 1; details['ADX'] = f"اتجاه قوي هابط +1"
-        else: details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
-
-    # Ichimoku
-    if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
-        if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
-            if current_price > last['senkou_a'] and current_price > last['senkou_b']:
-                scores['BUY'] += weights['ichimoku']; details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
-            elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
-                scores['SELL'] += weights['ichimoku']; details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
-            else: details['Ichimoku'] = "داخل السحابة"
-
-    # SMC
-    if last_smc.get('order_block_bullish', False):
-        scores['BUY'] += weights['smc']; details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
-    elif last_smc.get('order_block_bearish', False):
-        scores['SELL'] += weights['smc']; details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
-    elif last_smc.get('fvg_bullish', False):
-        scores['BUY'] += weights['smc']//2; details['SMC'] = f"FVG شراء +{weights['smc']//2}"
-    elif last_smc.get('fvg_bearish', False):
-        scores['SELL'] += weights['smc']//2; details['SMC'] = f"FVG بيع +{weights['smc']//2}"
-    elif last_smc.get('liquidity_sweep_bullish', False):
-        scores['BUY'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
-    elif last_smc.get('liquidity_sweep_bearish', False):
-        scores['SELL'] += weights['smc']//2; details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
-    elif last_smc.get('mss_bullish', False):
-        scores['BUY'] += weights['smc']; details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
-    elif last_smc.get('mss_bearish', False):
-        scores['SELL'] += weights['smc']; details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
-    elif last_smc.get('in_discount', False):
-        scores['BUY'] += weights['smc']//2; details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
-    elif last_smc.get('in_premium', False):
-        scores['SELL'] += weights['smc']//2; details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
-    else: details['SMC'] = "لا توجد إشارة SMC"
-
-    # SMR
-    if last_smc.get('smr_bullish', False):
-        scores['BUY'] += weights['smr']; details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
-    elif last_smc.get('smr_bearish', False):
-        scores['SELL'] += weights['smr']; details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
-    else: details['SMR'] = "لا توجد إشارة SMR"
-
-    # Patterns
-    if patterns:
-        for p in patterns:
-            if p['direction'] == 'BULLISH':
-                scores['BUY'] += weights['patterns']; details['Pattern'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
-            else:
-                scores['SELL'] += weights['patterns']; details['Pattern'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
-    else: details['Pattern'] = "لا توجد نماذج"
-
-    # TBS
-    if tbs_type == "BULLISH":
-        scores['BUY'] += weights['tbs']; details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
-    elif tbs_type == "BEARISH":
-        scores['SELL'] += weights['tbs']; details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
-    else: details['TBS'] = "لا توجد إشارة TBS"
-
-    # MFI
-    if 'mfi' in df.columns and not pd.isna(last['mfi']):
-        mfi = last['mfi']
-        if mfi < 20:
-            scores['BUY'] += weights['mfi']; details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
-        elif mfi > 80:
-            scores['SELL'] += weights['mfi']; details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
-        else: details['MFI'] = f"محايد ({mfi:.1f})"
-
-    # ===== Fibonacci المحسّن (مع 78.6% و 88.6%) =====
+    
+    # 1. حساب الاتجاه العام باستخدام متوسطات متحركة كبيرة
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
+    
+    # 2. مؤشر ADX لتأكيد قوة الاتجاه
+    adx, _, _ = calc_adx(df, period=14)
+    current_adx = adx.iloc[-1] if not adx.isna().all() else 0
+    
+    # 3. تحديد مناطق الدعم والمقاومة القوية (آخر 50 شمعة)
     recent_high = df['high'].iloc[-50:].max()
     recent_low = df['low'].iloc[-50:].min()
-    fib = calc_fibonacci_levels_pro(recent_high, recent_low, current_price)
-    if fib:
-        if current_price > fib.get('fib_618', current_price):
-            scores['BUY'] += weights['fibonacci']
-            details['Fibonacci'] = f"فوق 61.8% (قوي) +{weights['fibonacci']}"
-        elif current_price < fib.get('fib_382', current_price):
-            scores['SELL'] += weights['fibonacci']
-            details['Fibonacci'] = f"تحت 38.2% (قوي) +{weights['fibonacci']}"
-        # المستويات الذهبية
-        if fib.get('fib_786', current_price) and current_price < fib['fib_786'] < current_price * 1.01:
-            details['Fibonacci_786'] = "⚠️ قرب 78.6% (آخر خط دفاع)"
-        if fib.get('fib_886', current_price) and current_price < fib['fib_886'] < current_price * 1.01:
-            details['Fibonacci_886'] = "🔴 قرب 88.6% (نموذج توافقي)"
-
-    # ===== تأثير الأخبار =====
-    if news_sentiment:
-        sentiment, score = news_sentiment
-        if sentiment == "BULLISH":
-            scores['BUY'] += 2; details['News_Sentiment'] = f"📈 أخبار إيجابية ({score:.0f}%) +2 BUY"
-        elif sentiment == "BEARISH":
-            scores['SELL'] += 2; details['News_Sentiment'] = f"📉 أخبار سلبية ({score:.0f}%) +2 SELL"
-        else: details['News_Sentiment'] = "➖ أخبار محايدة"
-
-    # ===== فلتر العملات =====
-    if currency_indices is not None and len(currency_indices) > 0:
-        base_cur = None; quote_cur = None
-        for cur in ['EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD']:
-            if symbol.startswith(cur): base_cur = cur
-            if symbol.endswith(cur + '=X') or symbol.endswith(cur + '-USD') or symbol.endswith(cur + '=F'):
-                quote_cur = cur
-        if symbol == "GC=F" or symbol == "XAUUSD=X": base_cur = "XAU"; quote_cur = "USD"
-        if symbol == "DX-Y.NYB": base_cur = "USD"; quote_cur = "DXY"
-        if base_cur and quote_cur and base_cur in currency_indices and quote_cur in currency_indices:
-            base_val = currency_indices[base_cur].iloc[-1]
-            quote_val = currency_indices[quote_cur].iloc[-1]
-            diff = base_val - quote_val
-            if diff > 0.2:
-                scores['BUY'] += weights['currency']; details['Currency_Filter'] = f"💪 {base_cur} أقوى من {quote_cur} ({diff:.2f}) +{weights['currency']}"
-            elif diff < -0.2:
-                scores['SELL'] += weights['currency']; details['Currency_Filter'] = f"💪 {quote_cur} أقوى من {base_cur} ({-diff:.2f}) +{weights['currency']}"
-            else: details['Currency_Filter'] = f"⚖️ متعادلان ({diff:.2f})"
-
-    net_score = scores['BUY'] - scores['SELL']
-    total_weight = sum(weights.values())
+    range_zone = (recent_high + recent_low) / 2  # منتصف النطاق (للعلم)
     
+    # 4. تحديد الاتجاه العام
+    last_close = df['close'].iloc[-1]
+    last_ema50 = df['ema50'].iloc[-1]
+    last_ema100 = df['ema100'].iloc[-1]
+    
+    # اتجاه صاعد: السعر فوق EMA50 و EMA100 و ADX > 25
+    uptrend = (last_close > last_ema50) and (last_close > last_ema100) and (current_adx > 25)
+    # اتجاه هابط: السعر تحت EMA50 و EMA100 و ADX > 25
+    downtrend = (last_close < last_ema50) and (last_close < last_ema100) and (current_adx > 25)
+    
+    # 5. تحديد الإشارة بناءً على الاتجاه العام + المناطق
+    details = {}
+    scores = {'BUY': 0, 'SELL': 0}
+    
+    # قوة الاتجاه
+    if uptrend:
+        scores['BUY'] += 5
+        details['Trend'] = "اتجاه صاعد قوي (EMA50/100 + ADX)"
+    elif downtrend:
+        scores['SELL'] += 5
+        details['Trend'] = "اتجاه هابط قوي (EMA50/100 + ADX)"
+    else:
+        details['Trend'] = "اتجاه جانبي أو ضعيف - انتظار"
+        return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
+    
+    # 6. تأكيد الدخول: كسر منطقة الدعم/المقاومة أو إشارة SMC
+    df_smc = analyze_smc_ict(df)
+    last_smc = df_smc.iloc[-1]
+    
+    if uptrend:
+        # في الاتجاه الصاعد، نبحث عن كسر مقاومة أو Order Block شراء
+        if last_smc.get('order_block_bullish', False) or last_smc.get('fvg_bullish', False):
+            scores['BUY'] += 3
+            details['SMC'] = "تأكيد شراء من SMC"
+        elif last_close > recent_high * 0.995:  # كسر مقاومة
+            scores['BUY'] += 2
+            details['Breakout'] = "كسر مقاومة قوية"
+        else:
+            # انتظر كسر مؤكد
+            return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
+    else:
+        # في الاتجاه الهابط، نبحث عن كسر دعم أو Order Block بيع
+        if last_smc.get('order_block_bearish', False) or last_smc.get('fvg_bearish', False):
+            scores['SELL'] += 3
+            details['SMC'] = "تأكيد بيع من SMC"
+        elif last_close < recent_low * 1.005:  # كسر دعم
+            scores['SELL'] += 2
+            details['Breakout'] = "كسر دعم قوي"
+        else:
+            return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
+    
+    # 7. حساب الثقة
+    net_score = scores['BUY'] - scores['SELL']
+    total_weight = 8  # 5 (اتجاه) + 3 (تأكيد)
     if net_score >= 5:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
@@ -864,66 +751,45 @@ def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, 
         signal = "SELL"
         confidence = min(100, 60 + (abs(net_score) / total_weight) * 100)
     else:
-        signal = "WAIT"
-        confidence = 50 + (net_score / total_weight) * 50
-
-    if 'atr' in df.columns and len(df) > 50:
-        current_atr = last['atr']; avg_atr = df['atr'].iloc[-50:].mean()
-        if not pd.isna(current_atr) and not pd.isna(avg_atr):
-            if current_atr < avg_atr * 0.7:
-                confidence = confidence * 0.6; details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة)"
-
-    if news_sentiment:
-        sentiment, score = news_sentiment
-        if abs(score) > 50:
-            confidence = confidence * 0.7; details['News_Warning'] = f"⚠️ أخبار قوية قد تغير الاتجاه (ثقة مخفضة)"
-
-    confidence = max(0, min(100, confidence))
-    tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
+        return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
     
-    stop_loss = None; entry_price = None; targets = {}
-    if signal in ["BUY", "SELL"] and confidence >= confidence_threshold:
-        atr_value = last['atr'] if not pd.isna(last['atr']) else 10
-        blocks = []
-        start_idx = max(3, len(df) - 30)
-        for i in range(start_idx, len(df) - 1):
-            if df['close'].iloc[i] > df['open'].iloc[i]:
-                body = df['close'].iloc[i] - df['open'].iloc[i]
-                avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
-                if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
-                    blocks.append(('bullish', df['low'].iloc[i-1], df['high'].iloc[i-1]))
-            if df['close'].iloc[i] < df['open'].iloc[i]:
-                body = df['open'].iloc[i] - df['close'].iloc[i]
-                avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
-                if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
-                    blocks.append(('bearish', df['low'].iloc[i-1], df['high'].iloc[i-1]))
-        order_blocks = blocks[-5:] if blocks else []
-        entry_price = current_price
-        if signal == "BUY":
-            recent_low = df['low'].iloc[-20:].min()
-            ob_low = min([block[1] for block in order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.8)
-            stop_loss = max(recent_low, ob_low, current_price - atr_value * 2.0)
-            stop_loss = min(stop_loss, current_price - atr_value * 0.5)
-        else:
-            recent_high = df['high'].iloc[-20:].max()
-            ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.8)
-            stop_loss = min(recent_high, ob_high, current_price + atr_value * 2.0)
-            stop_loss = max(stop_loss, current_price + atr_value * 0.5)
-        min_distance = atr_value * 0.3
-        if signal == "BUY" and (entry_price - stop_loss) < min_distance:
-            stop_loss = entry_price - min_distance
-        elif signal == "SELL" and (stop_loss - entry_price) < min_distance:
-            stop_loss = entry_price + min_distance
-        risk = abs(entry_price - stop_loss) if stop_loss else atr_value
-        if signal == "BUY":
-            targets = {'target1': entry_price + risk * 1.0, 'target2': entry_price + risk * 1.5, 'target3': entry_price + risk * 2.0, 'risk_reward_1': 1.0, 'risk_reward_2': 1.5, 'risk_reward_3': 2.0, 'risk': risk}
-        else:
-            targets = {'target1': entry_price - risk * 1.0, 'target2': entry_price - risk * 1.5, 'target3': entry_price - risk * 2.0, 'risk_reward_1': 1.0, 'risk_reward_2': 1.5, 'risk_reward_3': 2.0, 'risk': risk}
+    if confidence < confidence_threshold:
+        return "WAIT", confidence, net_score, details, [], (None,None,None,None), None, None, {}
+    
+    # 8. تحديد وقف الخسارة والأهداف (ثابتة)
+    atr_value = calc_atr(df).iloc[-1] if 'atr' in df.columns else 10
+    entry_price = current_price
+    
+    if signal == "BUY":
+        stop_loss = max(recent_low, last_ema50)  # دعم قوي أو EMA50
+        targets = {
+            'target1': entry_price + atr_value * 1.5,
+            'target2': entry_price + atr_value * 2.5,
+            'target3': entry_price + atr_value * 4.0,
+            'risk_reward_1': 1.5,
+            'risk_reward_2': 2.5,
+            'risk_reward_3': 4.0,
+            'risk': abs(entry_price - stop_loss)
+        }
+    else:
+        stop_loss = min(recent_high, last_ema50)  # مقاومة قوية أو EMA50
+        targets = {
+            'target1': entry_price - atr_value * 1.5,
+            'target2': entry_price - atr_value * 2.5,
+            'target3': entry_price - atr_value * 4.0,
+            'risk_reward_1': 1.5,
+            'risk_reward_2': 2.5,
+            'risk_reward_3': 4.0,
+            'risk': abs(entry_price - stop_loss)
+        }
+    
+    patterns = []
+    tbs_info = (None, None, None, None)
     
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# دوال مساعدة أخرى (MTF, Reversal, Explanation) – مختصرة
+# دوال مساعدة أخرى (MTF, Reversal, Explanation) – محدثة لاستخدام VRSI
 # ==========================================
 def get_mtf_signal(symbol, current_price, interval='1h'):
     timeframes = ['15m', '1h', '4h'] if interval == '1h' else ['5m', '15m', '1h']
@@ -931,11 +797,10 @@ def get_mtf_signal(symbol, current_price, interval='1h'):
     for tf in timeframes:
         df = get_historical_data(symbol, period="5d", interval=tf)
         if df is not None and len(df) > 50:
-            # نستخدم VRSI بدلاً من RSI في MTF أيضاً
             if 'volume' in df.columns:
                 vrsi = calc_vrsi(df['close'], df['volume'], period=14).iloc[-1]
             else:
-                vrsi = calc_rsi(df['close']).iloc[-1]  # fallback
+                vrsi = calc_rsi(df['close'], period=14).iloc[-1]  # fallback
             if vrsi < 20: signals.append(('BUY', tf))
             elif vrsi > 80: signals.append(('SELL', tf))
             else: signals.append(('NEUTRAL', tf))
@@ -1046,6 +911,7 @@ def get_all_signals_with_trades(interval='1h', params=None, weights=None):
         # حساب المؤشرات الأساسية
         df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
         df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+        df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
         df['atr'] = calc_atr(df)
         df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
         df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'], period=params.get('bb_period', 20), std_dev=params.get('bb_std', 2))
@@ -1054,15 +920,14 @@ def get_all_signals_with_trades(interval='1h', params=None, weights=None):
         tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
         df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
         df['mfi'] = calc_mfi(df)
-        
-        # VRSI (بدلاً من RSI)
+        # VRSI
         if 'volume' in df.columns and not df['volume'].isna().all():
             df['vrsi'] = calc_vrsi(df['close'], df['volume'], period=params.get('vrsi_period', 14))
         else:
-            df['vrsi'] = calc_rsi(df['close'], period=params.get('vrsi_period', 14))  # fallback
+            df['vrsi'] = calc_rsi(df['close'], period=params.get('vrsi_period', 14))
         
         currency_indices = st.session_state.currency_indices if st.session_state.currency_indices is not None else None
-        signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(
+        signal, confidence, net_score, details, _, _, stop_loss, entry_price, targets = generate_advanced_signal(
             df, current_price, symbol, news_sentiment, currency_indices, params
         )
         
@@ -1132,7 +997,7 @@ class TradeManager:
 # الشريط الجانبي (لوحة التحكم)
 # ==========================================
 with st.sidebar:
-    st.markdown("### ⚙️ لوحة التحكم Pro")
+    st.markdown("### ⚙️ لوحة التحكم Pro (Stable)")
     st.session_state.account_balance = st.number_input("💰 رصيد الحساب", value=st.session_state.account_balance, step=1000, format="%d")
     risk_pct = st.slider("⚠️ نسبة المخاطرة (%)", 0.5, 5.0, 2.0, 0.1)
     st.session_state.risk_per_trade = risk_pct / 100
@@ -1232,6 +1097,7 @@ if current_price is None: current_price = df['close'].iloc[-1]; change = 0
 # حساب المؤشرات
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
 df['atr'] = calc_atr(df)
 df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
 df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'], period=bb_period, std_dev=bb_std)
@@ -1240,7 +1106,6 @@ df['vwap'] = calc_vwap(df)
 tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
 df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
-# VRSI
 if 'volume' in df.columns and not df['volume'].isna().all():
     df['vrsi'] = calc_vrsi(df['close'], df['volume'], period=vrsi_period)
 else:
@@ -1281,9 +1146,9 @@ if signal in ["BUY", "SELL"] and confidence >= confidence_threshold and stop_los
         <b>📍 الدخول:</b> {price_format.format(entry_price)}<br>
         <b>🛑 وقف الخسارة:</b> {price_format.format(stop_loss)}<br>
         <b>📦 اللوت المقترح (Auto-Risk {st.session_state.risk_per_trade*100:.1f}%):</b> {lot_size}<br>
-        <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_format.format(targets['target1'])}</div>
-        <div class="target-zone" style="border-left-color:#ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_format.format(targets['target2'])}</div>
-        <div class="target-zone" style="border-left-color:#00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_format.format(targets['target3'])}</div>
+        <div class="target-zone"><b>🎯 الهدف 1 (1:1.5):</b> {price_format.format(targets['target1'])}</div>
+        <div class="target-zone" style="border-left-color:#ffaa00;"><b>🎯 الهدف 2 (1:2.5):</b> {price_format.format(targets['target2'])}</div>
+        <div class="target-zone" style="border-left-color:#00ff88;"><b>🎯 الهدف 3 (1:4):</b> {price_format.format(targets['target3'])}</div>
         <b>📈 R:R قصوى:</b> 1:{targets['risk_reward_3']:.1f}
     </div>
     """, unsafe_allow_html=True)
@@ -1298,7 +1163,7 @@ else:
 
 # الإشارة الرئيسية
 st.markdown("---")
-st.markdown("### 🧠 الإشارة المتكاملة (VRSI + Fibonacci Pro)")
+st.markdown("### 🧠 الإشارة المتكاملة (ثابتة)")
 signal_color = "#ffaa00" if signal == "WAIT" else ("#00ff88" if signal == "BUY" else "#ff4444")
 st.markdown(f"""
 <div class="signal-box">
@@ -1308,7 +1173,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-with st.expander("📝 شرح القرار (Pro)", expanded=True):
+with st.expander("📝 شرح القرار (ثابت)", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
@@ -1373,15 +1238,16 @@ else:
     st.info("قم بتحديث الإشارات لحساب المؤشرات.")
 
 # ==========================================
-# الرسم البياني الرئيسي (مع VRSI بدلاً من RSI)
+# الرسم البياني الرئيسي (مع VRSI و EMA50/100)
 # ==========================================
 st.markdown("---")
-st.markdown("### 📈 Price Chart with VRSI")
+st.markdown("### 📈 Price Chart with VRSI & Trend Lines")
 df_smc = analyze_smc_ict(df)
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
 fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='cyan', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema100'], name='EMA100', line=dict(color='magenta', dash='dash')), row=1, col=1)
 if not df_smc['bsl'].isna().all():
     fig.add_hline(y=df_smc['bsl'].iloc[-1], line_dash="dash", line_color="rgba(0,255,0,0.5)", row=1, col=1)
 if not df_smc['ssl'].isna().all():
@@ -1389,7 +1255,6 @@ if not df_smc['ssl'].isna().all():
 if stop_loss and entry_price:
     fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", opacity=0.7, row=1, col=1)
     fig.add_hline(y=entry_price, line_dash="dash", line_color="green", opacity=0.7, row=1, col=1)
-# VRSI بدلاً من RSI
 fig.add_trace(go.Scatter(x=df.index, y=df['vrsi'], name='VRSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
 fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
@@ -1450,6 +1315,6 @@ if st.session_state.show_form:
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    <span class="brand">▲ BLACK PYRAMID PRO v2004</span> • VRSI • VWAP Session • Fibonacci 78.6% & 88.6% • Auto-Risk • Heatmap
+    <span class="brand">▲ BLACK PYRAMID PRO v2005</span> • Stable Signals • Trend-Based • VRSI • Fibonacci 78.6% & 88.6% • Auto-Risk • Heatmap
 </div>
 """, unsafe_allow_html=True)
