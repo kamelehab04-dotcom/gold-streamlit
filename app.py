@@ -108,10 +108,9 @@ st.markdown("""
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
 
-BACKTEST_LOOKBACK = 500  # عدد الشموع المستخدمة في الباك تست
-MIN_CONFIDENCE = 55      # الحد الأدنى للثقة لإظهار الصفقة
+BACKTEST_LOOKBACK = 500
+MIN_CONFIDENCE = 55
 
-# قائمة الأزواج
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
     "XAG/USD (Silver)": "SI=F",
@@ -158,8 +157,6 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 if "show_form" not in st.session_state:
     st.session_state.show_form = False
-if "backtest_results" not in st.session_state:
-    st.session_state.backtest_results = {}
 
 # ============================================================
 # دوال جلب البيانات
@@ -282,7 +279,6 @@ def calc_bollinger(data, period=20, std=2):
     return sma + std*s, sma, sma - std*s
 
 def calc_adx_correct(df, period=14):
-    """ADX محسوب بشكل صحيح مع +DI و -DI"""
     high, low, close = df['high'], df['low'], df['close']
     up_move = high.diff()
     down_move = -low.diff()
@@ -306,12 +302,9 @@ def calc_ichimoku(df):
     return tenkan, kijun, senkou_a, senkou_b, chikou
 
 def calc_vwap_anchor(df, anchor=None):
-    """Session VWAP أو Anchored VWAP"""
     if anchor is None:
-        # نفترض أن البيانات تبدأ من بداية الجلسة
         return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
     else:
-        # VWAP من نقطة معينة (Anchored)
         idx = df.index.get_loc(anchor) if anchor in df.index else 0
         vol = df['volume'].iloc[idx:].copy()
         price = df['close'].iloc[idx:].copy()
@@ -328,7 +321,6 @@ def calc_mfi(df, period=14):
 # الأدوات الهيكلية (Structure, Liquidity, SMC)
 # ============================================================
 def find_swings(df, order=5):
-    """تعريف القمم والقيعان المحلية"""
     highs = df['high'].values
     lows = df['low'].values
     peaks = []
@@ -344,7 +336,6 @@ def detect_liquidity_levels(df, lookback=50):
     return df['high'].rolling(lookback).max(), df['low'].rolling(lookback).min()
 
 def detect_smc_ict(df):
-    """تحليل SMC/ICT محسّن: OB, FVG, Sweeps, BOS/MSS"""
     df = df.copy()
     df['ob_bullish'] = False
     df['ob_bearish'] = False
@@ -357,29 +348,24 @@ def detect_smc_ict(df):
     df['mss_bullish'] = False
     df['mss_bearish'] = False
     
-    # Order Blocks (على أساس الشموع القوية)
     for i in range(3, len(df)):
-        # OB شراء
         if df['close'].iloc[i] > df['open'].iloc[i]:
             body = df['close'].iloc[i] - df['open'].iloc[i]
             avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
             if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
                 df.loc[df.index[i-1], 'ob_bullish'] = True
-        # OB بيع
         if df['close'].iloc[i] < df['open'].iloc[i]:
             body = df['open'].iloc[i] - df['close'].iloc[i]
             avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
             if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
                 df.loc[df.index[i-1], 'ob_bearish'] = True
     
-    # FVG (Fair Value Gaps)
     for i in range(2, len(df)):
         if df['low'].iloc[i] > df['high'].iloc[i-2]:
             df.loc[df.index[i], 'fvg_bullish'] = True
         if df['high'].iloc[i] < df['low'].iloc[i-2]:
             df.loc[df.index[i], 'fvg_bearish'] = True
     
-    # Liquidity Sweeps
     for i in range(10, len(df)):
         recent_lows = df['low'].iloc[i-10:i].tolist()
         if df['low'].iloc[i] < min(recent_lows[:-1]):
@@ -388,15 +374,12 @@ def detect_smc_ict(df):
         if df['high'].iloc[i] > max(recent_highs[:-1]):
             df.loc[df.index[i], 'liquidity_sweep_bearish'] = True
     
-    # BOS (Break of Structure) – بناءً على Swing Points
-    peaks, troughs = find_swings(df, order=3)
     for i in range(5, len(df)):
         if df['close'].iloc[i] > df['high'].iloc[i-5:i].max():
             df.loc[df.index[i], 'bos_bullish'] = True
         if df['close'].iloc[i] < df['low'].iloc[i-5:i].min():
             df.loc[df.index[i], 'bos_bearish'] = True
     
-    # MSS (Market Structure Shift)
     for i in range(3, len(df)):
         if df['bos_bearish'].iloc[i-1] and df['close'].iloc[i] > df['high'].iloc[i-2:i].max():
             df.loc[df.index[i], 'mss_bullish'] = True
@@ -409,7 +392,6 @@ def detect_smc_ict(df):
 # TBS (Turtle Body Soup) – تصحيح
 # ============================================================
 def detect_tbs_correct(df, lookback=20, body_mult=1.5):
-    """TBS الصحيح: False Breakout ثم العودة"""
     if len(df) < lookback + 2:
         return None, None, None, None
     last = df.iloc[-1]
@@ -419,10 +401,8 @@ def detect_tbs_correct(df, lookback=20, body_mult=1.5):
     current_body = abs(last['close'] - last['open'])
     if current_body < avg_body * body_mult:
         return None, None, None, None
-    # Bearish TBS: اختراق فوق old high ثم إغلاق تحته
     if last['high'] > lookback_high and last['close'] < lookback_high:
         return "BEARISH", last['close'], last['low'], lookback_high
-    # Bullish TBS: اختراق تحت old low ثم إغلاق فوقه
     elif last['low'] < lookback_low and last['close'] > lookback_low:
         return "BULLISH", last['close'], last['high'], lookback_low
     return None, None, None, None
@@ -449,10 +429,6 @@ def get_dxy_correlation(df_pair, df_dxy, lookback=50):
 # DXY Filter (بدون قلب الإشارة)
 # ============================================================
 def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
-    """
-    يطبق تعديلاً على net_score بناءً على توافق الإشارة مع DXY.
-    لا يقلب الإشارة بالكامل، بل يضبط الثقة.
-    """
     adjustment = 0
     status = "NEUTRAL"
     if dxy_signal is None or dxy_signal == "WAIT" or signal == "WAIT":
@@ -460,7 +436,6 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
     if abs(correlation) < 0.30:
         return net_score, "WEAK_CORRELATION", 0
     if correlation <= -0.60:
-        # علاقة عكسية قوية
         if (signal == "BUY" and dxy_signal == "SELL") or (signal == "SELL" and dxy_signal == "BUY"):
             adjustment = 3
             status = "STRONGLY_ALIGNED"
@@ -468,7 +443,6 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
             adjustment = -4
             status = "MISALIGNED"
     elif correlation >= 0.60:
-        # علاقة مباشرة قوية
         if signal == dxy_signal:
             adjustment = 3
             status = "STRONGLY_ALIGNED"
@@ -476,7 +450,6 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
             adjustment = -4
             status = "MISALIGNED"
     else:
-        # علاقة متوسطة
         if correlation < 0:
             aligned = (signal == "BUY" and dxy_signal == "SELL") or (signal == "SELL" and dxy_signal == "BUY")
         else:
@@ -489,7 +462,6 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
 # Regime Filter
 # ============================================================
 def detect_regime(df):
-    """يحدد وضع السوق: Trending, Ranging, High Vol, Low Vol"""
     last = df.iloc[-1]
     adx = last['adx'] if 'adx' in df.columns else 20
     ema20 = df['ema20'].iloc[-1] if 'ema20' in df.columns else df['close'].iloc[-1]
@@ -514,7 +486,6 @@ def detect_regime(df):
 # MTF Engine (محسّن)
 # ============================================================
 def mtf_analysis(df, symbol):
-    """تحليل متكامل للأطر الزمنية: 15m, 1h, 4h"""
     timeframes = ['15m', '1h', '4h']
     results = []
     for tf in timeframes:
@@ -522,17 +493,14 @@ def mtf_analysis(df, symbol):
             data = get_historical_data(symbol, period="5d", interval=tf)
             if data is None or len(data) < 50:
                 continue
-            # مؤشرات بسيطة سريعة
             rsi = calc_rsi(data['close']).iloc[-1]
             ema20 = data['close'].ewm(20).mean().iloc[-1]
             ema50 = data['close'].ewm(50).mean().iloc[-1]
-            # اتجاه بسيط
             trend = "NEUTRAL"
             if ema20 > ema50 and rsi > 50:
                 trend = "BULLISH"
             elif ema20 < ema50 and rsi < 50:
                 trend = "BEARISH"
-            # شمعة أخيرة
             last = data.iloc[-1]
             candle = "BULLISH" if last['close'] > last['open'] else "BEARISH"
             results.append({
@@ -543,7 +511,6 @@ def mtf_analysis(df, symbol):
             })
         except:
             continue
-    # الإجماع
     buy = sum(1 for r in results if r['trend'] == "BULLISH")
     sell = sum(1 for r in results if r['trend'] == "BEARISH")
     if buy > sell:
@@ -558,11 +525,11 @@ def mtf_analysis(df, symbol):
     return consensus, count, results
 
 # ============================================================
-# المحرك الرئيسي للإشارة (v2003)
+# المحرك الرئيسي للإشارة (v2003) – مصحح
 # ============================================================
 def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     if df is None or len(df) < 100:
-        return "WAIT", 0, {}, None, None, None, None, None, None, None
+        return "WAIT", 0, {}, {}, None, None, None, None, None, None, (None,None,None,None)
     
     # حساب المؤشرات
     df['ema20'] = df['close'].ewm(20, adjust=False).mean()
@@ -587,6 +554,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     
     # TBS
     tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs_correct(df)
+    tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)  # تعريف tbs_info
     
     # Regime
     regime = detect_regime(df)
@@ -594,7 +562,6 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     # MTF
     mtf_consensus, mtf_count, mtf_details = mtf_analysis(df, symbol)
     
-    # آخر قيمة
     last = df.iloc[-1]
     current_price = last['close']
     
@@ -612,7 +579,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     }
     details = {}
     
-    # 1. Structure (BOS/MSS)
+    # 1. Structure
     if last_smc.get('bos_bullish', False) or last_smc.get('mss_bullish', False):
         factors['structure'] += 25
         details['Structure'] = "BOS/MSS صاعد"
@@ -623,7 +590,6 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
         details['Structure'] = "محايد"
     
     # 2. Liquidity
-    bsl, ssl = detect_liquidity_levels(df, 50)
     if last_smc.get('liquidity_sweep_bullish', False):
         factors['liquidity'] += 20
         details['Liquidity'] = "اجتياح سيولة شراء"
@@ -633,7 +599,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     else:
         details['Liquidity'] = "لا يوجد اجتياح"
     
-    # 3. SMC (OB, FVG)
+    # 3. SMC
     if last_smc.get('ob_bullish', False) or last_smc.get('fvg_bullish', False):
         factors['smc'] += 20
         details['SMC'] = "OB/FVG شراء"
@@ -653,11 +619,8 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     else:
         details['MTF'] = "محايد"
     
-    # 5. DXY (باستخدام الفلتر الجديد)
+    # 5. DXY
     if dxy_signal is not None and dxy_signal != "WAIT":
-        # نستخدم apply_dxy_filter لكننا نخزن النتيجة مؤقتاً
-        temp_score = 0
-        # نحدد الاتجاه المبدئي من العوامل
         raw_direction = "BUY" if factors['structure'] + factors['liquidity'] + factors['smc'] + factors['mtf'] > 0 else "SELL"
         if raw_direction == "WAIT":
             raw_direction = "BUY" if factors['structure'] > 0 else "SELL"
@@ -667,7 +630,7 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     else:
         details['DXY'] = "لا توجد إشارة DXY"
     
-    # 6. Momentum (RSI, MACD)
+    # 6. Momentum
     if last['rsi'] < 30:
         factors['momentum'] += 10
         details['Momentum'] = f"مفرط بيع RSI={last['rsi']:.1f}"
@@ -675,25 +638,25 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
         factors['momentum'] -= 10
         details['Momentum'] = f"مفرط شراء RSI={last['rsi']:.1f}"
     else:
-        factors['momentum'] += (50 - last['rsi']) / 10  # تصحيح بسيط
+        factors['momentum'] += (50 - last['rsi']) / 10
         details['Momentum'] = f"RSI محايد {last['rsi']:.1f}"
     if last['macd'] > last['macd_signal']:
         factors['momentum'] += 5
     else:
         factors['momentum'] -= 5
     
-    # 7. Volatility (ATR)
+    # 7. Volatility
     atr_ratio = last['atr'] / df['atr'].iloc[-20:].mean() if df['atr'].iloc[-20:].mean() > 0 else 1
     if atr_ratio > 1.5:
-        factors['volatility'] -= 10  # تقليل الثقة في التقلب العالي
+        factors['volatility'] -= 10
         details['Volatility'] = "تقلب عالٍ"
     elif atr_ratio < 0.7:
-        factors['volatility'] += 5  # تقلب منخفض قد يعطي إشارات أوضح
+        factors['volatility'] += 5
         details['Volatility'] = "تقلب منخفض"
     else:
         details['Volatility'] = "تقلب طبيعي"
     
-    # 8. Pattern (TBS + أشكال)
+    # 8. Pattern
     if tbs_type == "BULLISH":
         factors['pattern'] += 20
         details['Pattern'] = f"TBS شراء"
@@ -713,10 +676,8 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     else:
         details['Volume'] = f"MFI محايد {last['mfi']:.1f}"
     
-    # حساب النتيجة الإجمالية (مجموع العوامل)
     total_score = sum(factors.values())
     
-    # تحديد الإشارة بناءً على النتيجة
     if total_score >= 20:
         signal = "BUY"
         confidence = min(90, 50 + total_score * 0.5)
@@ -729,25 +690,22 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     
     confidence = max(0, min(100, confidence))
     
-    # Regime يؤثر على الثقة
     if "HIGH_VOL" in regime:
         confidence *= 0.8
     elif "LOW_VOL" in regime:
         confidence *= 1.1
     
-    # ========== Stop Loss & Targets (منطقية) ==========
+    # ========== Stop Loss & Targets ==========
     stop_loss = None
     entry_price = current_price
     targets = {}
     if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE:
         atr_val = last['atr'] if not pd.isna(last['atr']) else 10
         if signal == "BUY":
-            # Structure low
             struct_low = df['low'].iloc[-10:].min()
-            # Order block low
-            ob_low = df['low'].iloc[-5:].min()  # تبسيط
+            ob_low = df['low'].iloc[-5:].min()
             stop_loss = min(struct_low, ob_low, current_price - atr_val * 1.5)
-            stop_loss = max(stop_loss, current_price - atr_val * 3)  # حماية
+            stop_loss = max(stop_loss, current_price - atr_val * 3)
         else:
             struct_high = df['high'].iloc[-10:].max()
             ob_high = df['high'].iloc[-5:].max()
@@ -778,26 +736,21 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
 # Backtesting Engine
 # ============================================================
 def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
-    """يختبر الإشارات على البيانات التاريخية ويحسب الإحصائيات"""
     if df is None or len(df) < lookback:
         return {}
     test_df = df.iloc[-lookback:].copy()
     trades = []
     for i in range(100, len(test_df)):
-        # نأخذ نافذة للتحليل
         window = test_df.iloc[:i]
-        # نحاكي إشارة
         signal, conf, _, _, _, _, _, _, sl, entry, targets, _ = generate_signal_v2003(
             window, symbol, dxy_signal=None, dxy_correlation=0.0
         )
         if signal == "WAIT" or conf < MIN_CONFIDENCE:
             continue
-        # ندخل الصفقة
         if signal == "BUY":
             entry_price = window['close'].iloc[-1]
             stop = sl if sl else entry_price - 20
             tp = targets.get('target2', entry_price + 40)
-            # ننتظر حتى الخروج
             for j in range(i, len(test_df)):
                 price = test_df['close'].iloc[j]
                 if price <= stop:
@@ -806,7 +759,7 @@ def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
                 elif price >= tp:
                     trades.append({'result': 'win', 'r': 2})
                     break
-        else:  # SELL
+        else:
             entry_price = window['close'].iloc[-1]
             stop = sl if sl else entry_price + 20
             tp = targets.get('target2', entry_price - 40)
@@ -818,7 +771,6 @@ def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
                 elif price <= tp:
                     trades.append({'result': 'win', 'r': 2})
                     break
-    # إحصائيات
     if not trades:
         return {}
     wins = [t for t in trades if t['result'] == 'win']
@@ -841,7 +793,6 @@ def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
 @st.cache_data(ttl=120)
 def get_all_signals():
     results = []
-    # DXY أولاً
     df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
     dxy_signal = None
     if df_dxy is not None and len(df_dxy) > 100:
@@ -854,14 +805,11 @@ def get_all_signals():
             if df is None or len(df) < 100:
                 continue
             current_price = df['close'].iloc[-1]
-            # الارتباط مع DXY
             corr = get_dxy_correlation(df, df_dxy, lookback=50)
             signal, conf, score, details, factors, regime, mtf_cons, mtf_count, sl, entry, targets, tbs = generate_signal_v2003(
                 df, symbol, dxy_signal, corr
             )
-            # باك تست
             bt = run_backtest(df, symbol)
-            # تنسيق السعر
             if any(x in pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]):
                 price_str = f"${current_price:,.2f}"
                 fmt = "${:,.2f}"
@@ -1122,7 +1070,7 @@ st.plotly_chart(fig, use_container_width=True)
 # ============================================================
 st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
-# هنا يمكن إضافة TradeManager بسيط، لكن للاختصار سنتركها فارغة الآن
+# يمكن إضافة TradeManager لاحقاً
 
 # ============================================================
 # تذييل
