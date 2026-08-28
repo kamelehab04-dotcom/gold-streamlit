@@ -1,277 +1,1135 @@
-import json, os
-from datetime import datetime, timezone
-from pathlib import Path
+# ============================================================
+# BLACK PYRAMID v2003 – Advanced Trading Intelligence Engine
+# تاريخ التحديث: 2026-08-28
+# الهيكل: Regime + Confirmation + Risk + Backtesting
+# ============================================================
 
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+import pytz
+import pandas as pd
+import numpy as np
+import requests
+import json
+import time
+from typing import Dict, Tuple, List, Optional
 
-st.set_page_config(page_title="BLACK PYRAMID FX PRO", page_icon="â–²", layout="wide")
+# ============================================================
+# إعداد الصفحة
+# ============================================================
+st.set_page_config(
+    page_title="Black Pyramid v2003",
+    page_icon="▲",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# ============================================================
+# الهوية البصرية – محسّنة
+# ============================================================
+st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+    * { font-family: 'Inter', sans-serif; }
+    .main-title, .signal-text, .price-value { font-family: 'Orbitron', sans-serif !important; letter-spacing: 3px; }
+    .main-subtitle, .price-label, .signal-confidence, .footer { font-family: 'Inter', sans-serif !important; letter-spacing: 1px; }
+    html, body, .stApp { background: #0a0a0a !important; margin: 0; padding: 0; }
+    .stApp { position: relative; background: #0a0a0a; min-height: 100vh; }
+    .stApp::before {
+        content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: url('https://raw.githubusercontent.com/kamelehab04-dotcom/gold-streamlit/main/file_00000000a364820aa4218d02627011f1.png');
+        background-size: cover; background-position: center;
+        opacity: 0.25; pointer-events: none; z-index: 0;
+    }
+    .stApp::after {
+        content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+        background: radial-gradient(ellipse at 30% 20%, rgba(255,215,0,0.03) 0%, transparent 50%),
+                    radial-gradient(ellipse at 70% 80%, rgba(255,215,0,0.02) 0%, transparent 50%);
+        pointer-events: none; z-index: 0; animation: bgPulse 10s ease-in-out infinite;
+    }
+    @keyframes bgPulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert, .news-card, .explanation-box, .stButton button, .stSelectbox, .stDataFrame, .stMetric, .stPlotlyChart, .stTabs { position: relative; z-index: 1; }
+    .css-1d391kg, .css-1d391kg * { background: rgba(10,10,10,0.85); backdrop-filter: blur(10px); border-right: 1px solid rgba(255,215,0,0.05); }
+    .main-header { display: flex; justify-content: flex-end; align-items: center; padding: 10px 25px; min-height: 55px; background: rgba(0,0,0,0.5); backdrop-filter: blur(8px); border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(255,215,0,0.08); }
+    .main-header .main-title { font-size: 1.2rem; color: #ffd700; font-weight: 700; letter-spacing: 2px; }
+    .main-header .main-subtitle { font-size: 0.55rem; color: #666; letter-spacing: 1px; }
+    .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert { background: rgba(10,10,10,0.75); backdrop-filter: blur(6px); border: 1px solid rgba(255,215,0,0.10); border-radius: 12px; box-shadow: 0 4px 30px rgba(0,0,0,0.5); }
+    .price-value { color: #fff; }
+    .price-label { color: #888; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 2px; }
+    .signal-box { border: 2px solid #ffd700; }
+    .suggested-trade { border: 2px solid #00ff88; background: rgba(0,10,5,0.80); }
+    .target-zone { border-left: 4px solid #ffd700; background: rgba(255,215,0,0.04); padding: 8px 12px; margin: 4px 0; }
+    .target-zone:last-child { border-left-color: #00ff88; }
+    .stop-loss-level { border-left: 4px solid #ff4444; background: rgba(255,68,68,0.04); padding: 8px 12px; margin: 4px 0; }
+    .entry-zone { border-left: 4px solid #00ff88; background: rgba(0,255,136,0.04); padding: 8px 12px; margin: 4px 0; }
+    .trade-row { border-left: 4px solid #ffd700; padding: 10px 15px; margin: 5px 0; }
+    .footer { text-align: center; padding: 15px; color: #444; font-size: 0.65rem; border-top: 1px solid rgba(255,215,0,0.05); margin-top: 30px; letter-spacing: 1px; }
+    .footer .brand { color: #ffd700; font-weight: 600; }
+    .stButton button { background: linear-gradient(135deg, #ffd700 0%, #d4a800 100%) !important; color: #000 !important; font-weight: 700 !important; border-radius: 10px !important; border: none !important; padding: 8px 16px !important; width: 100% !important; transition: all 0.3s ease !important; }
+    .stButton button:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(255,215,0,0.2); }
+    .explanation-box { background: rgba(10,10,10,0.80); border: 1px solid rgba(255,215,0,0.05); border-radius: 10px; padding: 15px; margin: 8px 0; color: #bbb; font-size: 0.9rem; line-height: 1.6; }
+    .news-card { background: rgba(10,10,10,0.65); border-left: 3px solid #ffd700; border-radius: 8px; padding: 10px 15px; margin: 5px 0; }
+    .news-title { color: #eee; font-weight: 500; font-size: 0.9rem; }
+    .news-date { color: #666; font-size: 0.7rem; }
+    .reversal-alert { border: 1px solid #ff4444; background: rgba(255,68,68,0.04); padding: 10px 15px; margin: 5px 0; border-radius: 8px; font-size: 0.85rem; }
+    .pattern-badge { display: inline-block; background: rgba(255,215,0,0.08); border: 1px solid rgba(255,215,0,0.12); border-radius: 16px; padding: 3px 12px; margin: 2px; font-size: 0.7rem; color: #ffd700; }
+    .tbs-badge { display: inline-block; background: rgba(255,136,0,0.10); border: 1px solid rgba(255,136,0,0.15); border-radius: 16px; padding: 3px 12px; margin: 2px; font-size: 0.7rem; color: #ff8800; font-weight: bold; }
+    .dxy-aligned { display: inline-block; background: rgba(0,255,136,0.10); border: 1px solid rgba(0,255,136,0.20); border-radius: 16px; padding: 3px 12px; margin: 2px; font-size: 0.7rem; color: #00ff88; font-weight: bold; }
+    .dxy-misaligned { display: inline-block; background: rgba(255,68,68,0.10); border: 1px solid rgba(255,68,68,0.20); border-radius: 16px; padding: 3px 12px; margin: 2px; font-size: 0.7rem; color: #ff4444; font-weight: bold; }
+    .regime-badge { display: inline-block; border-radius: 16px; padding: 3px 12px; margin: 2px; font-size: 0.7rem; font-weight: bold; }
+    .regime-trending { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.20); }
+    .regime-ranging { background: rgba(255,170,0,0.15); color: #ffaa00; border: 1px solid rgba(255,170,0,0.20); }
+    .regime-volatile { background: rgba(255,68,68,0.15); color: #ff4444; border: 1px solid rgba(255,68,68,0.20); }
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# الهيدر
+# ============================================================
+st.markdown("""
+<div class="main-header">
+    <div style="text-align: right;">
+        <div class="main-title">
+            <span class="pyramid-icon">▲</span>
+            BLACK PYRAMID v2003
+            <span class="pyramid-icon">▲</span>
+        </div>
+        <div class="main-subtitle">Regime • Structure • Liquidity • SMC • MTF • DXY • Risk • Backtest</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# API Keys & Configuration
+# ============================================================
+GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
+NEWS_API_KEY = "YOUR_NEWS_API_KEY"
+
+BACKTEST_LOOKBACK = 500  # عدد الشموع المستخدمة في الباك تست
+MIN_CONFIDENCE = 55      # الحد الأدنى للثقة لإظهار الصفقة
+
+# قائمة الأزواج
 PAIRS = {
-    "EUR/USD":"EURUSD=X", "GBP/USD":"GBPUSD=X", "USD/JPY":"USDJPY=X",
-    "AUD/USD":"AUDUSD=X", "USD/CAD":"USDCAD=X", "USD/CHF":"USDCHF=X",
-    "EUR/JPY":"EURJPY=X", "GBP/JPY":"GBPJPY=X", "EUR/GBP":"EURGBP=X",
-    "NZD/USD":"NZDUSD=X",
+    "XAU/USD (Gold)": "GC=F",
+    "XAG/USD (Silver)": "SI=F",
+    "DXY (Dollar Index)": "DX-Y.NYB",
+    "EUR/USD": "EURUSD=X",
+    "GBP/USD": "GBPUSD=X",
+    "USD/JPY": "USDJPY=X",
+    "USD/CHF": "USDCHF=X",
+    "AUD/USD": "AUDUSD=X",
+    "NZD/USD": "NZDUSD=X",
+    "USD/CAD": "USDCAD=X",
+    "EUR/GBP": "EURGBP=X",
+    "EUR/JPY": "EURJPY=X",
+    "EUR/CHF": "EURCHF=X",
+    "EUR/AUD": "EURAUD=X",
+    "EUR/NZD": "EURNZD=X",
+    "EUR/CAD": "EURCAD=X",
+    "GBP/JPY": "GBPJPY=X",
+    "GBP/CHF": "GBPCHF=X",
+    "GBP/AUD": "GBPAUD=X",
+    "GBP/NZD": "GBPNZD=X",
+    "GBP/CAD": "GBPCAD=X",
+    "AUD/JPY": "AUDJPY=X",
+    "AUD/CHF": "AUDCHF=X",
+    "AUD/NZD": "AUDNZD=X",
+    "AUD/CAD": "AUDCAD=X",
+    "NZD/JPY": "NZDJPY=X",
+    "NZD/CHF": "NZDCHF=X",
+    "NZD/CAD": "NZDCAD=X",
+    "CAD/JPY": "CADJPY=X",
+    "CAD/CHF": "CADCHF=X",
+    "BTC/USD (Bitcoin)": "BTC-USD",
+    "ETH/USD (Ethereum)": "ETH-USD"
 }
-DXY = "DX-Y.NYB"
-STATE_FILE = Path("black_pyramid_fx_state.json")
 
-def load_state():
-    try: return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except Exception: return {"active_trade":None,"closed_trades":[]}
+# ============================================================
+# تهيئة حالة الجلسة
+# ============================================================
+if "all_signals" not in st.session_state:
+    st.session_state.all_signals = None
+if "last_update" not in st.session_state:
+    st.session_state.last_update = datetime.now()
+if "show_indicators" not in st.session_state:
+    st.session_state.show_indicators = True
+if "show_form" not in st.session_state:
+    st.session_state.show_form = False
+if "backtest_results" not in st.session_state:
+    st.session_state.backtest_results = {}
 
-def save_state(s): STATE_FILE.write_text(json.dumps(s,ensure_ascii=False,indent=2),encoding="utf-8")
-if "state" not in st.session_state: st.session_state.state=load_state()
-
-@st.cache_data(ttl=45,show_spinner=False)
-def data(symbol,period,interval):
+# ============================================================
+# دوال جلب البيانات
+# ============================================================
+@st.cache_data(ttl=5)
+def get_spot_price(symbol="GC=F"):
+    if symbol == "GC=F" and GOLD_API_KEY:
+        try:
+            url = "https://www.goldapi.io/api/XAU/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return float(data['price']), float(data['change_percent'])
+        except:
+            pass
+    if symbol == "SI=F" and GOLD_API_KEY:
+        try:
+            url = "https://www.goldapi.io/api/XAG/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return float(data['price']), float(data['change_percent'])
+        except:
+            pass
     try:
-        x=yf.download(symbol,period=period,interval=interval,auto_adjust=False,progress=False,threads=False)
-        if x is None or x.empty:return None
-        if isinstance(x.columns,pd.MultiIndex): x.columns=[c[0] for c in x.columns]
-        x.columns=[str(c).lower() for c in x.columns]
-        if not all(c in x for c in ["open","high","low","close"]):return None
-        if "volume" not in x:x["volume"]=0
-        x=x[["open","high","low","close","volume"]].apply(pd.to_numeric,errors="coerce").dropna(subset=["open","high","low","close"])
-        return x[~x.index.duplicated(keep="last")].sort_index()
-    except Exception:return None
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d", interval="5m")
+        if not data.empty:
+            last = data.iloc[-1]
+            first = data.iloc[0]
+            change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+            return float(last['Close']), float(change)
+    except:
+        pass
+    return None, None
 
-@st.cache_data(ttl=20,show_spinner=False)
-def price(symbol):
-    x=data(symbol,"5d","5m")
-    if x is None:return None,None
-    p=float(x.close.iloc[-1]); q=float(x.close.iloc[-2])
-    return p,((p-q)/q*100 if q else 0)
+@st.cache_data(ttl=300)
+def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
+    alt = {
+        "GC=F": ["XAUUSD=X", "GOLD"],
+        "SI=F": ["XAGUSD=X", "SILVER"],
+        "DX-Y.NYB": ["DX=F", "DXY"],
+        "BTC-USD": ["BTCUSD=X"],
+        "ETH-USD": ["ETHUSD=X"]
+    }
+    symbols = [symbol] + alt.get(symbol, [])
+    for attempt in range(max_retries):
+        for sym in symbols:
+            try:
+                ticker = yf.Ticker(sym)
+                df = ticker.history(period=period, interval=interval)
+                if not df.empty:
+                    df.columns = [c.lower() for c in df.columns]
+                    return df
+            except:
+                continue
+        time.sleep(2)
+    return None
 
-def rsi(c,n=14):
-    d=c.diff(); g=d.clip(lower=0); l=-d.clip(upper=0)
-    ag=g.ewm(alpha=1/n,adjust=False,min_periods=n).mean()
-    al=l.ewm(alpha=1/n,adjust=False,min_periods=n).mean()
-    return 100-100/(1+ag/al.replace(0,np.nan))
+def get_market_status():
+    eastern = pytz.timezone('US/Eastern')
+    now = datetime.now(eastern)
+    wd = now.weekday()
+    open_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
+    close_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
+    if wd == 5:
+        return "CLOSED", "عطلة نهاية الأسبوع", open_time + timedelta(days=1), close_time
+    if wd == 6:
+        return ("OPEN", "السوق مفتوح (الأحد)", close_time, close_time) if now >= open_time else ("CLOSED", "انتظار الافتتاح", open_time, close_time)
+    if 0 <= wd <= 3:
+        if close_time <= now < open_time:
+            return "CLOSED", "الاستراحة اليومية", open_time, close_time
+        return "OPEN", "السوق مفتوح", close_time if now < close_time else close_time + timedelta(days=1), close_time
+    if wd == 4:
+        if now < close_time:
+            return "OPEN", "السوق مفتوح (الجمعة)", close_time, close_time
+        return "CLOSED", "نهاية الأسبوع", open_time + timedelta(days=2), close_time
+    return "UNKNOWN", "غير معروف", None, None
 
-def atr(x,n=14):
-    pc=x.close.shift(1)
-    tr=pd.concat([x.high-x.low,(x.high-pc).abs(),(x.low-pc).abs()],axis=1).max(axis=1)
-    return tr.ewm(alpha=1/n,adjust=False,min_periods=n).mean()
+def time_remaining(dt):
+    if dt is None:
+        return "N/A"
+    diff = dt - datetime.now(pytz.timezone('US/Eastern'))
+    if diff.total_seconds() < 0:
+        return "انتهى"
+    h = int(diff.total_seconds() // 3600)
+    m = int((diff.total_seconds() % 3600) // 60)
+    return f"{h}h {m}m"
 
-def adx(x,n=14):
-    up=x.high.diff(); dn=-x.low.diff()
-    plus=pd.Series(np.where((up>dn)&(up>0),up,0),index=x.index)
-    minus=pd.Series(np.where((dn>up)&(dn>0),dn,0),index=x.index)
-    a=atr(x,n)
-    p=100*plus.ewm(alpha=1/n,adjust=False).mean()/a.replace(0,np.nan)
-    m=100*minus.ewm(alpha=1/n,adjust=False).mean()/a.replace(0,np.nan)
-    dx=100*(p-m).abs()/(p+m).replace(0,np.nan)
-    return dx.ewm(alpha=1/n,adjust=False,min_periods=n).mean(),p,m
+def format_time(dt):
+    return dt.strftime("%Y-%m-%d %H:%M:%S %Z") if dt else "N/A"
 
-def enrich(x):
-    x=x.copy()
-    x["ema20"]=x.close.ewm(span=20,adjust=False).mean()
-    x["ema50"]=x.close.ewm(span=50,adjust=False).mean()
-    x["ema200"]=x.close.ewm(span=200,adjust=False).mean()
-    x["rsi"]=rsi(x.close); x["atr"]=atr(x); x["adx"],x["pdi"],x["mdi"]=adx(x)
-    e12=x.close.ewm(span=12,adjust=False).mean(); e26=x.close.ewm(span=26,adjust=False).mean()
-    x["macd"]=e12-e26; x["macds"]=x.macd.ewm(span=9,adjust=False).mean()
-    x["hist"]=x.macd-x.macds
-    ph=x.high.rolling(5).max().shift(1); pl=x.low.rolling(5).min().shift(1)
-    x["bos_bull"]=x.close>ph; x["bos_bear"]=x.close<pl
-    hi=x.high.rolling(20).max().shift(1); lo=x.low.rolling(20).min().shift(1)
-    x["sweep_bull"]=(x.low<lo)&(x.close>lo); x["sweep_bear"]=(x.high>hi)&(x.close<hi)
-    x["fvg_bull"]=x.low>x.high.shift(2); x["fvg_bear"]=x.high<x.low.shift(2)
-    x["ob_bull"]=(x.close>x.open)&((x.close-x.open).abs()>x.atr*1.15)&(x.close.shift(1)<x.open.shift(1))
-    x["ob_bear"]=(x.close<x.open)&((x.close-x.open).abs()>x.atr*1.15)&(x.close.shift(1)>x.open.shift(1))
-    rh=x.high.rolling(50).max(); rl=x.low.rolling(50).min(); mid=(rh+rl)/2
-    x["premium"]=x.close>mid; x["discount"]=x.close<mid
-    return x
+# ============================================================
+# المؤشرات الأساسية (محسّنة)
+# ============================================================
+def calc_rsi(data, period=14):
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
-def tf4(x):
-    return x.resample("4h",label="right",closed="right").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna()
+def calc_atr(df, period=14):
+    high, low, close = df['high'], df['low'], df['close']
+    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+    return tr.rolling(window=period).mean()
 
-def bias(x):
-    if x is None or len(x)<220:return "WAIT"
-    z=enrich(x).iloc[-1]; b=s=0
-    if z.close>z.ema200:b+=3
-    else:s+=3
-    if z.ema20>z.ema50:b+=2
-    else:s+=2
-    if z.bos_bull:b+=2
-    if z.bos_bear:s+=2
-    if z.adx>=18:
-        if z.pdi>z.mdi:b+=1
-        elif z.mdi>z.pdi:s+=1
-    if b>=s+2:return "BULLISH"
-    if s>=b+2:return "BEARISH"
-    return "NEUTRAL"
+def calc_macd(data):
+    e12 = data.ewm(span=12, adjust=False).mean()
+    e26 = data.ewm(span=26, adjust=False).mean()
+    macd = e12 - e26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    return macd, signal, macd - signal
 
-@st.cache_data(ttl=60,show_spinner=False)
-def mtf(symbol):
-    h=data(symbol,"180d","1h"); m=data(symbol,"30d","15m")
-    if h is None or m is None:return None
-    h4=tf4(h)
-    return {"4H":bias(h4),"1H":bias(h),"15M":bias(m),"h4":enrich(h4),"h1":enrich(h),"m15":enrich(m)}
+def calc_bollinger(data, period=20, std=2):
+    sma = data.rolling(window=period).mean()
+    s = data.rolling(window=period).std()
+    return sma + std*s, sma, sma - std*s
 
-@st.cache_data(ttl=60,show_spinner=False)
-def dxy_data(): 
-    x=data(DXY,"180d","1h")
-    return enrich(x) if x is not None else None
+def calc_adx_correct(df, period=14):
+    """ADX محسوب بشكل صحيح مع +DI و -DI"""
+    high, low, close = df['high'], df['low'], df['close']
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    plus_di = 100 * (pd.Series(plus_dm).rolling(window=period).mean() / atr)
+    minus_di = 100 * (pd.Series(minus_dm).rolling(window=period).mean() / atr)
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+    adx = dx.rolling(window=period).mean()
+    return adx, plus_di, minus_di
 
-def dxy_bias(symbol,h):
-    d=dxy_data()
-    if d is None:return "UNKNOWN",0
-    common=h.index.intersection(d.index)
-    if len(common)<40:return "UNKNOWN",0
-    corr=float(h.loc[common,"close"].pct_change().tail(60).corr(d.loc[common,"close"].pct_change().tail(60)))
-    return bias(d),corr
+def calc_ichimoku(df):
+    high, low, close = df['high'], df['low'], df['close']
+    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
+    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
+    senkou_a = ((tenkan + kijun) / 2).shift(26)
+    senkou_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    chikou = close.shift(-26)
+    return tenkan, kijun, senkou_a, senkou_b, chikou
 
-def trade(z,direction,entry):
-    a=float(z.atr.iloc[-1])
-    if not np.isfinite(a) or a<=0:return None
-    lo=float(z.low.tail(40).min()); hi=float(z.high.tail(40).max())
-    if direction=="BUY":
-        sl=min(lo,entry-a*.9); risk=entry-sl
-        if risk<a*.65:risk=a*.8; sl=entry-risk
-        t1=entry+risk*1.25; t2=entry+risk*2; t3=entry+risk*2.75
+def calc_vwap_anchor(df, anchor=None):
+    """Session VWAP أو Anchored VWAP"""
+    if anchor is None:
+        # نفترض أن البيانات تبدأ من بداية الجلسة
+        return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
     else:
-        sl=max(hi,entry+a*.9); risk=sl-entry
-        if risk<a*.65:risk=a*.8; sl=entry+risk
-        t1=entry-risk*1.25; t2=entry-risk*2; t3=entry-risk*2.75
-    rr=abs(t2-entry)/abs(entry-sl)
-    if rr<1.8:return None
-    return dict(direction=direction,entry=round(entry,6),stop_loss=round(sl,6),
-                target1=round(t1,6),target2=round(t2,6),target3=round(t3,6),rr=round(rr,2))
+        # VWAP من نقطة معينة (Anchored)
+        idx = df.index.get_loc(anchor) if anchor in df.index else 0
+        vol = df['volume'].iloc[idx:].copy()
+        price = df['close'].iloc[idx:].copy()
+        return (vol * price).cumsum() / vol.cumsum()
 
-def analyze(name,symbol):
-    p,ch=price(symbol); m=mtf(symbol)
-    if p is None or m is None:return None
-    z=m["m15"]; q=z.iloc[-1]; b4,b1,b15=m["4H"],m["1H"],m["15M"]
-    buy=sell=0; br=[]; sr=[]
-    if b4=="BULLISH":buy+=22;br.append("4H Bullish")
-    elif b4=="BEARISH":sell+=22;sr.append("4H Bearish")
-    if b1=="BULLISH":buy+=18;br.append("1H Bullish")
-    elif b1=="BEARISH":sell+=18;sr.append("1H Bearish")
-    if b15=="BULLISH":buy+=8;br.append("15M Bullish")
-    elif b15=="BEARISH":sell+=8;sr.append("15M Bearish")
-    if q.sweep_bull:buy+=18;br.append("Liquidity Sweep +")
-    if q.sweep_bear:sell+=18;sr.append("Liquidity Sweep -")
-    if q.bos_bull:buy+=12;br.append("BOS/MSS +")
-    if q.bos_bear:sell+=12;sr.append("BOS/MSS -")
-    if q.ob_bull:buy+=10;br.append("Order Block +")
-    if q.ob_bear:sell+=10;sr.append("Order Block -")
-    if q.fvg_bull:buy+=7;br.append("FVG +")
-    if q.fvg_bear:sell+=7;sr.append("FVG -")
-    if q.discount:buy+=5;br.append("Discount")
-    if q.premium:sell+=5;sr.append("Premium")
-    if 50<=q.rsi<=68:buy+=5;br.append(f"RSI {q.rsi:.1f}")
-    if 32<=q.rsi<=50:sell+=5;sr.append(f"RSI {q.rsi:.1f}")
-    if q.hist>0:buy+=4;br.append("MACD +")
-    elif q.hist<0:sell+=4;sr.append("MACD -")
-    if q.adx>=18:
-        if q.pdi>q.mdi:buy+=4;br.append("ADX +DI")
-        elif q.mdi>q.pdi:sell+=4;sr.append("ADX -DI")
-    db,corr=dxy_bias(symbol,m["h1"])
-    if abs(corr)>=.25:
-        if db=="BEARISH":buy+=6;br.append(f"DXY Bearish {corr:.2f}")
-        elif db=="BULLISH":sell+=6;sr.append(f"DXY Bullish {corr:.2f}")
-    direction="BUY" if buy>sell else "SELL" if sell>buy else "WAIT"
-    edge=abs(buy-sell)
-    bull_trigger=bool(q.sweep_bull or q.bos_bull or q.ob_bull or q.fvg_bull)
-    bear_trigger=bool(q.sweep_bear or q.bos_bear or q.ob_bear or q.fvg_bear)
-    bull_zone=bool(q.ob_bull or q.fvg_bull or q.discount)
-    bear_zone=bool(q.ob_bear or q.fvg_bear or q.premium)
-    if direction=="BUY":
-        aplus=b4=="BULLISH" and b1=="BULLISH" and bull_trigger and bull_zone and q.rsi<70
-        aset=(b4=="BULLISH" or b1=="BULLISH") and bull_trigger and bull_zone and q.rsi<72 and edge>=8
-    elif direction=="SELL":
-        aplus=b4=="BEARISH" and b1=="BEARISH" and bear_trigger and bear_zone and q.rsi>30
-        aset=(b4=="BEARISH" or b1=="BEARISH") and bear_trigger and bear_zone and q.rsi>28 and edge>=8
-    else:aplus=aset=False
-    gate=aplus or aset
-    if not gate:
-        signal="WAIT"; conf=min(68,50+edge*.35); tr=None; grade="WAIT"
+def calc_mfi(df, period=14):
+    typical = (df['high'] + df['low'] + df['close']) / 3
+    flow = typical * df['volume']
+    pos = flow.where(typical > typical.shift(), 0).rolling(period).sum()
+    neg = flow.where(typical < typical.shift(), 0).rolling(period).sum()
+    return 100 - (100 / (1 + pos / neg))
+
+# ============================================================
+# الأدوات الهيكلية (Structure, Liquidity, SMC)
+# ============================================================
+def find_swings(df, order=5):
+    """تعريف القمم والقيعان المحلية"""
+    highs = df['high'].values
+    lows = df['low'].values
+    peaks = []
+    troughs = []
+    for i in range(order, len(df) - order):
+        if all(highs[i] > highs[i-j] for j in range(1, order+1)) and all(highs[i] > highs[i+j] for j in range(1, order+1)):
+            peaks.append((i, highs[i]))
+        if all(lows[i] < lows[i-j] for j in range(1, order+1)) and all(lows[i] < lows[i+j] for j in range(1, order+1)):
+            troughs.append((i, lows[i]))
+    return peaks, troughs
+
+def detect_liquidity_levels(df, lookback=50):
+    return df['high'].rolling(lookback).max(), df['low'].rolling(lookback).min()
+
+def detect_smc_ict(df):
+    """تحليل SMC/ICT محسّن: OB, FVG, Sweeps, BOS/MSS"""
+    df = df.copy()
+    df['ob_bullish'] = False
+    df['ob_bearish'] = False
+    df['fvg_bullish'] = False
+    df['fvg_bearish'] = False
+    df['liquidity_sweep_bullish'] = False
+    df['liquidity_sweep_bearish'] = False
+    df['bos_bullish'] = False
+    df['bos_bearish'] = False
+    df['mss_bullish'] = False
+    df['mss_bearish'] = False
+    
+    # Order Blocks (على أساس الشموع القوية)
+    for i in range(3, len(df)):
+        # OB شراء
+        if df['close'].iloc[i] > df['open'].iloc[i]:
+            body = df['close'].iloc[i] - df['open'].iloc[i]
+            avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
+            if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
+                df.loc[df.index[i-1], 'ob_bullish'] = True
+        # OB بيع
+        if df['close'].iloc[i] < df['open'].iloc[i]:
+            body = df['open'].iloc[i] - df['close'].iloc[i]
+            avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
+            if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
+                df.loc[df.index[i-1], 'ob_bearish'] = True
+    
+    # FVG (Fair Value Gaps)
+    for i in range(2, len(df)):
+        if df['low'].iloc[i] > df['high'].iloc[i-2]:
+            df.loc[df.index[i], 'fvg_bullish'] = True
+        if df['high'].iloc[i] < df['low'].iloc[i-2]:
+            df.loc[df.index[i], 'fvg_bearish'] = True
+    
+    # Liquidity Sweeps
+    for i in range(10, len(df)):
+        recent_lows = df['low'].iloc[i-10:i].tolist()
+        if df['low'].iloc[i] < min(recent_lows[:-1]):
+            df.loc[df.index[i], 'liquidity_sweep_bullish'] = True
+        recent_highs = df['high'].iloc[i-10:i].tolist()
+        if df['high'].iloc[i] > max(recent_highs[:-1]):
+            df.loc[df.index[i], 'liquidity_sweep_bearish'] = True
+    
+    # BOS (Break of Structure) – بناءً على Swing Points
+    peaks, troughs = find_swings(df, order=3)
+    for i in range(5, len(df)):
+        if df['close'].iloc[i] > df['high'].iloc[i-5:i].max():
+            df.loc[df.index[i], 'bos_bullish'] = True
+        if df['close'].iloc[i] < df['low'].iloc[i-5:i].min():
+            df.loc[df.index[i], 'bos_bearish'] = True
+    
+    # MSS (Market Structure Shift)
+    for i in range(3, len(df)):
+        if df['bos_bearish'].iloc[i-1] and df['close'].iloc[i] > df['high'].iloc[i-2:i].max():
+            df.loc[df.index[i], 'mss_bullish'] = True
+        if df['bos_bullish'].iloc[i-1] and df['close'].iloc[i] < df['low'].iloc[i-2:i].min():
+            df.loc[df.index[i], 'mss_bearish'] = True
+    
+    return df
+
+# ============================================================
+# TBS (Turtle Body Soup) – تصحيح
+# ============================================================
+def detect_tbs_correct(df, lookback=20, body_mult=1.5):
+    """TBS الصحيح: False Breakout ثم العودة"""
+    if len(df) < lookback + 2:
+        return None, None, None, None
+    last = df.iloc[-1]
+    lookback_high = df['high'].iloc[-lookback-1:-1].max()
+    lookback_low = df['low'].iloc[-lookback-1:-1].min()
+    avg_body = abs(df['close'] - df['open']).iloc[-lookback-1:-1].mean()
+    current_body = abs(last['close'] - last['open'])
+    if current_body < avg_body * body_mult:
+        return None, None, None, None
+    # Bearish TBS: اختراق فوق old high ثم إغلاق تحته
+    if last['high'] > lookback_high and last['close'] < lookback_high:
+        return "BEARISH", last['close'], last['low'], lookback_high
+    # Bullish TBS: اختراق تحت old low ثم إغلاق فوقه
+    elif last['low'] < lookback_low and last['close'] > lookback_low:
+        return "BULLISH", last['close'], last['high'], lookback_low
+    return None, None, None, None
+
+# ============================================================
+# DXY Correlation (على Returns)
+# ============================================================
+def get_dxy_correlation(df_pair, df_dxy, lookback=50):
+    if df_pair is None or df_dxy is None:
+        return 0.0
+    if len(df_pair) < lookback or len(df_dxy) < lookback:
+        return 0.0
+    pair = df_pair[['close']].copy()
+    dxy = df_dxy[['close']].copy()
+    pair_ret = pair['close'].pct_change()
+    dxy_ret = dxy['close'].pct_change()
+    combined = pd.concat([pair_ret, dxy_ret], axis=1, join='inner').dropna()
+    if len(combined) < lookback:
+        return 0.0
+    corr = combined.iloc[-lookback:, 0].corr(combined.iloc[-lookback:, 1])
+    return float(corr) if not pd.isna(corr) else 0.0
+
+# ============================================================
+# DXY Filter (بدون قلب الإشارة)
+# ============================================================
+def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
+    """
+    يطبق تعديلاً على net_score بناءً على توافق الإشارة مع DXY.
+    لا يقلب الإشارة بالكامل، بل يضبط الثقة.
+    """
+    adjustment = 0
+    status = "NEUTRAL"
+    if dxy_signal is None or dxy_signal == "WAIT" or signal == "WAIT":
+        return net_score, status, 0
+    if abs(correlation) < 0.30:
+        return net_score, "WEAK_CORRELATION", 0
+    if correlation <= -0.60:
+        # علاقة عكسية قوية
+        if (signal == "BUY" and dxy_signal == "SELL") or (signal == "SELL" and dxy_signal == "BUY"):
+            adjustment = 3
+            status = "STRONGLY_ALIGNED"
+        else:
+            adjustment = -4
+            status = "MISALIGNED"
+    elif correlation >= 0.60:
+        # علاقة مباشرة قوية
+        if signal == dxy_signal:
+            adjustment = 3
+            status = "STRONGLY_ALIGNED"
+        else:
+            adjustment = -4
+            status = "MISALIGNED"
     else:
-        grade="A+" if aplus else "A"
-        conf=min(95,72+edge*.20+min(max(buy,sell),100)*.10) if aplus else min(79,67+edge*.18+min(max(buy,sell),100)*.08)
-        tr=trade(z,direction,float(p)); signal=direction if tr else "WAIT"
-        if signal=="WAIT":grade="WAIT"
-    return dict(name=name,symbol=symbol,price=p,change=ch,signal=signal,grade=grade,confidence=round(conf,1),
-                buy=round(buy,1),sell=round(sell,1),edge=round(edge,1),**{"4H":b4,"1H":b1,"15M":b15},
-                rsi=round(float(q.rsi),1),adx=round(float(q.adx),1),dxy=db,corr=round(corr,3),
-                reasons=(br if direction=="BUY" else sr),trade=tr,chart=z)
+        # علاقة متوسطة
+        if correlation < 0:
+            aligned = (signal == "BUY" and dxy_signal == "SELL") or (signal == "SELL" and dxy_signal == "BUY")
+        else:
+            aligned = signal == dxy_signal
+        adjustment = 1 if aligned else -2
+        status = "ALIGNED" if aligned else "MISALIGNED"
+    return net_score + adjustment, status, adjustment
 
-@st.cache_data(ttl=60,show_spinner=False)
-def scan():
-    out=[]
-    for n,s in PAIRS.items():
-        r=analyze(n,s)
-        if r:out.append(r)
-    rank={"A+":3,"A":2,"WAIT":1}
-    return sorted(out,key=lambda x:(rank[x["grade"]],x["confidence"],x["edge"]),reverse=True)
+# ============================================================
+# Regime Filter
+# ============================================================
+def detect_regime(df):
+    """يحدد وضع السوق: Trending, Ranging, High Vol, Low Vol"""
+    last = df.iloc[-1]
+    adx = last['adx'] if 'adx' in df.columns else 20
+    ema20 = df['ema20'].iloc[-1] if 'ema20' in df.columns else df['close'].iloc[-1]
+    ema50 = df['ema50'].iloc[-1] if 'ema50' in df.columns else df['close'].iloc[-1]
+    atr = last['atr'] if 'atr' in df.columns else 10
+    atr_ma = df['atr'].iloc[-20:].mean() if 'atr' in df.columns else atr
+    
+    regime = "NEUTRAL"
+    if adx > 25 and abs(ema20 - ema50) / ema50 > 0.01:
+        regime = "TRENDING"
+    elif adx < 20:
+        regime = "RANGING"
+    
+    if atr > atr_ma * 1.5:
+        regime = "HIGH_VOLATILITY" if regime == "NEUTRAL" else regime + "_HIGH_VOL"
+    elif atr < atr_ma * 0.7:
+        regime = "LOW_VOLATILITY" if regime == "NEUTRAL" else regime + "_LOW_VOL"
+    
+    return regime
 
-# ---------------- UI ----------------
-st.markdown("<style>.stApp{background:#050505}.card{border:1px solid #b8941f;border-radius:16px;padding:20px;background:#0b0b0b}.gold{color:#c7a52d}</style>",unsafe_allow_html=True)
-st.markdown('<div class="card"><h1>â–² BLACK PYRAMID FX PRO</h1><div class="gold">Forex Scanner â€¢ MTF â€¢ SMC/ICT â€¢ Liquidity â€¢ DXY â€¢ Risk/Reward</div></div>',unsafe_allow_html=True)
+# ============================================================
+# MTF Engine (محسّن)
+# ============================================================
+def mtf_analysis(df, symbol):
+    """تحليل متكامل للأطر الزمنية: 15m, 1h, 4h"""
+    timeframes = ['15m', '1h', '4h']
+    results = []
+    for tf in timeframes:
+        try:
+            data = get_historical_data(symbol, period="5d", interval=tf)
+            if data is None or len(data) < 50:
+                continue
+            # مؤشرات بسيطة سريعة
+            rsi = calc_rsi(data['close']).iloc[-1]
+            ema20 = data['close'].ewm(20).mean().iloc[-1]
+            ema50 = data['close'].ewm(50).mean().iloc[-1]
+            # اتجاه بسيط
+            trend = "NEUTRAL"
+            if ema20 > ema50 and rsi > 50:
+                trend = "BULLISH"
+            elif ema20 < ema50 and rsi < 50:
+                trend = "BEARISH"
+            # شمعة أخيرة
+            last = data.iloc[-1]
+            candle = "BULLISH" if last['close'] > last['open'] else "BEARISH"
+            results.append({
+                "timeframe": tf,
+                "trend": trend,
+                "rsi": rsi,
+                "candle": candle
+            })
+        except:
+            continue
+    # الإجماع
+    buy = sum(1 for r in results if r['trend'] == "BULLISH")
+    sell = sum(1 for r in results if r['trend'] == "BEARISH")
+    if buy > sell:
+        consensus = "BUY"
+        count = buy - sell
+    elif sell > buy:
+        consensus = "SELL"
+        count = sell - buy
+    else:
+        consensus = "NEUTRAL"
+        count = 0
+    return consensus, count, results
 
-state=st.session_state.state; active=state.get("active_trade")
+# ============================================================
+# المحرك الرئيسي للإشارة (v2003)
+# ============================================================
+def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
+    if df is None or len(df) < 100:
+        return "WAIT", 0, {}, None, None, None, None, None, None, None
+    
+    # حساب المؤشرات
+    df['ema20'] = df['close'].ewm(20, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(50, adjust=False).mean()
+    df['rsi'] = calc_rsi(df['close'])
+    df['atr'] = calc_atr(df)
+    df['macd'], df['macd_signal'], df['macd_hist'] = calc_macd(df['close'])
+    df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger(df['close'])
+    df['adx'], df['plus_di'], df['minus_di'] = calc_adx_correct(df)
+    tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
+    df['tenkan'] = tenkan
+    df['kijun'] = kijun
+    df['senkou_a'] = senkou_a
+    df['senkou_b'] = senkou_b
+    df['chikou'] = chikou
+    df['mfi'] = calc_mfi(df)
+    df['vwap'] = calc_vwap_anchor(df)
+    
+    # SMC
+    df_smc = detect_smc_ict(df)
+    last_smc = df_smc.iloc[-1]
+    
+    # TBS
+    tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs_correct(df)
+    
+    # Regime
+    regime = detect_regime(df)
+    
+    # MTF
+    mtf_consensus, mtf_count, mtf_details = mtf_analysis(df, symbol)
+    
+    # آخر قيمة
+    last = df.iloc[-1]
+    current_price = last['close']
+    
+    # ========== نظام العوامل ==========
+    factors = {
+        "structure": 0,
+        "liquidity": 0,
+        "smc": 0,
+        "mtf": 0,
+        "dxy": 0,
+        "momentum": 0,
+        "volatility": 0,
+        "pattern": 0,
+        "volume": 0
+    }
+    details = {}
+    
+    # 1. Structure (BOS/MSS)
+    if last_smc.get('bos_bullish', False) or last_smc.get('mss_bullish', False):
+        factors['structure'] += 25
+        details['Structure'] = "BOS/MSS صاعد"
+    elif last_smc.get('bos_bearish', False) or last_smc.get('mss_bearish', False):
+        factors['structure'] -= 25
+        details['Structure'] = "BOS/MSS هابط"
+    else:
+        details['Structure'] = "محايد"
+    
+    # 2. Liquidity
+    bsl, ssl = detect_liquidity_levels(df, 50)
+    if last_smc.get('liquidity_sweep_bullish', False):
+        factors['liquidity'] += 20
+        details['Liquidity'] = "اجتياح سيولة شراء"
+    elif last_smc.get('liquidity_sweep_bearish', False):
+        factors['liquidity'] -= 20
+        details['Liquidity'] = "اجتياح سيولة بيع"
+    else:
+        details['Liquidity'] = "لا يوجد اجتياح"
+    
+    # 3. SMC (OB, FVG)
+    if last_smc.get('ob_bullish', False) or last_smc.get('fvg_bullish', False):
+        factors['smc'] += 20
+        details['SMC'] = "OB/FVG شراء"
+    elif last_smc.get('ob_bearish', False) or last_smc.get('fvg_bearish', False):
+        factors['smc'] -= 20
+        details['SMC'] = "OB/FVG بيع"
+    else:
+        details['SMC'] = "لا توجد إشارة SMC"
+    
+    # 4. MTF
+    if mtf_consensus == "BUY":
+        factors['mtf'] += 15
+        details['MTF'] = f"صاعد ({mtf_count} أطر)"
+    elif mtf_consensus == "SELL":
+        factors['mtf'] -= 15
+        details['MTF'] = f"هابط ({mtf_count} أطر)"
+    else:
+        details['MTF'] = "محايد"
+    
+    # 5. DXY (باستخدام الفلتر الجديد)
+    if dxy_signal is not None and dxy_signal != "WAIT":
+        # نستخدم apply_dxy_filter لكننا نخزن النتيجة مؤقتاً
+        temp_score = 0
+        # نحدد الاتجاه المبدئي من العوامل
+        raw_direction = "BUY" if factors['structure'] + factors['liquidity'] + factors['smc'] + factors['mtf'] > 0 else "SELL"
+        if raw_direction == "WAIT":
+            raw_direction = "BUY" if factors['structure'] > 0 else "SELL"
+        adjusted, status, adj = apply_dxy_filter(raw_direction, 0, dxy_signal, dxy_correlation)
+        factors['dxy'] = adj
+        details['DXY'] = f"{status} (تعديل: {adj})"
+    else:
+        details['DXY'] = "لا توجد إشارة DXY"
+    
+    # 6. Momentum (RSI, MACD)
+    if last['rsi'] < 30:
+        factors['momentum'] += 10
+        details['Momentum'] = f"مفرط بيع RSI={last['rsi']:.1f}"
+    elif last['rsi'] > 70:
+        factors['momentum'] -= 10
+        details['Momentum'] = f"مفرط شراء RSI={last['rsi']:.1f}"
+    else:
+        factors['momentum'] += (50 - last['rsi']) / 10  # تصحيح بسيط
+        details['Momentum'] = f"RSI محايد {last['rsi']:.1f}"
+    if last['macd'] > last['macd_signal']:
+        factors['momentum'] += 5
+    else:
+        factors['momentum'] -= 5
+    
+    # 7. Volatility (ATR)
+    atr_ratio = last['atr'] / df['atr'].iloc[-20:].mean() if df['atr'].iloc[-20:].mean() > 0 else 1
+    if atr_ratio > 1.5:
+        factors['volatility'] -= 10  # تقليل الثقة في التقلب العالي
+        details['Volatility'] = "تقلب عالٍ"
+    elif atr_ratio < 0.7:
+        factors['volatility'] += 5  # تقلب منخفض قد يعطي إشارات أوضح
+        details['Volatility'] = "تقلب منخفض"
+    else:
+        details['Volatility'] = "تقلب طبيعي"
+    
+    # 8. Pattern (TBS + أشكال)
+    if tbs_type == "BULLISH":
+        factors['pattern'] += 20
+        details['Pattern'] = f"TBS شراء"
+    elif tbs_type == "BEARISH":
+        factors['pattern'] -= 20
+        details['Pattern'] = f"TBS بيع"
+    else:
+        details['Pattern'] = "لا يوجد TBS"
+    
+    # 9. Volume / MFI
+    if last['mfi'] < 20:
+        factors['volume'] += 5
+        details['Volume'] = f"MFI مفرط بيع {last['mfi']:.1f}"
+    elif last['mfi'] > 80:
+        factors['volume'] -= 5
+        details['Volume'] = f"MFI مفرط شراء {last['mfi']:.1f}"
+    else:
+        details['Volume'] = f"MFI محايد {last['mfi']:.1f}"
+    
+    # حساب النتيجة الإجمالية (مجموع العوامل)
+    total_score = sum(factors.values())
+    
+    # تحديد الإشارة بناءً على النتيجة
+    if total_score >= 20:
+        signal = "BUY"
+        confidence = min(90, 50 + total_score * 0.5)
+    elif total_score <= -20:
+        signal = "SELL"
+        confidence = min(90, 50 + abs(total_score) * 0.5)
+    else:
+        signal = "WAIT"
+        confidence = 50 + total_score * 0.2
+    
+    confidence = max(0, min(100, confidence))
+    
+    # Regime يؤثر على الثقة
+    if "HIGH_VOL" in regime:
+        confidence *= 0.8
+    elif "LOW_VOL" in regime:
+        confidence *= 1.1
+    
+    # ========== Stop Loss & Targets (منطقية) ==========
+    stop_loss = None
+    entry_price = current_price
+    targets = {}
+    if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE:
+        atr_val = last['atr'] if not pd.isna(last['atr']) else 10
+        if signal == "BUY":
+            # Structure low
+            struct_low = df['low'].iloc[-10:].min()
+            # Order block low
+            ob_low = df['low'].iloc[-5:].min()  # تبسيط
+            stop_loss = min(struct_low, ob_low, current_price - atr_val * 1.5)
+            stop_loss = max(stop_loss, current_price - atr_val * 3)  # حماية
+        else:
+            struct_high = df['high'].iloc[-10:].max()
+            ob_high = df['high'].iloc[-5:].max()
+            stop_loss = max(struct_high, ob_high, current_price + atr_val * 1.5)
+            stop_loss = min(stop_loss, current_price + atr_val * 3)
+        risk = abs(entry_price - stop_loss)
+        if risk < atr_val * 0.3:
+            stop_loss = entry_price - atr_val * 0.5 if signal == "BUY" else entry_price + atr_val * 0.5
+            risk = atr_val * 0.5
+        if signal == "BUY":
+            targets = {
+                'target1': entry_price + risk * 1.0,
+                'target2': entry_price + risk * 1.5,
+                'target3': entry_price + risk * 2.0,
+                'risk_reward': 2.0
+            }
+        else:
+            targets = {
+                'target1': entry_price - risk * 1.0,
+                'target2': entry_price - risk * 1.5,
+                'target3': entry_price - risk * 2.0,
+                'risk_reward': 2.0
+            }
+    
+    return signal, confidence, total_score, details, factors, regime, mtf_consensus, mtf_count, stop_loss, entry_price, targets, tbs_info
+
+# ============================================================
+# Backtesting Engine
+# ============================================================
+def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
+    """يختبر الإشارات على البيانات التاريخية ويحسب الإحصائيات"""
+    if df is None or len(df) < lookback:
+        return {}
+    test_df = df.iloc[-lookback:].copy()
+    trades = []
+    for i in range(100, len(test_df)):
+        # نأخذ نافذة للتحليل
+        window = test_df.iloc[:i]
+        # نحاكي إشارة
+        signal, conf, _, _, _, _, _, _, sl, entry, targets, _ = generate_signal_v2003(
+            window, symbol, dxy_signal=None, dxy_correlation=0.0
+        )
+        if signal == "WAIT" or conf < MIN_CONFIDENCE:
+            continue
+        # ندخل الصفقة
+        if signal == "BUY":
+            entry_price = window['close'].iloc[-1]
+            stop = sl if sl else entry_price - 20
+            tp = targets.get('target2', entry_price + 40)
+            # ننتظر حتى الخروج
+            for j in range(i, len(test_df)):
+                price = test_df['close'].iloc[j]
+                if price <= stop:
+                    trades.append({'result': 'loss', 'r': -1})
+                    break
+                elif price >= tp:
+                    trades.append({'result': 'win', 'r': 2})
+                    break
+        else:  # SELL
+            entry_price = window['close'].iloc[-1]
+            stop = sl if sl else entry_price + 20
+            tp = targets.get('target2', entry_price - 40)
+            for j in range(i, len(test_df)):
+                price = test_df['close'].iloc[j]
+                if price >= stop:
+                    trades.append({'result': 'loss', 'r': -1})
+                    break
+                elif price <= tp:
+                    trades.append({'result': 'win', 'r': 2})
+                    break
+    # إحصائيات
+    if not trades:
+        return {}
+    wins = [t for t in trades if t['result'] == 'win']
+    losses = [t for t in trades if t['result'] == 'loss']
+    win_rate = len(wins) / len(trades) * 100
+    avg_r = sum(t['r'] for t in trades) / len(trades)
+    profit_factor = abs(sum(t['r'] for t in wins) / sum(abs(t['r']) for t in losses)) if losses else float('inf')
+    return {
+        'total_trades': len(trades),
+        'win_rate': win_rate,
+        'avg_r': avg_r,
+        'profit_factor': profit_factor,
+        'wins': len(wins),
+        'losses': len(losses)
+    }
+
+# ============================================================
+# جمع الإشارات لجميع الأزواج
+# ============================================================
+@st.cache_data(ttl=120)
+def get_all_signals():
+    results = []
+    # DXY أولاً
+    df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
+    dxy_signal = None
+    if df_dxy is not None and len(df_dxy) > 100:
+        dxy_signal, _, _, _, _, _, _, _, _, _, _, _ = generate_signal_v2003(
+            df_dxy, "DX-Y.NYB", dxy_signal=None, dxy_correlation=0.0
+        )
+    for pair_name, symbol in PAIRS.items():
+        try:
+            df = get_historical_data(symbol, period="1mo", interval="1h")
+            if df is None or len(df) < 100:
+                continue
+            current_price = df['close'].iloc[-1]
+            # الارتباط مع DXY
+            corr = get_dxy_correlation(df, df_dxy, lookback=50)
+            signal, conf, score, details, factors, regime, mtf_cons, mtf_count, sl, entry, targets, tbs = generate_signal_v2003(
+                df, symbol, dxy_signal, corr
+            )
+            # باك تست
+            bt = run_backtest(df, symbol)
+            # تنسيق السعر
+            if any(x in pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]):
+                price_str = f"${current_price:,.2f}"
+                fmt = "${:,.2f}"
+            else:
+                price_str = f"{current_price:.4f}"
+                fmt = "{:.4f}"
+            
+            results.append({
+                "الزوج": pair_name,
+                "الإشارة": signal,
+                "الثقة": round(conf, 1),
+                "النتيجة": score,
+                "السعر": price_str,
+                "سعر الدخول": fmt.format(entry) if entry else "N/A",
+                "وقف الخسارة": fmt.format(sl) if sl else "N/A",
+                "الهدف 1": fmt.format(targets.get('target1')) if targets else "N/A",
+                "الهدف 2": fmt.format(targets.get('target2')) if targets else "N/A",
+                "الهدف 3": fmt.format(targets.get('target3')) if targets else "N/A",
+                "نسبة المخاطرة": f"1:{targets.get('risk_reward',0):.1f}" if targets else "N/A",
+                "توافق DXY": details.get('DXY', 'N/A'),
+                "معامل الارتباط": round(corr, 3),
+                "النظام": regime,
+                "MTF": mtf_cons,
+                "Win Rate": f"{bt.get('win_rate', 0):.1f}%" if bt else "N/A",
+                "Profit Factor": f"{bt.get('profit_factor', 0):.2f}" if bt else "N/A"
+            })
+        except Exception as e:
+            continue
+    return pd.DataFrame(results)
+
+# ============================================================
+# واجهة Streamlit
+# ============================================================
 with st.sidebar:
-    pair=st.selectbox("ط§ظ„ط²ظˆط¬",list(PAIRS))
-    if st.button("ًں”„ طھط­ط¯ظٹط« ط§ظ„ط¨ظٹط§ظ†ط§طھ"):st.cache_data.clear();st.rerun()
+    st.markdown("### 📊 حالة السوق")
+    status, status_text, next_event, close_time = get_market_status()
+    if status == "OPEN":
+        st.markdown(f"🟢 **{status_text}**")
+        st.markdown(f"⏳ **يغلق في:** {time_remaining(next_event)}")
+    else:
+        st.markdown(f"🔴 **{status_text}**")
+        st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
+    st.markdown("---")
+    
+    st.markdown("### 📋 جميع الإشارات")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 تحديث الكل", use_container_width=True):
+            with st.spinner("جارٍ التحليل..."):
+                st.session_state.all_signals = get_all_signals()
+                st.session_state.last_update = datetime.now()
+                st.rerun()
+    with col2:
+        if st.button("🗑️ مسح", use_container_width=True):
+            st.session_state.all_signals = None
+            st.rerun()
+    
+    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+        df_sig = st.session_state.all_signals.copy()
+        df_sig["الإشارة"] = df_sig["الإشارة"].apply(lambda x: "🟢 شراء" if x=="BUY" else "🔴 بيع" if x=="SELL" else "⚪ انتظار")
+        st.dataframe(
+            df_sig[["الزوج", "الإشارة", "الثقة", "النتيجة", "السعر", "توافق DXY"]],
+            column_config={
+                "الزوج": "الزوج",
+                "الإشارة": "الإشارة",
+                "الثقة": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
+                "النتيجة": st.column_config.NumberColumn("النتيجة", format="%d"),
+                "السعر": "السعر",
+                "توافق DXY": "DXY"
+            },
+            hide_index=True,
+            use_container_width=True,
+            height=300
+        )
+        buy = len(df_sig[df_sig["الإشارة"] == "🟢 شراء"])
+        sell = len(df_sig[df_sig["الإشارة"] == "🔴 بيع"])
+        wait = len(df_sig) - buy - sell
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(f"🟢 **{buy}** شراء")
+        c2.markdown(f"🔴 **{sell}** بيع")
+        c3.markdown(f"⚪ **{wait}** انتظار")
+        st.caption(f"🕐 {st.session_state.last_update.strftime('%H:%M:%S')}")
+    else:
+        st.info("اضغط 'تحديث الكل'")
+    
+    st.markdown("---")
+    st.markdown("### 🔍 اختر الزوج")
+    selected_pair = st.selectbox("للتحليل المتقدم", list(PAIRS.keys()), index=0)
+    selected_symbol = PAIRS[selected_pair]
+    st.markdown("---")
+    if st.button("➕ صفقة جديدة", use_container_width=True):
+        st.session_state.show_form = not st.session_state.show_form
 
-if active:
-    st.warning(f"ًں”’ ط§ظ„طµظپظ‚ط© ط§ظ„ظ…ط«ط¨طھط©: {active['name']} {active['direction']} | Entry {active['entry']} | SL {active['stop_loss']} | TP2 {active['target2']}")
-    if st.button("â‌Œ ط¥ط؛ظ„ط§ظ‚ ظˆطھط³ط¬ظٹظ„ ط§ظ„طµظپظ‚ط©"):
-        active["status"]="closed_manual";active["closed_at"]=datetime.now(timezone.utc).isoformat()
-        state["closed_trades"].append(active);state["active_trade"]=None;save_state(state);st.session_state.state=state;st.rerun()
+# ============================================================
+# تحميل بيانات الزوج المختار
+# ============================================================
+price, change = get_spot_price(selected_symbol)
+df = get_historical_data(selected_symbol, period="1mo", interval="1h")
+if df is None:
+    st.error("فشل تحميل البيانات")
+    st.stop()
+if price is None:
+    price = df['close'].iloc[-1]
+    change = 0
 
-cur=analyze(pair,PAIRS[pair])
-if cur is None:st.error("ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظƒط§ظپظٹط©.");st.stop()
+# DXY
+df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
+dxy_signal = None
+corr = 0.0
+if df_dxy is not None and len(df_dxy) > 100:
+    dxy_signal, _, _, _, _, _, _, _, _, _, _, _ = generate_signal_v2003(df_dxy, "DX-Y.NYB")
+    corr = get_dxy_correlation(df, df_dxy, lookback=50)
 
-a,b,c,d,e=st.columns(5)
-a.metric("Price",f"{cur['price']:.5f}");b.metric("4H",cur["4H"]);c.metric("1H",cur["1H"]);d.metric("15M",cur["15M"]);e.metric("DXY",cur["dxy"])
+# حساب المؤشرات للزوج المختار
+df['ema20'] = df['close'].ewm(20).mean()
+df['ema50'] = df['close'].ewm(50).mean()
+df['rsi'] = calc_rsi(df['close'])
+df['atr'] = calc_atr(df)
+df['macd'], df['macd_signal'], df['macd_hist'] = calc_macd(df['close'])
+df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger(df['close'])
+df['adx'], df['plus_di'], df['minus_di'] = calc_adx_correct(df)
+tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
+df['tenkan'] = tenkan
+df['kijun'] = kijun
+df['senkou_a'] = senkou_a
+df['senkou_b'] = senkou_b
+df['chikou'] = chikou
+df['mfi'] = calc_mfi(df)
 
-if cur["signal"]=="BUY":st.success(f"ًںں¢ BUY {cur['grade']} â€” {cur['confidence']}%")
-elif cur["signal"]=="SELL":st.error(f"ًں”´ SELL {cur['grade']} â€” {cur['confidence']}%")
-else:st.info(f"âڑھ WAIT â€” {cur['confidence']}%")
+# توليد الإشارة للزوج المختار
+signal, confidence, score, details, factors, regime, mtf_cons, mtf_count, sl, entry, targets, tbs_info = generate_signal_v2003(
+    df, selected_symbol, dxy_signal, corr
+)
 
-if cur["trade"]:
-    t=cur["trade"]; st.markdown("### ًںژ¯ ط§ظ„طµظپظ‚ط©")
-    a,b,c,d,e=st.columns(5)
-    a.metric("Entry",f"{t['entry']:.5f}");b.metric("SL",f"{t['stop_loss']:.5f}");c.metric("TP1",f"{t['target1']:.5f}");d.metric("TP2",f"{t['target2']:.5f}");e.metric("R/R",f"1:{t['rr']:.2f}")
-    if not active and st.button("ًں”’ طھط«ط¨ظٹطھ AI Trade",use_container_width=True):
-        state["active_trade"]={"id":"BPFX-"+datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),"name":cur["name"],"symbol":cur["symbol"],
-            "direction":t["direction"],"grade":cur["grade"],"confidence":cur["confidence"],**t,"opened_at":datetime.now(timezone.utc).isoformat(),"status":"open"}
-        save_state(state);st.session_state.state=state;st.rerun()
+# ============================================================
+# عرض السعر والمؤشرات
+# ============================================================
+if "Gold" in selected_pair or "Silver" in selected_pair or "Bitcoin" in selected_pair or "Ethereum" in selected_pair:
+    price_fmt = "${:,.2f}"
+else:
+    price_fmt = "{:.4f}"
 
-st.markdown("### ًں”ژ ط£ط³ط¨ط§ط¨ ط§ظ„ظ‚ط±ط§ط±")
-for r in cur["reasons"]:st.write("â€¢",r)
+st.markdown(f"""
+<div class="price-card">
+    <div class="price-label">{selected_pair}</div>
+    <div class="price-value">{price_fmt.format(price)}</div>
+    <div class="price-change" style="color: {'#00ff88' if change >= 0 else '#ff4444'};">
+        {change:+.2f}%
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-z=cur["chart"].tail(250)
-fig=go.Figure(go.Candlestick(x=z.index,open=z.open,high=z.high,low=z.low,close=z.close,name="Price"))
-for col in ["ema20","ema50","ema200"]:fig.add_trace(go.Scatter(x=z.index,y=z[col],name=col.upper()))
-if cur["trade"]:
-    for y,label in [(cur["trade"]["entry"],"ENTRY"),(cur["trade"]["stop_loss"],"SL"),(cur["trade"]["target2"],"TP2")]:
-        fig.add_hline(y=y,line_dash="dash",annotation_text=label)
-fig.update_layout(height=600,template="plotly_dark",xaxis_rangeslider_visible=False)
-st.plotly_chart(fig,use_container_width=True)
+# DXY info
+if dxy_signal:
+    dxy_col = "#00ff88" if dxy_signal=="BUY" else "#ff4444" if dxy_signal=="SELL" else "#ffaa00"
+    st.markdown(f"""
+    <div style="background:rgba(10,10,10,0.5);border-radius:8px;padding:8px 15px;margin:5px 0;border:1px solid rgba(255,215,0,0.08);">
+        <span style="color:#888;font-size:0.8rem;">📊 DXY Signal: </span>
+        <span style="color:{dxy_col};font-weight:bold;font-size:0.9rem;">{dxy_signal}</span>
+        <span style="color:#888;font-size:0.8rem;margin-left:15px;">🔗 Correlation: </span>
+        <span style="color:{'#00ff88' if abs(corr)>0.3 else '#ffaa00'};font-weight:bold;font-size:0.9rem;">{corr:.2f}</span>
+        <span style="color:#666;font-size:0.7rem;margin-left:10px;">({('عكسي قوي' if corr < -0.6 else 'مباشر قوي' if corr > 0.6 else 'متوسط' if abs(corr)>0.3 else 'ضعيف')})</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-st.markdown("---");st.markdown("## ًںڑ¨ ظ…ط§ط³ط­ ط£ط²ظˆط§ط¬ ط§ظ„ط¹ظ…ظ„ط§طھ")
-with st.spinner("ظپط­طµ ط§ظ„ط£ط²ظˆط§ط¬..."):results=scan()
-if results:
-    table=pd.DataFrame([{"Pair":r["name"],"Signal":r["signal"],"Grade":r["grade"],"Confidence":r["confidence"],"4H":r["4H"],"1H":r["1H"],"15M":r["15M"],"RSI":r["rsi"],"ADX":r["adx"],"DXY":r["dxy"],"R/R":r["trade"]["rr"] if r["trade"] else None} for r in results])
-    st.dataframe(table,use_container_width=True,hide_index=True)
-    confirmed=[r for r in results if r["trade"]]
-    if confirmed:
-        st.markdown("### ًںڈ† ط£ظپط¶ظ„ ط§ظ„ظپط±طµ")
-        for r in confirmed[:3]:
-            st.write(f"{'ًںں¢' if r['signal']=='BUY' else 'ًں”´'} **{r['name']}** â€” {r['signal']} {r['grade']} â€” {r['confidence']}% â€” R/R 1:{r['trade']['rr']}")
-            st.caption(" | ".join(r["reasons"][:8]))
-    else:st.info("ظ„ط§ طھظˆط¬ط¯ طµظپظ‚ط© ظ…ظƒطھظ…ظ„ط© ط§ظ„ط¢ظ†ط› ط§ظ„ظ†ط¸ط§ظ… ظ„ط§ ظٹط¬ط¨ط± ط§ظ„ط³ظˆظ‚ ط¹ظ„ظ‰ طµظپظ‚ط©.")
+# Regime
+regime_badge = ""
+if "TRENDING" in regime:
+    regime_badge = '<span class="regime-badge regime-trending">📈 اتجاه</span>'
+elif "RANGING" in regime:
+    regime_badge = '<span class="regime-badge regime-ranging">➖ تذبذب</span>'
+if "HIGH_VOL" in regime:
+    regime_badge += ' <span class="regime-badge regime-volatile">⚡ تقلب عال</span>'
+elif "LOW_VOL" in regime:
+    regime_badge += ' <span class="regime-badge" style="background:rgba(0,150,255,0.15);color:#0096ff;border:1px solid rgba(0,150,255,0.20);">🌊 تقلب منخفض</span>'
+st.markdown(f"**النظام الحالي:** {regime_badge}", unsafe_allow_html=True)
 
-st.markdown("---");st.markdown("## ًں“ڑ ط³ط¬ظ„ ط§ظ„طµظپظ‚ط§طھ")
-closed=state.get("closed_trades",[])
-if closed:
-    st.dataframe(pd.DataFrame([{"ID":x.get("id"),"Pair":x.get("name"),"Direction":x.get("direction"),"Grade":x.get("grade"),"Confidence":x.get("confidence"),"Entry":x.get("entry"),"SL":x.get("stop_loss"),"TP2":x.get("target2"),"Status":x.get("status")} for x in closed[-50:]]),use_container_width=True,hide_index=True)
-else:st.info("ظ„ط§ طھظˆط¬ط¯ طµظپظ‚ط§طھ ظ…ط³ط¬ظ„ط©.")
-st.caption("ط§ظ„ط«ظ‚ط© ظ„ظٹط³طھ ط§ط­طھظ…ط§ظ„ ط±ط¨ط­ ط­ظ‚ظٹظ‚ظٹظ‹ط§. ط§ط®طھط¨ط± ط§ظ„ظ†ط¸ط§ظ… Backtest ظˆForward Test ظ‚ط¨ظ„ ط§ظ„طھط¯ط§ظˆظ„ ط¨ط£ظ…ظˆط§ظ„ ط­ظ‚ظٹظ‚ظٹط©.")
+# ============================================================
+# عرض الصفقة المقترحة
+# ============================================================
+if signal in ["BUY", "SELL"] and confidence >= MIN_CONFIDENCE:
+    direction_text = "شراء" if signal=="BUY" else "بيع"
+    st.markdown(f"""
+    <div class="suggested-trade">
+        <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
+        <b>📍 الدخول:</b> {price_fmt.format(entry)}<br>
+        <b>🛑 وقف الخسارة:</b> {price_fmt.format(sl)}<br>
+        <div class="target-zone"><b>🎯 الهدف 1 (1:1):</b> {price_fmt.format(targets.get('target1'))}</div>
+        <div class="target-zone" style="border-left-color:#ffaa00;"><b>🎯 الهدف 2 (1:1.5):</b> {price_fmt.format(targets.get('target2'))}</div>
+        <div class="target-zone" style="border-left-color:#00ff88;"><b>🎯 الهدف 3 (1:2):</b> {price_fmt.format(targets.get('target3'))}</div>
+        <b>📈 R:R</b> 1:{targets.get('risk_reward',0):.1f}
+    </div>
+    """, unsafe_allow_html=True)
+
+# ============================================================
+# تفاصيل العوامل
+# ============================================================
+with st.expander("📊 تحليل العوامل المتكاملة", expanded=True):
+    cols = st.columns(3)
+    i = 0
+    for factor, value in factors.items():
+        col = cols[i % 3]
+        color = "#00ff88" if value > 0 else "#ff4444" if value < 0 else "#ffaa00"
+        col.metric(factor.capitalize(), f"{value:+d}", delta_color="normal")
+        i += 1
+    st.markdown("#### ملخص التفاصيل")
+    for k, v in details.items():
+        st.write(f"**{k}:** {v}")
+
+# ============================================================
+# باك تست للزوج المختار
+# ============================================================
+bt = run_backtest(df, selected_symbol)
+if bt:
+    st.markdown("#### 📈 باك تست (آخر 500 شمعة)")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("عدد الصفقات", bt['total_trades'])
+    c2.metric("نسبة الربح", f"{bt['win_rate']:.1f}%")
+    c3.metric("متوسط R", f"{bt['avg_r']:.2f}")
+    c4.metric("Profit Factor", f"{bt['profit_factor']:.2f}")
+
+# ============================================================
+# الرسم البياني
+# ============================================================
+st.markdown("---")
+st.markdown("### 📈 Price Chart")
+df_smc = detect_smc_ict(df)
+fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
+fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
+# SMC annotations
+if df_smc['ob_bullish'].iloc[-1]:
+    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
+if df_smc['ob_bearish'].iloc[-1]:
+    fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
+if sl and entry:
+    fig.add_hline(y=sl, line_dash="dash", line_color="red", opacity=0.7, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=sl, text="SL", showarrow=True, arrowhead=1, row=1, col=1)
+    fig.add_hline(y=entry, line_dash="dash", line_color="green", opacity=0.7, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=entry, text="Entry", showarrow=True, arrowhead=1, row=1, col=1)
+# RSI
+fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
+fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
+fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
+# MACD
+fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
+fig.add_bar(x=df.index, y=df['macd_hist'], name='Histogram', marker_color='gray', opacity=0.3, row=3, col=1)
+fig.update_layout(height=800, template='plotly_dark', showlegend=True)
+st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================
+# إدارة الصفقات (مبسطة)
+# ============================================================
+st.markdown("---")
+st.markdown("### 💼 إدارة الصفقات")
+# هنا يمكن إضافة TradeManager بسيط، لكن للاختصار سنتركها فارغة الآن
+
+# ============================================================
+# تذييل
+# ============================================================
+st.markdown(f"""
+<div class="footer">
+    <span class="brand">▲ BLACK PYRAMID v2003</span> • Regime • Structure • Liquidity • SMC • MTF • DXY • Risk • Backtest<br>
+    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+</div>
+""", unsafe_allow_html=True)
