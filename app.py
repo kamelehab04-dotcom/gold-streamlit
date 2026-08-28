@@ -1,7 +1,11 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002
-# تاريخ التحديث: 2026-08-27
-# المصدر: GoldAPI + yfinance
+# BLACK PYRAMID – الإصدار 2002 (مطور)
+# تاريخ التحديث: 2026-08-28
+# الإضافات: 
+# - نظام تحليل الأخبار وتأثيرها على السوق
+# - مفاتيح API جديدة (NewsAPI, Alpha Vantage)
+# - تحليل معنويات السوق
+# - تنبيهات الأخبار العاجلة
 # ==========================================
 
 import streamlit as st
@@ -16,6 +20,14 @@ import requests
 import json
 import os
 import time
+import re
+
+# ==========================================
+# 🔑 API Keys – محدثة بالمفاتيح الجديدة
+# ==========================================
+GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
+NEWS_API_KEY = "b45e3a2b60d74c1bb1e8ddcdfa513bea"
+ALPHA_VANTAGE_KEY = "017FGHT0JLG80XTG"
 
 # ==========================================
 # إعداد الصفحة
@@ -28,7 +40,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# الهوية البصرية
+# 🖤 BLACK PYRAMID – الهوية البصرية
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -50,7 +62,7 @@ st.markdown("""
         pointer-events: none; z-index: 0; animation: bgPulse 10s ease-in-out infinite;
     }
     @keyframes bgPulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
-    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert, .news-card, .explanation-box, .stButton button, .stSelectbox, .stDataFrame, .stMetric, .stPlotlyChart, .stTabs { position: relative !important; z-index: 1 !important; }
+    .main-header, .price-card, .signal-box, .suggested-trade, .trade-row, .entry-zone, .target-zone, .stop-loss-level, .reversal-alert, .news-card, .news-alert, .explanation-box, .stButton button, .stSelectbox, .stDataFrame, .stMetric, .stPlotlyChart, .stTabs { position: relative !important; z-index: 1 !important; }
     .css-1d391kg, .css-1d391kg * { background: rgba(10,10,10,0.85) !important; backdrop-filter: blur(10px) !important; border-right: 1px solid rgba(255,215,0,0.05) !important; }
     .main-header { display: flex; justify-content: flex-end; align-items: center; padding: 10px 25px !important; min-height: 55px !important; background: rgba(0,0,0,0.5) !important; backdrop-filter: blur(8px) !important; border-radius: 12px !important; margin-bottom: 15px !important; border: 1px solid rgba(255,215,0,0.08) !important; }
     .main-header .main-title { font-size: 1.2rem !important; color: #ffd700 !important; font-weight: 700 !important; letter-spacing: 2px !important; }
@@ -73,9 +85,15 @@ st.markdown("""
     .news-card { background: rgba(10,10,10,0.65) !important; border-left: 3px solid #ffd700 !important; border-radius: 8px !important; padding: 10px 15px !important; margin: 5px 0 !important; }
     .news-title { color: #eee !important; font-weight: 500 !important; font-size: 0.9rem !important; }
     .news-date { color: #666 !important; font-size: 0.7rem !important; }
+    .news-alert { background: rgba(255,68,68,0.15) !important; border: 2px solid #ff4444 !important; border-radius: 10px !important; padding: 15px !important; margin: 10px 0 !important; animation: pulseAlert 2s ease-in-out infinite; }
+    .news-alert-bullish { background: rgba(0,255,136,0.10) !important; border: 2px solid #00ff88 !important; border-radius: 10px !important; padding: 15px !important; margin: 10px 0 !important; animation: pulseAlert 2s ease-in-out infinite; }
+    @keyframes pulseAlert { 0%,100% { opacity: 0.8; transform: scale(1); } 50% { opacity: 1; transform: scale(1.01); } }
     .reversal-alert { border: 1px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 10px 15px !important; margin: 5px 0 !important; border-radius: 8px !important; font-size: 0.85rem !important; }
     .pattern-badge { display: inline-block; background: rgba(255,215,0,0.08) !important; border: 1px solid rgba(255,215,0,0.12) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ffd700 !important; }
     .tbs-badge { display: inline-block; background: rgba(255,136,0,0.10) !important; border: 1px solid rgba(255,136,0,0.15) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ff8800 !important; font-weight: bold; }
+    .impact-high { color: #ff4444 !important; font-weight: bold; }
+    .impact-medium { color: #ffaa00 !important; font-weight: bold; }
+    .impact-low { color: #00ff88 !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,19 +108,13 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • News Analysis</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# API Keys – باستخدام المفتاح الجديد
-# ==========================================
-GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"
-
-# ==========================================
-# قائمة الأزواج (جميع الأزواج)
+# قائمة الأزواج
 # ==========================================
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -166,7 +178,7 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 
 # ==========================================
-# دوال جلب البيانات (GoldAPI + yfinance)
+# دوال جلب البيانات
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -213,12 +225,6 @@ def time_remaining(dt):
 
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
-    """
-    جلب السعر الفوري:
-    - GoldAPI للذهب والفضة (دقيق)
-    - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI
-    """
-    # محاولة GoldAPI للذهب والفضة
     if symbol == "GC=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAU/USD"
@@ -226,12 +232,9 @@ def get_spot_price(symbol="GC=F"):
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                price = float(data.get('price', 0))
-                change = float(data.get('change_percent', 0))
-                return price, change
-        except Exception as e:
+                return float(data.get('price', 0)), float(data.get('change_percent', 0))
+        except:
             pass
-    
     if symbol == "SI=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAG/USD"
@@ -239,13 +242,9 @@ def get_spot_price(symbol="GC=F"):
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                price = float(data.get('price', 0))
-                change = float(data.get('change_percent', 0))
-                return price, change
+                return float(data.get('price', 0)), float(data.get('change_percent', 0))
         except:
             pass
-    
-    # البديل: yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -260,9 +259,6 @@ def get_spot_price(symbol="GC=F"):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
-    """
-    جلب البيانات التاريخية من yfinance مع رموز بديلة وإعادة محاولة متعددة
-    """
     alternative_symbols = {
         "GC=F": ["XAUUSD=X", "GOLD"],
         "SI=F": ["XAGUSD=X", "SILVER"],
@@ -271,7 +267,6 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
         "ETH-USD": ["ETHUSD=X"]
     }
     symbols_to_try = [symbol] + alternative_symbols.get(symbol, [])
-    
     for attempt in range(max_retries):
         for sym in symbols_to_try:
             try:
@@ -280,63 +275,193 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
                 if not df.empty:
                     df.columns = [col.lower() for col in df.columns]
                     return df
-            except Exception as e:
+            except:
                 continue
         if attempt < max_retries - 1:
             time.sleep(3)
     return None
 
-@st.cache_data(ttl=60)
-def get_all_forex():
-    main_symbols = {
-        "DXY": "DX-Y.NYB",
-        "EURUSD": "EURUSD=X",
-        "GBPUSD": "GBPUSD=X",
-        "USDJPY": "USDJPY=X",
-        "USDCHF": "USDCHF=X",
-        "AUDUSD": "AUDUSD=X",
-        "NZDUSD": "NZDUSD=X",
-        "USDCAD": "USDCAD=X"
-    }
-    results = {}
-    for name, symbol in main_symbols.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period="1d", interval="5m")
-            if not data.empty:
-                last = data.iloc[-1]
-                first = data.iloc[0]
-                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                results[name] = {'price': float(last['Close']), 'change': float(change)}
-            else:
-                results[name] = {'price': 0, 'change': 0}
-        except:
-            results[name] = {'price': 0, 'change': 0}
-    return results
+# ==========================================
+# نظام تحليل الأخبار المتقدم (بالمفاتيح الجديدة)
+# ==========================================
 
-@st.cache_data(ttl=600)
-def get_economic_news():
+# الكلمات المفتاحية الإيجابية والسلبية
+POSITIVE_KEYWORDS = [
+    "higher", "increase", "growth", "positive", "strong", "beat", "surplus",
+    "rally", "bullish", "up", "gain", "profit", "support", "stimulus",
+    "cut", "reduce", "lower", "drop", "pullback", "correction", "recovery"
+]
+
+NEGATIVE_KEYWORDS = [
+    "lower", "decrease", "decline", "negative", "weak", "miss", "deficit",
+    "crash", "bearish", "down", "loss", "concern", "fear", "uncertainty",
+    "hike", "raise", "higher rates", "inflation", "recession", "crisis",
+    "war", "conflict", "sanctions", "default"
+]
+
+ECONOMIC_INDICATORS = {
+    "CPI": "تضخم أسعار المستهلكين",
+    "PPI": "تضخم أسعار المنتجين",
+    "GDP": "الناتج المحلي الإجمالي",
+    "NFP": "الوظائف غير الزراعية",
+    "Unemployment": "البطالة",
+    "PMI": "مؤشر مديري المشتريات",
+    "Fed": "الاحتياطي الفيدرالي",
+    "FOMC": "لجنة السوق المفتوحة",
+    "ECB": "البنك المركزي الأوروبي",
+    "BOE": "بنك إنجلترا",
+    "BOJ": "بنك اليابان",
+    "Rate": "سعر الفائدة",
+    "Inflation": "التضخم",
+    "Retail Sales": "مبيعات التجزئة",
+    "Durable Goods": "السلع المعمرة",
+    "Consumer Confidence": "ثقة المستهلك"
+}
+
+@st.cache_data(ttl=60)
+def fetch_news():
+    """جلب الأخبار الاقتصادية من NewsAPI"""
     try:
-        url = f"https://newsapi.org/v2/everything?q=gold OR forex OR economy&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize=5"
+        url = f"https://newsapi.org/v2/everything?q=forex OR gold OR economy OR inflation OR fed OR interest rates OR stock market&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize=15"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            articles = data.get('articles', [])
-            news_list = []
-            for art in articles[:5]:
-                news_list.append({
-                    'title': art.get('title', ''),
-                    'source': art.get('source', {}).get('name', ''),
-                    'publishedAt': art.get('publishedAt', ''),
-                    'url': art.get('url', '')
+            return data.get('articles', [])
+        else:
+            st.warning(f"⚠️ NewsAPI error: {response.status_code}")
+    except Exception as e:
+        st.error(f"❌ خطأ في جلب الأخبار: {e}")
+    return []
+
+@st.cache_data(ttl=3600)
+def get_economic_indicator(indicator="CPI"):
+    """جلب مؤشرات اقتصادية من Alpha Vantage"""
+    try:
+        url = f"https://www.alphavantage.co/query?function={indicator}&apikey={ALPHA_VANTAGE_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return data
+    except:
+        pass
+    return None
+
+@st.cache_data(ttl=300)
+def get_economic_calendar_real():
+    """جلب التقويم الاقتصادي من Alpha Vantage"""
+    try:
+        url = f"https://www.alphavantage.co/query?function=ECONOMIC_CALENDAR&apikey={ALPHA_VANTAGE_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            events = []
+            for item in data.get("data", [])[:5]:
+                events.append({
+                    "time": item.get("time", "N/A"),
+                    "event": item.get("event", "N/A"),
+                    "impact": item.get("impact", "MEDIUM"),
+                    "previous": item.get("previous", "N/A"),
+                    "forecast": item.get("forecast", "N/A")
                 })
-            return news_list
+            return events
     except:
         pass
     return []
 
+def analyze_news_impact(articles):
+    """تحليل تأثير الأخبار على السوق"""
+    analyzed_news = []
+    for article in articles[:8]:
+        title = article.get('title', '')
+        description = article.get('description', '')
+        content = f"{title} {description}".lower()
+        
+        indicator = None
+        for key, name in ECONOMIC_INDICATORS.items():
+            if key.lower() in content or name in content:
+                indicator = name
+                break
+        
+        positive_score = sum(1 for word in POSITIVE_KEYWORDS if word in content)
+        negative_score = sum(1 for word in NEGATIVE_KEYWORDS if word in content)
+        
+        if positive_score > negative_score:
+            impact = "BULLISH"
+            impact_text = "📈 إيجابي (صاعد)"
+            color = "#00ff88"
+        elif negative_score > positive_score:
+            impact = "BEARISH"
+            impact_text = "📉 سلبي (هابط)"
+            color = "#ff4444"
+        else:
+            impact = "NEUTRAL"
+            impact_text = "➖ محايد"
+            color = "#ffaa00"
+        
+        total_score = positive_score + negative_score
+        if total_score >= 5:
+            strength = "HIGH"
+            strength_text = "🔴 قوي"
+        elif total_score >= 3:
+            strength = "MEDIUM"
+            strength_text = "🟡 متوسط"
+        else:
+            strength = "LOW"
+            strength_text = "🟢 ضعيف"
+        
+        analyzed_news.append({
+            "title": title,
+            "description": description,
+            "source": article.get('source', {}).get('name', 'Unknown'),
+            "publishedAt": article.get('publishedAt', ''),
+            "url": article.get('url', ''),
+            "indicator": indicator,
+            "impact": impact,
+            "impact_text": impact_text,
+            "strength": strength,
+            "strength_text": strength_text,
+            "color": color,
+            "positive_score": positive_score,
+            "negative_score": negative_score
+        })
+    
+    return analyzed_news
+
+def get_market_sentiment(analyzed_news):
+    """حساب معنويات السوق العامة"""
+    bullish_count = sum(1 for n in analyzed_news if n['impact'] == "BULLISH")
+    bearish_count = sum(1 for n in analyzed_news if n['impact'] == "BEARISH")
+    neutral_count = sum(1 for n in analyzed_news if n['impact'] == "NEUTRAL")
+    
+    total = bullish_count + bearish_count + neutral_count
+    if total == 0:
+        return "NEUTRAL", 0
+    
+    sentiment_score = (bullish_count - bearish_count) / total * 100
+    
+    if sentiment_score > 30:
+        return "BULLISH", sentiment_score
+    elif sentiment_score < -30:
+        return "BEARISH", sentiment_score
+    else:
+        return "NEUTRAL", sentiment_score
+
+def get_economic_calendar():
+    """جلب التقويم الاقتصادي (محاولة Alpha Vantage أولاً، ثم الاحتياطي)"""
+    events = get_economic_calendar_real()
+    if events:
+        return events
+    
+    # بيانات احتياطية
+    return [
+        {"time": "08:30", "event": "مؤشر أسعار المستهلكين (CPI)", "impact": "HIGH", "previous": "3.2%", "forecast": "3.0%"},
+        {"time": "10:00", "event": "مبيعات التجزئة", "impact": "MEDIUM", "previous": "0.5%", "forecast": "0.3%"},
+        {"time": "14:00", "event": "قرار سعر الفائدة - الاحتياطي الفيدرالي", "impact": "HIGH", "previous": "5.50%", "forecast": "5.50%"},
+        {"time": "16:30", "event": "محضر اجتماع FOMC", "impact": "HIGH", "previous": "-", "forecast": "-"},
+    ]
+
 # ==========================================
-# المؤشرات الأساسية (نفسها)
+# المؤشرات الأساسية
 # ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
@@ -615,9 +740,9 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# الإشارة المتكاملة
+# الإشارة المتكاملة (مع تأثير الأخبار)
 # ==========================================
-def generate_advanced_signal(df, current_price, symbol=""):
+def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
 
@@ -634,6 +759,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3, 'smr': 3
     }
 
+    # RSI
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -645,6 +771,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
+    # MACD
     if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
             scores['BUY'] += weights['macd']
@@ -655,6 +782,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD'] = "محايد"
 
+    # BB
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
         if current_price <= last['bb_lower'] * 1.005:
             scores['BUY'] += weights['bb']
@@ -665,6 +793,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['BB'] = "وسط النطاق"
 
+    # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
             scores['BUY'] += weights['vwap']
@@ -673,6 +802,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             scores['SELL'] += weights['vwap']
             details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
+    # ADX
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
@@ -684,6 +814,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
+    # Ichimoku
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
@@ -695,6 +826,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
+    # SMC
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']
         details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
@@ -728,6 +860,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMC'] = "لا توجد إشارة SMC"
 
+    # SMR
     if last_smc.get('smr_bullish', False):
         scores['BUY'] += weights['smr']
         details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
@@ -737,6 +870,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['SMR'] = "لا توجد إشارة SMR"
 
+    # Patterns
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
@@ -748,6 +882,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['Pattern'] = "لا توجد نماذج"
 
+    # TBS
     if tbs_type == "BULLISH":
         scores['BUY'] += weights['tbs']
         details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
@@ -757,6 +892,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     else:
         details['TBS'] = "لا توجد إشارة TBS"
 
+    # MFI
     if 'mfi' in df.columns and not pd.isna(last['mfi']):
         mfi = last['mfi']
         if mfi < 20:
@@ -768,6 +904,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
+    # Fibonacci
     recent_high = df['high'].iloc[-50:].max()
     recent_low = df['low'].iloc[-50:].min()
     fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
@@ -780,6 +917,18 @@ def generate_advanced_signal(df, current_price, symbol=""):
             details['Fibonacci'] = f"تحت 0.382 +2 SELL"
         else:
             details['Fibonacci'] = "منطقة وسط"
+
+    # ===== تأثير الأخبار =====
+    if news_sentiment:
+        sentiment, score = news_sentiment
+        if sentiment == "BULLISH":
+            scores['BUY'] += 2
+            details['News_Sentiment'] = f"📈 أخبار إيجابية ({score:.0f}%) +2 BUY"
+        elif sentiment == "BEARISH":
+            scores['SELL'] += 2
+            details['News_Sentiment'] = f"📉 أخبار سلبية ({score:.0f}%) +2 SELL"
+        else:
+            details['News_Sentiment'] = "➖ أخبار محايدة"
 
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
@@ -801,6 +950,13 @@ def generate_advanced_signal(df, current_price, symbol=""):
             if current_atr < avg_atr * 0.7:
                 confidence = confidence * 0.6
                 details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة)"
+
+    # تقليل الثقة في حالة الأخبار القوية
+    if news_sentiment:
+        sentiment, score = news_sentiment
+        if abs(score) > 50:
+            confidence = confidence * 0.7
+            details['News_Warning'] = f"⚠️ أخبار قوية قد تغير الاتجاه (ثقة مخفضة)"
 
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
@@ -937,13 +1093,13 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد"]):
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "أخبار إيجابية"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
-            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط"]):
+            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط", "أخبار سلبية"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
@@ -952,6 +1108,10 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         for k, v in details.items():
             explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
+    
+    if "News_Warning" in details:
+        explanation += f"\n\n⚠️ **تنبيه**: {details['News_Warning']}"
+        explanation += "\n📰 يُنصح بتوخي الحذر ومراقبة الأخبار قبل الدخول في الصفقة."
     
     if stop_loss and entry_price and targets:
         explanation += f"\n\n📍 **سعر الدخول المقترح:** {entry_price:.4f}"
@@ -1001,11 +1161,15 @@ def get_mtf_signal(symbol, current_price):
         return "NEUTRAL", 0
 
 # ==========================================
-# جمع إشارات جميع الأزواج مع تفاصيل الصفقة
+# جمع إشارات جميع الأزواج
 # ==========================================
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
     results = []
+    articles = fetch_news()
+    analyzed_news = analyze_news_impact(articles) if articles else []
+    news_sentiment = get_market_sentiment(analyzed_news) if analyzed_news else ("NEUTRAL", 0)
+    
     for pair_name, symbol in PAIRS.items():
         try:
             df = get_historical_data(symbol, period="1mo", interval="1h")
@@ -1029,7 +1193,7 @@ def get_all_signals_with_trades():
             df['chikou'] = chikou
             df['mfi'] = calc_mfi(df)
             
-            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, symbol)
+            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, symbol, news_sentiment)
             
             if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
                 price_str = f"${current_price:,.2f}"
@@ -1064,7 +1228,7 @@ def get_all_signals_with_trades():
             })
         except Exception as e:
             continue
-    return pd.DataFrame(results)
+    return pd.DataFrame(results), analyzed_news, news_sentiment
 
 # ==========================================
 # إدارة الصفقات
@@ -1146,7 +1310,7 @@ class TradeManager:
         return None
 
 # ==========================================
-# الشريط الجانبي والواجهة الرئيسية
+# الشريط الجانبي
 # ==========================================
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
@@ -1166,12 +1330,13 @@ with st.sidebar:
     with col1:
         if st.button("🔄 تحديث الكل", use_container_width=True):
             with st.spinner("جارٍ التحليل..."):
-                st.session_state.all_signals = get_all_signals_with_trades()
+                st.session_state.all_signals, st.session_state.news_analyzed, st.session_state.news_sentiment = get_all_signals_with_trades()
                 st.session_state.last_update = datetime.now()
                 st.rerun()
     with col2:
         if st.button("🗑️ مسح", use_container_width=True):
             st.session_state.all_signals = None
+            st.session_state.news_analyzed = None
             st.rerun()
     
     if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
@@ -1216,6 +1381,68 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
+# عرض الأخبار العاجلة
+# ==========================================
+st.markdown("---")
+st.markdown("### 🔴 أخبار عاجلة وتحليل تأثيرها على السوق")
+
+articles = fetch_news()
+if articles:
+    analyzed_news = analyze_news_impact(articles)
+    sentiment, sentiment_score = get_market_sentiment(analyzed_news)
+    
+    if sentiment == "BULLISH":
+        st.markdown(f"""
+        <div class="news-alert-bullish">
+            <b>📈 معنويات السوق العامة: إيجابية</b><br>
+            نسبة الإيجابية: {sentiment_score:.1f}%<br>
+            <span style="color:#00ff88;">🟢 الأخبار تدعم الاتجاه الصاعد</span>
+        </div>
+        """, unsafe_allow_html=True)
+    elif sentiment == "BEARISH":
+        st.markdown(f"""
+        <div class="news-alert">
+            <b>📉 معنويات السوق العامة: سلبية</b><br>
+            نسبة السلبية: {sentiment_score:.1f}%<br>
+            <span style="color:#ff4444;">🔴 الأخبار تدعم الاتجاه الهابط</span>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div style="background: rgba(255,170,0,0.10); border: 2px solid #ffaa00; border-radius: 10px; padding: 15px; margin: 10px 0;">
+            <b>➖ معنويات السوق العامة: محايدة</b><br>
+            <span style="color:#ffaa00;">🟡 لا توجد إشارة واضحة من الأخبار</span>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("#### 📰 آخر الأخبار الاقتصادية")
+    for news in analyzed_news[:5]:
+        impact_icon = "📈" if news['impact'] == "BULLISH" else ("📉" if news['impact'] == "BEARISH" else "➖")
+        impact_class = "impact-high" if news['strength'] == "HIGH" else ("impact-medium" if news['strength'] == "MEDIUM" else "impact-low")
+        
+        st.markdown(f"""
+        <div class="news-card">
+            <div class="news-title">
+                <a href="{news['url']}" target="_blank">{news['title'][:100]}...</a>
+            </div>
+            <div class="news-date">
+                {impact_icon} <span class="{impact_class}">{news['impact_text']}</span> | 
+                القوة: {news['strength_text']} | 
+                {news['source']} - {news['publishedAt'][:10]}
+                {f' | 📊 {news["indicator"]}' if news['indicator'] else ''}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    high_impact_news = [n for n in analyzed_news if n['strength'] == "HIGH"]
+    if high_impact_news:
+        st.warning(f"⚠️ هناك {len(high_impact_news)} أخبار قوية قد تؤثر بشكل كبير على اتجاه السوق. يُنصح بتوخي الحذر.")
+else:
+    st.info("لا توجد أخبار حالياً. يرجى التحقق من اتصال الإنترنت أو مفتاح NewsAPI.")
+
+st.markdown("---")
+
+# ==========================================
 # جلب البيانات للزوج المختار
 # ==========================================
 for attempt in range(3):
@@ -1255,9 +1482,13 @@ df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
 # ==========================================
-# توليد الإشارة
+# توليد الإشارة (مع تأثير الأخبار)
 # ==========================================
-signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol)
+articles = fetch_news()
+analyzed_news = analyze_news_impact(articles) if articles else []
+news_sentiment = get_market_sentiment(analyzed_news) if analyzed_news else ("NEUTRAL", 0)
+
+signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol, news_sentiment)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # ==========================================
@@ -1557,25 +1788,32 @@ if st.session_state.show_form:
             st.rerun()
 
 # ==========================================
-# الأخبار
+# الأخبار والتقويم الاقتصادي
 # ==========================================
 st.markdown("---")
 st.markdown("### 📰 الأخبار الاقتصادية والتقويم")
-news = get_economic_news()
-if news:
-    for item in news:
+
+# عرض التقويم الاقتصادي
+st.markdown("#### 📅 التقويم الاقتصادي اليوم")
+calendar_events = get_economic_calendar()
+if calendar_events:
+    for event in calendar_events:
+        impact_color = "#ff4444" if event['impact'] == "HIGH" else ("#ffaa00" if event['impact'] == "MEDIUM" else "#00ff88")
         st.markdown(f"""
-        <div class="news-card">
-            <div class="news-title"><a href="{item['url']}" target="_blank">{item['title']}</a></div>
-            <div class="news-date">{item['source']} - {item['publishedAt'][:10]}</div>
+        <div style="border-left: 4px solid {impact_color}; padding: 8px 12px; margin: 4px 0; background: rgba(10,10,10,0.4); border-radius: 4px;">
+            <b>{event['time']}</b> - {event['event']}
+            <span style="color: {impact_color}; font-weight: bold;">({event['impact']})</span>
+            <br><span style="color: #888; font-size: 0.8rem;">السابق: {event['previous']} | المتوقع: {event['forecast']}</span>
         </div>
         """, unsafe_allow_html=True)
 else:
-    st.info("لا توجد أخبار حالياً")
-st.write("**📅 التقويم الاقتصادي:**")
+    st.info("لا توجد أحداث اقتصادية اليوم")
+
+st.write("**📅 مصادر التقويم الاقتصادي:**")
 st.markdown("""
 - [Investing.com Economic Calendar](https://www.investing.com/economic-calendar/)
 - [ForexFactory Economic Calendar](https://www.forexfactory.com/calendar)
+- [Trading Economics](https://tradingeconomics.com/calendar)
 """)
 
 # ==========================================
@@ -1666,6 +1904,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • News Analysis • Integrated Signals • Stop Loss & Targets
 </div>
 """, unsafe_allow_html=True)
