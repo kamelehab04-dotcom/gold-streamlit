@@ -1,7 +1,7 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002
-# تاريخ التحديث: 2026-08-27
-# المصدر: GoldAPI + yfinance
+# BLACK PYRAMID – الإصدار 2002 (نهائي متكامل)
+# تاريخ التحديث: 2026-08-29
+# المصدر: GoldAPI + yfinance + تحليلات متقدمة
 # ==========================================
 
 import streamlit as st
@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# الهوية البصرية
+# الهوية البصرية (نفسها)
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -90,13 +90,13 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# API Keys – باستخدام المفتاح الجديد
+# API Keys
 # ==========================================
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
@@ -166,7 +166,7 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 
 # ==========================================
-# دوال جلب البيانات (GoldAPI + yfinance)
+# دوال جلب البيانات (GoldAPI + yfinance) - نفسها
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -213,12 +213,7 @@ def time_remaining(dt):
 
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
-    """
-    جلب السعر الفوري:
-    - GoldAPI للذهب والفضة (دقيق)
-    - yfinance كبديل لباقي الأصول أو في حال فشل GoldAPI
-    """
-    # محاولة GoldAPI للذهب والفضة
+    # GoldAPI
     if symbol == "GC=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAU/USD"
@@ -245,7 +240,7 @@ def get_spot_price(symbol="GC=F"):
         except:
             pass
     
-    # البديل: yfinance
+    # yfinance
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
@@ -260,9 +255,6 @@ def get_spot_price(symbol="GC=F"):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
-    """
-    جلب البيانات التاريخية من yfinance مع رموز بديلة وإعادة محاولة متعددة
-    """
     alternative_symbols = {
         "GC=F": ["XAUUSD=X", "GOLD"],
         "SI=F": ["XAGUSD=X", "SILVER"],
@@ -430,7 +422,7 @@ def detect_smart_money_reversal(df, lookback=20):
     return df
 
 # ==========================================
-# SMC/ICT
+# SMC/ICT (مطورة)
 # ==========================================
 def analyze_smc_ict(df):
     df = df.copy()
@@ -537,7 +529,7 @@ def detect_tbs(df, lookback=20, body_multiplier=1.5):
     return None, None, None, None
 
 # ==========================================
-# أنماط
+# أنماط هيكلية محسنة (متعددة)
 # ==========================================
 def find_peaks_troughs(series, order=5):
     peaks, troughs = [], []
@@ -595,27 +587,258 @@ def detect_triangle_pattern(df, lookback=40):
         return "DESCENDING_TRIANGLE", 3
     return None, 0
 
+def detect_triple_top_bottom(df, lookback=50, tolerance=0.02):
+    if len(df) < lookback:
+        return None, 0
+    highs = df['high'].iloc[-lookback:].values
+    lows = df['low'].iloc[-lookback:].values
+    peaks, _ = find_peaks_troughs(highs, order=3)
+    _, troughs = find_peaks_troughs(lows, order=3)
+    if len(peaks) >= 3:
+        last_three = sorted(peaks[-3:], key=lambda x: x[0])
+        p1, p2, p3 = last_three[-3][1], last_three[-2][1], last_three[-1][1]
+        if abs(p1 - p2) / p1 < tolerance and abs(p2 - p3) / p2 < tolerance:
+            return "TRIPLE_TOP", 5
+    if len(troughs) >= 3:
+        last_three = sorted(troughs[-3:], key=lambda x: x[0])
+        t1, t2, t3 = last_three[-3][1], last_three[-2][1], last_three[-1][1]
+        if abs(t1 - t2) / t1 < tolerance and abs(t2 - t3) / t2 < tolerance:
+            return "TRIPLE_BOTTOM", 5
+    return None, 0
+
+def detect_wedge(df, lookback=40):
+    if len(df) < lookback:
+        return None, 0
+    recent = df.iloc[-lookback:]
+    highs = recent['high'].values
+    lows = recent['low'].values
+    x = np.arange(len(highs))
+    slope_h = np.polyfit(x, highs, 1)[0]
+    slope_l = np.polyfit(x, lows, 1)[0]
+    if slope_h > 0.002 and slope_l > 0.001 and slope_h > slope_l:
+        return "RISING_WEDGE", 3
+    if slope_h < -0.002 and slope_l < -0.001 and slope_h < slope_l:
+        return "FALLING_WEDGE", 3
+    return None, 0
+
+def detect_flag_pennant(df, lookback=30):
+    if len(df) < lookback:
+        return None, 0
+    recent = df.iloc[-lookback:]
+    first_half = recent.iloc[:lookback//2]
+    second_half = recent.iloc[lookback//2:]
+    if first_half['close'].max() - first_half['close'].min() > 2 * (second_half['close'].max() - second_half['close'].min()):
+        return "FLAG", 3
+    return None, 0
+
 def analyze_chart_patterns(df):
     patterns = []
     total_score = 0
+
     p, s = detect_head_shoulders(df)
     if p:
-        patterns.append({"pattern": p, "score": s, "direction": "BEARISH"})
-        total_score += s
-    p, s = detect_double_top_bottom(df)
-    if p:
-        direction = "BEARISH" if "DOUBLE_TOP" in p else "BULLISH"
+        direction = "BEARISH" if "HEAD" in p else "BULLISH"
         patterns.append({"pattern": p, "score": s, "direction": direction})
         total_score += s
+
+    p, s = detect_double_top_bottom(df)
+    if p:
+        direction = "BEARISH" if "TOP" in p else "BULLISH"
+        patterns.append({"pattern": p, "score": s, "direction": direction})
+        total_score += s
+
     p, s = detect_triangle_pattern(df)
     if p:
         direction = "BULLISH" if "ASCENDING" in p else "BEARISH"
         patterns.append({"pattern": p, "score": s, "direction": direction})
         total_score += s
+
+    p, s = detect_triple_top_bottom(df)
+    if p:
+        direction = "BEARISH" if "TOP" in p else "BULLISH"
+        patterns.append({"pattern": p, "score": s, "direction": direction})
+        total_score += s
+
+    p, s = detect_wedge(df)
+    if p:
+        direction = "BEARISH" if "RISING" in p else "BULLISH"
+        patterns.append({"pattern": p, "score": s, "direction": direction})
+        total_score += s
+
+    p, s = detect_flag_pennant(df)
+    if p:
+        last_close = df['close'].iloc[-1]
+        prev_close = df['close'].iloc[-5]
+        direction = "BULLISH" if last_close > prev_close else "BEARISH"
+        patterns.append({"pattern": p, "score": s, "direction": direction})
+        total_score += s
+
     return patterns, total_score
 
 # ==========================================
-# الإشارة المتكاملة
+# دوال متقدمة جديدة (شموع، تباعد، تكيف، كتل، قتل)
+# ==========================================
+
+def detect_candlestick_patterns(df):
+    """كشف أنماط الشموع اليابانية الانعكاسية"""
+    patterns = []
+    if len(df) < 3:
+        return patterns
+    
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    prev2 = df.iloc[-3]
+    
+    body = abs(last['close'] - last['open'])
+    total_range = last['high'] - last['low']
+    
+    # Bullish Engulfing
+    if (prev['close'] < prev['open'] and 
+        last['close'] > last['open'] and 
+        last['open'] < prev['close'] and 
+        last['close'] > prev['open']):
+        patterns.append({"pattern": "BULLISH_ENGULFING", "direction": "BULLISH", "score": 3})
+    
+    # Bearish Engulfing
+    if (prev['close'] > prev['open'] and 
+        last['close'] < last['open'] and 
+        last['open'] > prev['close'] and 
+        last['close'] < prev['open']):
+        patterns.append({"pattern": "BEARISH_ENGULFING", "direction": "BEARISH", "score": 3})
+    
+    # Hammer
+    lower_wick = min(last['close'], last['open']) - last['low']
+    upper_wick = last['high'] - max(last['close'], last['open'])
+    if body > 0 and lower_wick > body * 2 and upper_wick < body * 0.3:
+        patterns.append({"pattern": "HAMMER", "direction": "BULLISH", "score": 2})
+    
+    # Shooting Star
+    if body > 0 and upper_wick > body * 2 and lower_wick < body * 0.3:
+        patterns.append({"pattern": "SHOOTING_STAR", "direction": "BEARISH", "score": 2})
+    
+    # Doji
+    if total_range > 0 and body < total_range * 0.15:
+        patterns.append({"pattern": "DOJI", "direction": "NEUTRAL", "score": 1})
+    
+    # Morning Star
+    if (prev2['close'] < prev2['open'] and 
+        abs(prev['close'] - prev['open']) < abs(prev2['close'] - prev2['open']) * 0.3 and
+        last['close'] > last['open'] and 
+        last['close'] > (prev2['open'] + prev2['close']) / 2):
+        patterns.append({"pattern": "MORNING_STAR", "direction": "BULLISH", "score": 4})
+    
+    # Evening Star
+    if (prev2['close'] > prev2['open'] and 
+        abs(prev['close'] - prev['open']) < abs(prev2['close'] - prev2['open']) * 0.3 and
+        last['close'] < last['open'] and 
+        last['close'] < (prev2['open'] + prev2['close']) / 2):
+        patterns.append({"pattern": "EVENING_STAR", "direction": "BEARISH", "score": 4})
+    
+    return patterns
+
+
+def detect_rsi_divergence(df, rsi_column='rsi', lookback=20):
+    """كشف التباعد (Divergence) بين السعر و RSI"""
+    if len(df) < lookback or rsi_column not in df.columns:
+        return None, 0
+    
+    recent_highs = df['high'].iloc[-lookback:].values
+    recent_lows = df['low'].iloc[-lookback:].values
+    recent_rsi = df[rsi_column].iloc[-lookback:].values
+    
+    # Bullish Divergence
+    if len(recent_lows) > 5:
+        min1_idx = np.argmin(recent_lows)
+        if min1_idx > 2:
+            prev_min_idx = np.argmin(recent_lows[:min1_idx-1])
+            if recent_lows[min1_idx] < recent_lows[prev_min_idx] and recent_rsi[min1_idx] > recent_rsi[prev_min_idx]:
+                return "BULLISH_DIVERGENCE", 4
+            if recent_lows[min1_idx] > recent_lows[prev_min_idx] and recent_rsi[min1_idx] < recent_rsi[prev_min_idx]:
+                return "HIDDEN_BULLISH_DIV", 3
+
+    # Bearish Divergence
+    if len(recent_highs) > 5:
+        max1_idx = np.argmax(recent_highs)
+        if max1_idx > 2:
+            prev_max_idx = np.argmax(recent_highs[:max1_idx-1])
+            if recent_highs[max1_idx] > recent_highs[prev_max_idx] and recent_rsi[max1_idx] < recent_rsi[prev_max_idx]:
+                return "BEARISH_DIVERGENCE", 4
+            if recent_highs[max1_idx] < recent_highs[prev_max_idx] and recent_rsi[max1_idx] > recent_rsi[prev_max_idx]:
+                return "HIDDEN_BEARISH_DIV", 3
+    
+    return None, 0
+
+
+def check_fresh_order_block(df_smc):
+    """التحقق من وجود كتلة أوامر طازجة (لم يتم لمسها)"""
+    if len(df_smc) < 10:
+        return False, None
+    
+    bull_obs = df_smc[df_smc['order_block_bullish'] == True]
+    if not bull_obs.empty:
+        last_idx = bull_obs.index[-1]
+        if df_smc['close'].iloc[-1] > df_smc['high'].loc[last_idx]:
+            return True, "BUY"
+    
+    bear_obs = df_smc[df_smc['order_block_bearish'] == True]
+    if not bear_obs.empty:
+        last_idx = bear_obs.index[-1]
+        if df_smc['close'].iloc[-1] < df_smc['low'].loc[last_idx]:
+            return True, "SELL"
+    
+    return False, None
+
+
+def is_ict_killzone():
+    """تحديد منطقة القتل الزمنية ICT (لندن/نيويورك)"""
+    eastern = pytz.timezone('US/Eastern')
+    now = datetime.now(eastern)
+    hour = now.hour
+    minute = now.minute
+    current_time = hour + minute/60.0
+    
+    if 2.0 <= current_time < 5.0:
+        return "LONDON", 3
+    elif 8.0 <= current_time < 11.0:
+        return "NY", 3
+    elif 18.0 <= current_time or current_time < 2.0:
+        return "ASIA", 1
+    return None, 0
+
+
+def get_major_trend(df):
+    """تحديد الاتجاه الرئيسي بناءً على EMA200"""
+    if len(df) < 200:
+        return "NEUTRAL"
+    ema200 = df['close'].ewm(span=200, adjust=False).mean().iloc[-1]
+    price = df['close'].iloc[-1]
+    if price > ema200 * 1.01:
+        return "BULLISH"
+    elif price < ema200 * 0.99:
+        return "BEARISH"
+    return "NEUTRAL"
+
+
+def get_dynamic_weights(df):
+    """تعديل أوزان المؤشرات حسب حالة السوق (اتجاهي أو عرضي)"""
+    adx_val = df['adx'].iloc[-1] if not pd.isna(df['adx'].iloc[-1]) else 20
+    weights = {
+        'rsi': 2, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 
+        'ichimoku': 2, 'smc': 3, 'patterns': 4, 'tbs': 4, 
+        'mfi': 2, 'smr': 3, 'candle': 3, 'divergence': 4, 'fresh_ob': 3
+    }
+    if adx_val > 25:
+        weights['ichimoku'] = 4
+        weights['rsi'] = 1
+        weights['bb'] = 1
+    else:
+        weights['bb'] = 4
+        weights['rsi'] = 4
+        weights['ichimoku'] = 1
+    return weights
+
+# ==========================================
+# الإشارة المتكاملة (النسخة النهائية)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol=""):
     if df is None or len(df) < 100:
@@ -625,15 +848,13 @@ def generate_advanced_signal(df, current_price, symbol=""):
     last_smc = df_smc.iloc[-1]
     patterns, _ = analyze_chart_patterns(df)
     tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
-
     last = df.iloc[-1]
+
+    weights = get_dynamic_weights(df)
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
-    weights = {
-        'rsi': 3, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 'ichimoku': 3,
-        'smc': 3, 'patterns': 4, 'tbs': 4, 'mfi': 3, 'smr': 3
-    }
 
+    # مؤشرات أساسية
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if rsi < 30:
@@ -645,7 +866,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
-    if 'macd' in df.columns and 'macd_signal' in df.columns and not pd.isna(last['macd']):
+    if 'macd' in df.columns and 'macd_signal' in df.columns:
         if last['macd'] > last['macd_signal'] and last['macd'] > 0:
             scores['BUY'] += weights['macd']
             details['MACD'] = f"إيجابي +{weights['macd']}"
@@ -655,7 +876,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD'] = "محايد"
 
-    if 'bb_upper' in df.columns and 'bb_lower' in df.columns and not pd.isna(last['bb_upper']):
+    if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
         if current_price <= last['bb_lower'] * 1.005:
             scores['BUY'] += weights['bb']
             details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
@@ -684,8 +905,8 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
-    if 'senkou_a' in df.columns and 'senkou_b' in df.columns and 'chikou' in df.columns:
-        if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']) and not pd.isna(last['chikou']):
+    if 'senkou_a' in df.columns and 'senkou_b' in df.columns:
+        if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
                 scores['BUY'] += weights['ichimoku']
                 details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
@@ -694,68 +915,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
             else:
                 details['Ichimoku'] = "داخل السحابة"
-
-    if last_smc.get('order_block_bullish', False):
-        scores['BUY'] += weights['smc']
-        details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
-    elif last_smc.get('order_block_bearish', False):
-        scores['SELL'] += weights['smc']
-        details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
-    elif last_smc.get('fvg_bullish', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"FVG شراء +{weights['smc']//2}"
-    elif last_smc.get('fvg_bearish', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"FVG بيع +{weights['smc']//2}"
-    elif last_smc.get('liquidity_sweep_bullish', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"اجتياح سيولة شراء +{weights['smc']//2}"
-    elif last_smc.get('liquidity_sweep_bearish', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"اجتياح سيولة بيع +{weights['smc']//2}"
-    elif last_smc.get('mss_bullish', False):
-        scores['BUY'] += weights['smc']
-        details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
-    elif last_smc.get('mss_bearish', False):
-        scores['SELL'] += weights['smc']
-        details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
-    elif last_smc.get('in_discount', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
-    elif last_smc.get('in_premium', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
-    else:
-        details['SMC'] = "لا توجد إشارة SMC"
-
-    if last_smc.get('smr_bullish', False):
-        scores['BUY'] += weights['smr']
-        details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
-    elif last_smc.get('smr_bearish', False):
-        scores['SELL'] += weights['smr']
-        details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
-    else:
-        details['SMR'] = "لا توجد إشارة SMR"
-
-    if patterns:
-        for p in patterns:
-            if p['direction'] == 'BULLISH':
-                scores['BUY'] += weights['patterns']
-                details['Pattern'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
-            else:
-                scores['SELL'] += weights['patterns']
-                details['Pattern'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
-    else:
-        details['Pattern'] = "لا توجد نماذج"
-
-    if tbs_type == "BULLISH":
-        scores['BUY'] += weights['tbs']
-        details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
-    elif tbs_type == "BEARISH":
-        scores['SELL'] += weights['tbs']
-        details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
-    else:
-        details['TBS'] = "لا توجد إشارة TBS"
 
     if 'mfi' in df.columns and not pd.isna(last['mfi']):
         mfi = last['mfi']
@@ -768,19 +927,94 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
-    recent_high = df['high'].iloc[-50:].max()
-    recent_low = df['low'].iloc[-50:].min()
-    fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
-    if fib_levels:
-        if current_price > fib_levels.get('fib_618', current_price):
-            scores['BUY'] += 2
-            details['Fibonacci'] = f"فوق 0.618 +2 BUY"
-        elif current_price < fib_levels.get('fib_382', current_price):
-            scores['SELL'] += 2
-            details['Fibonacci'] = f"تحت 0.382 +2 SELL"
-        else:
-            details['Fibonacci'] = "منطقة وسط"
+    # SMC/SMR
+    if last_smc.get('order_block_bullish', False):
+        scores['BUY'] += weights['smc']
+        details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
+    elif last_smc.get('order_block_bearish', False):
+        scores['SELL'] += weights['smc']
+        details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
+    elif last_smc.get('fvg_bullish', False):
+        scores['BUY'] += weights['smc']//2
+        details['SMC'] = f"FVG شراء +{weights['smc']//2}"
+    elif last_smc.get('fvg_bearish', False):
+        scores['SELL'] += weights['smc']//2
+        details['SMC'] = f"FVG بيع +{weights['smc']//2}"
+    elif last_smc.get('mss_bullish', False):
+        scores['BUY'] += weights['smc']
+        details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
+    elif last_smc.get('mss_bearish', False):
+        scores['SELL'] += weights['smc']
+        details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
+    elif last_smc.get('in_discount', False):
+        scores['BUY'] += weights['smc']//2
+        details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
+    elif last_smc.get('in_premium', False):
+        scores['SELL'] += weights['smc']//2
+        details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
 
+    if last_smc.get('smr_bullish', False):
+        scores['BUY'] += weights['smr']
+        details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
+    elif last_smc.get('smr_bearish', False):
+        scores['SELL'] += weights['smr']
+        details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
+
+    # الأنماط الهيكلية
+    if patterns:
+        for p in patterns:
+            if p['direction'] == 'BULLISH':
+                scores['BUY'] += weights['patterns']
+                details['Structure'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
+            else:
+                scores['SELL'] += weights['patterns']
+                details['Structure'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
+
+    # TBS
+    if tbs_type == "BULLISH":
+        scores['BUY'] += weights['tbs']
+        details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
+    elif tbs_type == "BEARISH":
+        scores['SELL'] += weights['tbs']
+        details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
+
+    # أنماط الشموع والتباعد
+    candle_patterns = detect_candlestick_patterns(df)
+    for cp in candle_patterns:
+        if cp['direction'] == 'BULLISH':
+            scores['BUY'] += weights['candle']
+            details[f"Candle_{cp['pattern']}"] = f"{cp['pattern']} (+{weights['candle']})"
+        elif cp['direction'] == 'BEARISH':
+            scores['SELL'] += weights['candle']
+            details[f"Candle_{cp['pattern']}"] = f"{cp['pattern']} (+{weights['candle']})"
+        else:
+            details[f"Candle_{cp['pattern']}"] = f"{cp['pattern']} (محايد)"
+
+    div_type, div_score = detect_rsi_divergence(df)
+    if div_type:
+        if "BULLISH" in div_type:
+            scores['BUY'] += weights['divergence']
+            details['Divergence'] = f"{div_type} (+{weights['divergence']})"
+        elif "BEARISH" in div_type:
+            scores['SELL'] += weights['divergence']
+            details['Divergence'] = f"{div_type} (+{weights['divergence']})"
+
+    # تكامل الأنماط الهيكلية مع الشموع (تأكيد مضاعف)
+    if patterns and candle_patterns:
+        last_struct = next((p for p in reversed(patterns) if p['direction'] != 'NEUTRAL'), None)
+        last_candle = next((c for c in reversed(candle_patterns) if c['direction'] != 'NEUTRAL'), None)
+        if last_struct and last_candle and last_struct['direction'] == last_candle['direction']:
+            bonus = weights['patterns'] // 2
+            scores[last_struct['direction']] += bonus
+            details['Confluence'] = f"تطابق {last_struct['pattern']} مع {last_candle['pattern']} (تأكيد مضاعف +{bonus})"
+
+    # كتل الأوامر الطازجة
+    is_fresh, fresh_dir = check_fresh_order_block(df_smc)
+    if is_fresh and fresh_dir:
+        scores[fresh_dir] += weights['fresh_ob']
+        details['Fresh_OB'] = f"كتلة أوامر طازجة لصالح {fresh_dir} (+{weights['fresh_ob']})"
+
+    # النتيجة الأولية
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     
@@ -794,24 +1028,45 @@ def generate_advanced_signal(df, current_price, symbol=""):
         signal = "WAIT"
         confidence = 50 + (net_score / total_weight) * 50
 
+    # مرشح الاتجاه الرئيسي
+    major_trend = get_major_trend(df)
+    if signal != "WAIT":
+        if signal == "BUY" and major_trend == "BEARISH":
+            confidence = confidence * 0.6
+            details['Trend_Filter'] = "⚠️ شراء مع اتجاه رئيسي هابط (ثقة ×0.6)"
+        elif signal == "SELL" and major_trend == "BULLISH":
+            confidence = confidence * 0.6
+            details['Trend_Filter'] = "⚠️ بيع مع اتجاه رئيسي صاعد (ثقة ×0.6)"
+        elif (signal == "BUY" and major_trend == "BULLISH") or (signal == "SELL" and major_trend == "BEARISH"):
+            confidence = min(100, confidence * 1.15)
+            details['Trend_Filter'] = f"✅ متوافق مع الاتجاه الرئيسي ({major_trend}) +15% ثقة"
+
+    # مكافأة مناطق القتل ICT
+    killzone, kz_bonus = is_ict_killzone()
+    if killzone and signal != "WAIT":
+        confidence = min(100, confidence + kz_bonus * 2)
+        details['ICT_Killzone'] = f"إشارة داخل منطقة {killzone} (+{kz_bonus*2}% ثقة)"
+
+    # تصفية التقلب
     if 'atr' in df.columns and len(df) > 50:
         current_atr = last['atr']
         avg_atr = df['atr'].iloc[-50:].mean()
         if not pd.isna(current_atr) and not pd.isna(avg_atr):
             if current_atr < avg_atr * 0.7:
                 confidence = confidence * 0.6
-                details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة)"
+                details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة ×0.6)"
 
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
-    
-    # Stop Loss and Targets
+
+    # حساب وقف الخسارة والأهداف
     stop_loss = None
     entry_price = None
     targets = {}
     
     if signal in ["BUY", "SELL"] and confidence >= 60:
         atr_value = last['atr'] if not pd.isna(last['atr']) else 10
+        entry_price = current_price
         
         blocks = []
         start_idx = max(3, len(df) - 30)
@@ -827,8 +1082,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
                     blocks.append(('bearish', df['low'].iloc[i-1], df['high'].iloc[i-1]))
         order_blocks = blocks[-5:] if blocks else []
-        
-        entry_price = current_price
         
         if signal == "BUY":
             recent_low = df['low'].iloc[-20:].min()
@@ -868,115 +1121,11 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 'risk_reward_3': 2.0,
                 'risk': risk
             }
-    
+
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# كشف الانعكاس
-# ==========================================
-def detect_reversal(df, trade):
-    if df is None or len(df) < 20:
-        return False, "بيانات غير كافية"
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    direction = trade["direction"]
-    entry = trade["entry"]
-    current_price = last['close']
-    signals = []
-    
-    if 'rsi' in df.columns and not pd.isna(last['rsi']):
-        rsi = last['rsi']
-        if direction == "BUY":
-            if rsi > 70:
-                signals.append("RSI فوق 70 (تشبع شرائي)")
-            elif rsi < 30 and current_price < entry:
-                signals.append("RSI تحت 30 مع هبوط (ضعف)")
-        else:
-            if rsi < 30:
-                signals.append("RSI تحت 30 (تشبع بيعي)")
-            elif rsi > 70 and current_price > entry:
-                signals.append("RSI فوق 70 مع صعود (ضعف)")
-
-    if 'macd' in df.columns and 'macd_signal' in df.columns:
-        if direction == "BUY":
-            if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
-                signals.append("MACD تقاطع هابط (انعكاس)")
-        else:
-            if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
-                signals.append("MACD تقاطع صاعد (انعكاس)")
-
-    candle_range = abs(last['high'] - last['low'])
-    if candle_range > 0:
-        if direction == "BUY":
-            upper_wick = last['high'] - max(last['close'], last['open'])
-            if upper_wick > candle_range * 0.5:
-                signals.append("شمعة انعكاس هابط (ذيل علوي طويل)")
-        else:
-            lower_wick = min(last['close'], last['open']) - last['low']
-            if lower_wick > candle_range * 0.5:
-                signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
-
-    if direction == "BUY":
-        recent_low = df['low'].iloc[-10:].min()
-        if current_price < recent_low:
-            signals.append(f"كسر الدعم القريب ({recent_low:.4f})")
-    else:
-        recent_high = df['high'].iloc[-10:].max()
-        if current_price > recent_high:
-            signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
-
-    if signals:
-        return True, " | ".join(signals)
-    return False, ""
-
-# ==========================================
-# شرح القرار
-# ==========================================
-def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets):
-    explanation = ""
-    if signal == "BUY":
-        explanation = "🔹 **قرار الشراء** بناءً على:\n"
-        for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد"]):
-                explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
-    elif signal == "SELL":
-        explanation = "🔻 **قرار البيع** بناءً على:\n"
-        for k, v in details.items():
-            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط"]):
-                explanation += f"- {k}: {v}\n"
-        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
-    else:
-        explanation = "⏳ **قرار الانتظار** بسبب:\n"
-        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع).\n- تفاصيل النقاط:\n"
-        for k, v in details.items():
-            explanation += f"  - {k}: {v}\n"
-        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
-    
-    if stop_loss and entry_price and targets:
-        explanation += f"\n\n📍 **سعر الدخول المقترح:** {entry_price:.4f}"
-        explanation += f"\n🛑 **وقف الخسارة:** {stop_loss:.4f} (المسافة: {abs(entry_price - stop_loss):.4f})"
-        explanation += f"\n🎯 **الأهداف:**"
-        explanation += f"\n   - الهدف 1 (1:1): {targets['target1']:.4f}"
-        explanation += f"\n   - الهدف 2 (1:1.5): {targets['target2']:.4f}"
-        explanation += f"\n   - الهدف 3 (1:2): {targets['target3']:.4f}"
-    
-    explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
-    if patterns:
-        explanation += "\n\n📐 **النماذج المكتشفة:**\n"
-        for p in patterns:
-            explanation += f"- {p['pattern']} ({p['direction']}) - قوة: {p['score']}/5\n"
-    if tbs_info[0]:
-        tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
-        explanation += f"\n\n🐢 **TBS (Turtle Body Soup) مكتشف:** {tbs_type}\n"
-        explanation += f"   - المستوى القديم المُختَرق: {tbs_level:.4f}\n"
-        explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
-        explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
-
-    return explanation
-
-# ==========================================
-# تحليل متعدد الأطر الزمنية
+# تحليل متعدد الأطر الزمنية (MTF)
 # ==========================================
 def get_mtf_signal(symbol, current_price):
     timeframes = ['15m', '1h', '4h']
@@ -1146,8 +1295,113 @@ class TradeManager:
         return None
 
 # ==========================================
-# الشريط الجانبي والواجهة الرئيسية
+# كشف الانعكاس (Reversal)
 # ==========================================
+def detect_reversal(df, trade):
+    if df is None or len(df) < 20:
+        return False, "بيانات غير كافية"
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    direction = trade["direction"]
+    entry = trade["entry"]
+    current_price = last['close']
+    signals = []
+    
+    if 'rsi' in df.columns and not pd.isna(last['rsi']):
+        rsi = last['rsi']
+        if direction == "BUY":
+            if rsi > 70:
+                signals.append("RSI فوق 70 (تشبع شرائي)")
+            elif rsi < 30 and current_price < entry:
+                signals.append("RSI تحت 30 مع هبوط (ضعف)")
+        else:
+            if rsi < 30:
+                signals.append("RSI تحت 30 (تشبع بيعي)")
+            elif rsi > 70 and current_price > entry:
+                signals.append("RSI فوق 70 مع صعود (ضعف)")
+
+    if 'macd' in df.columns and 'macd_signal' in df.columns:
+        if direction == "BUY":
+            if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
+                signals.append("MACD تقاطع هابط (انعكاس)")
+        else:
+            if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
+                signals.append("MACD تقاطع صاعد (انعكاس)")
+
+    candle_range = abs(last['high'] - last['low'])
+    if candle_range > 0:
+        if direction == "BUY":
+            upper_wick = last['high'] - max(last['close'], last['open'])
+            if upper_wick > candle_range * 0.5:
+                signals.append("شمعة انعكاس هابط (ذيل علوي طويل)")
+        else:
+            lower_wick = min(last['close'], last['open']) - last['low']
+            if lower_wick > candle_range * 0.5:
+                signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
+
+    if direction == "BUY":
+        recent_low = df['low'].iloc[-10:].min()
+        if current_price < recent_low:
+            signals.append(f"كسر الدعم القريب ({recent_low:.4f})")
+    else:
+        recent_high = df['high'].iloc[-10:].max()
+        if current_price > recent_high:
+            signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
+
+    if signals:
+        return True, " | ".join(signals)
+    return False, ""
+
+# ==========================================
+# شرح القرار
+# ==========================================
+def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets):
+    explanation = ""
+    if signal == "BUY":
+        explanation = "🔹 **قرار الشراء** بناءً على:\n"
+        for k, v in details.items():
+            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "متوافق", "لندن", "نيويورك"]):
+                explanation += f"- {k}: {v}\n"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
+    elif signal == "SELL":
+        explanation = "🔻 **قرار البيع** بناءً على:\n"
+        for k, v in details.items():
+            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط"]):
+                explanation += f"- {k}: {v}\n"
+        explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
+    else:
+        explanation = "⏳ **قرار الانتظار** بسبب:\n"
+        explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع).\n- تفاصيل النقاط:\n"
+        for k, v in details.items():
+            explanation += f"  - {k}: {v}\n"
+        explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
+    
+    if stop_loss and entry_price and targets:
+        explanation += f"\n\n📍 **سعر الدخول المقترح:** {entry_price:.4f}"
+        explanation += f"\n🛑 **وقف الخسارة:** {stop_loss:.4f} (المسافة: {abs(entry_price - stop_loss):.4f})"
+        explanation += f"\n🎯 **الأهداف:**"
+        explanation += f"\n   - الهدف 1 (1:1): {targets['target1']:.4f}"
+        explanation += f"\n   - الهدف 2 (1:1.5): {targets['target2']:.4f}"
+        explanation += f"\n   - الهدف 3 (1:2): {targets['target3']:.4f}"
+    
+    explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
+    if patterns:
+        explanation += "\n\n📐 **النماذج المكتشفة:**\n"
+        for p in patterns:
+            explanation += f"- {p['pattern']} ({p['direction']}) - قوة: {p['score']}/5\n"
+    if tbs_info[0]:
+        tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
+        explanation += f"\n\n🐢 **TBS (Turtle Body Soup) مكتشف:** {tbs_type}\n"
+        explanation += f"   - المستوى القديم المُختَرق: {tbs_level:.4f}\n"
+        explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
+        explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
+
+    return explanation
+
+# ==========================================
+# بداية الواجهة الرئيسية (Streamlit)
+# ==========================================
+
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
     status, status_text, next_event, close_time = get_market_status()
@@ -1215,9 +1469,7 @@ with st.sidebar:
         st.session_state.show_form = not st.session_state.show_form
         st.rerun()
 
-# ==========================================
 # جلب البيانات للزوج المختار
-# ==========================================
 for attempt in range(3):
     current_price, change = get_spot_price(selected_symbol)
     if current_price is not None:
@@ -1254,15 +1506,11 @@ df['senkou_b'] = senkou_b
 df['chikou'] = chikou
 df['mfi'] = calc_mfi(df)
 
-# ==========================================
 # توليد الإشارة
-# ==========================================
 signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
-# ==========================================
 # عرض السعر
-# ==========================================
 if "Gold" in selected_pair_name or "Silver" in selected_pair_name:
     price_format = "${:,.2f}"
 elif "Bitcoin" in selected_pair_name or "Ethereum" in selected_pair_name:
@@ -1280,9 +1528,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
 # زر تحديث
-# ==========================================
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
     if st.button("🔄 تحديث البيانات", use_container_width=True):
@@ -1294,9 +1540,7 @@ with col_refresh2:
 
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ==========================================
 # مؤشرات السوق
-# ==========================================
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
     btn_label = "📊 إخفاء" if st.session_state.show_indicators else "📊 إظهار"
@@ -1319,9 +1563,7 @@ else:
 
 st.markdown("---")
 
-# ==========================================
 # عرض الصفقة المقترحة
-# ==========================================
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
@@ -1366,9 +1608,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
 else:
     st.info("⏳ لا توجد صفقة مقترحة حالياً (انتظر إشارة قوية)")
 
-# ==========================================
 # النماذج و TBS
-# ==========================================
 if patterns:
     st.markdown("#### 📐 النماذج المكتشفة")
     pattern_html = " ".join([f'<span class="pattern-badge">{p["pattern"]} ({p["direction"]})</span>' for p in patterns])
@@ -1383,9 +1623,7 @@ if tbs_type:
         st.error(f"**إشارة TBS بيع** عند {price_format.format(tbs_entry)} (وقف: {price_format.format(tbs_stop)})")
     st.caption(f"المستوى القديم المُختَرق: {price_format.format(tbs_level)}")
 
-# ==========================================
 # الإشارة
-# ==========================================
 st.markdown("---")
 st.markdown("### 🧠 إشارة التداول المتكاملة")
 
@@ -1407,16 +1645,12 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ==========================================
 # شرح القرار
-# ==========================================
 with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
-# ==========================================
 # جميع الصفقات المقترحة
-# ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
 
@@ -1457,9 +1691,7 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
 else:
     st.info("اضغط 'تحديث الكل' في الشريط الجانبي لعرض جميع الصفقات المقترحة.")
 
-# ==========================================
 # إدارة الصفقات
-# ==========================================
 st.markdown("---")
 st.markdown("### 💼 إدارة الصفقات")
 trade_manager = TradeManager()
@@ -1556,9 +1788,7 @@ if st.session_state.show_form:
             st.session_state.show_form = False
             st.rerun()
 
-# ==========================================
 # الأخبار
-# ==========================================
 st.markdown("---")
 st.markdown("### 📰 الأخبار الاقتصادية والتقويم")
 news = get_economic_news()
@@ -1578,9 +1808,7 @@ st.markdown("""
 - [ForexFactory Economic Calendar](https://www.forexfactory.com/calendar)
 """)
 
-# ==========================================
 # الرسم البياني
-# ==========================================
 st.markdown("---")
 st.markdown("### 📈 Price Chart")
 df_smc = analyze_smc_ict(df)
@@ -1637,9 +1865,7 @@ fig.add_bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color='
 fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
-# ==========================================
 # تحليل DXY للذهب
-# ==========================================
 if selected_symbol == "GC=F":
     st.markdown("---")
     st.markdown("### 🔗 تحليل الارتباط: الذهب vs الدولار")
@@ -1660,12 +1886,10 @@ if selected_symbol == "GC=F":
     else:
         st.info("تعذر جلب بيانات مؤشر الدولار")
 
-# ==========================================
 # تذييل
-# ==========================================
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Integrated Signals • Stop Loss & Targets
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Integrated Signals & Trade Management
 </div>
 """, unsafe_allow_html=True)
