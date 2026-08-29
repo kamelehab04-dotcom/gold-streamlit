@@ -1,7 +1,7 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
 # تاريخ التحديث: 2026-08-29
-# المصدر: GoldAPI + yfinance + تحليلات متقدمة
+# المصدر: GoldAPI + yfinance + تحليلات متقدمة + مؤشرات العملات
 # ==========================================
 
 import streamlit as st
@@ -76,6 +76,12 @@ st.markdown("""
     .reversal-alert { border: 1px solid #ff4444 !important; background: rgba(255,68,68,0.04) !important; padding: 10px 15px !important; margin: 5px 0 !important; border-radius: 8px !important; font-size: 0.85rem !important; }
     .pattern-badge { display: inline-block; background: rgba(255,215,0,0.08) !important; border: 1px solid rgba(255,215,0,0.12) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ffd700 !important; }
     .tbs-badge { display: inline-block; background: rgba(255,136,0,0.10) !important; border: 1px solid rgba(255,136,0,0.15) !important; border-radius: 16px !important; padding: 3px 12px !important; margin: 2px !important; font-size: 0.7rem !important; color: #ff8800 !important; font-weight: bold; }
+    .currency-card { background: rgba(10,10,10,0.6); border: 1px solid rgba(255,215,0,0.08); border-radius: 8px; padding: 8px 12px; margin: 3px 0; text-align: center; }
+    .currency-card .currency { font-weight: bold; font-size: 1.1rem; }
+    .currency-card .strength { font-size: 0.9rem; }
+    .currency-card .strong { color: #00ff88; }
+    .currency-card .weak { color: #ff4444; }
+    .currency-card .neutral { color: #ffaa00; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,7 +96,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -140,6 +146,21 @@ PAIRS = {
 }
 
 # ==========================================
+# مؤشرات العملات الرئيسية
+# ==========================================
+
+CURRENCY_INDICES = {
+    "USD": ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "AUDUSD=X", "USDCAD=X", "NZDUSD=X"],
+    "EUR": ["EURUSD=X", "EURGBP=X", "EURJPY=X", "EURCHF=X", "EURAUD=X", "EURCAD=X", "EURNZD=X"],
+    "GBP": ["GBPUSD=X", "EURGBP=X", "GBPJPY=X", "GBPCHF=X", "GBPAUD=X", "GBPCAD=X", "GBPNZD=X"],
+    "JPY": ["USDJPY=X", "EURJPY=X", "GBPJPY=X", "AUDJPY=X", "NZDJPY=X", "CADJPY=X"],
+    "CHF": ["USDCHF=X", "EURCHF=X", "GBPCHF=X", "AUDCHF=X", "NZDCHF=X", "CADCHF=X"],
+    "AUD": ["AUDUSD=X", "EURAUD=X", "GBPAUD=X", "AUDJPY=X", "AUDNZD=X", "AUDCAD=X"],
+    "NZD": ["NZDUSD=X", "EURNZD=X", "GBPNZD=X", "AUDNZD=X", "NZDJPY=X", "NZDCAD=X"],
+    "CAD": ["USDCAD=X", "EURCAD=X", "GBPCAD=X", "AUDCAD=X", "NZDCAD=X", "CADJPY=X", "CADCHF=X"]
+}
+
+# ==========================================
 # تهيئة حالة الجلسة
 # ==========================================
 if "df" not in st.session_state:
@@ -164,6 +185,8 @@ if "all_signals" not in st.session_state:
     st.session_state.all_signals = None
 if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
+if "currency_strength" not in st.session_state:
+    st.session_state.currency_strength = None
 
 # ==========================================
 # دوال جلب البيانات
@@ -324,6 +347,68 @@ def get_economic_news():
     except:
         pass
     return []
+
+@st.cache_data(ttl=60)
+def get_currency_strength():
+    """
+    حساب قوة كل عملة بناءً على متوسط التغير في أزواجها مقابل العملات الأخرى
+    """
+    strength = {}
+    for currency, pairs in CURRENCY_INDICES.items():
+        changes = []
+        for pair in pairs:
+            try:
+                ticker = yf.Ticker(pair)
+                data = ticker.history(period="1d", interval="5m")
+                if not data.empty:
+                    last = data.iloc[-1]
+                    first = data.iloc[0]
+                    change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+                    if pair.startswith(currency):
+                        changes.append(change)
+                    else:
+                        changes.append(-change)
+            except:
+                continue
+        if changes:
+            strength[currency] = round(sum(changes) / len(changes), 2)
+        else:
+            strength[currency] = 0
+    return strength
+
+@st.cache_data(ttl=120)
+def get_correlation_matrix(pairs):
+    """
+    حساب مصفوفة الارتباط بين الأزواج المختارة
+    """
+    correlation_data = {}
+    for pair in pairs:
+        try:
+            df = get_historical_data(pair, period="5d", interval="1h")
+            if df is not None and not df.empty:
+                correlation_data[pair] = df['close']
+        except:
+            continue
+    
+    if correlation_data:
+        df_corr = pd.DataFrame(correlation_data)
+        return df_corr.corr()
+    return pd.DataFrame()
+
+@st.cache_data(ttl=120)
+def get_pair_correlation(symbol1, symbol2):
+    """
+    حساب الارتباط بين زوجين محددين
+    """
+    try:
+        df1 = get_historical_data(symbol1, period="5d", interval="1h")
+        df2 = get_historical_data(symbol2, period="5d", interval="1h")
+        if df1 is not None and df2 is not None and not df1.empty and not df2.empty:
+            df1_aligned = df1['close'].reindex(df2.index, method='nearest')
+            return round(df1_aligned.corr(df2['close']), 3)
+    except:
+        pass
+    return None
 
 # ==========================================
 # المؤشرات الأساسية
@@ -674,7 +759,7 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# دوال متقدمة جديدة
+# دوال متقدمة
 # ==========================================
 
 def detect_candlestick_patterns(df):
@@ -1023,6 +1108,41 @@ def generate_advanced_signal(df, current_price, symbol=""):
     if is_fresh and fresh_dir:
         scores[fresh_dir] += weights['fresh_ob']
         details['Fresh_OB'] = f"كتلة أوامر طازجة لصالح {fresh_dir} (+{weights['fresh_ob']})"
+
+    # Currency Strength Filter
+    if symbol in PAIRS.values():
+        currency_strength = get_currency_strength()
+        if currency_strength:
+            pair_name = [k for k, v in PAIRS.items() if v == symbol][0] if symbol in PAIRS.values() else ""
+            currencies = pair_name.split("/") if "/" in pair_name else []
+            
+            if len(currencies) == 2:
+                base = currencies[0]
+                quote = currencies[1]
+                base_strength = currency_strength.get(base, 0)
+                quote_strength = currency_strength.get(quote, 0)
+                
+                # حساب النتيجة المبدئية قبل تطبيق المرشحات
+                net_score_temp = scores['BUY'] - scores['SELL']
+                if net_score_temp >= 5:
+                    temp_signal = "BUY"
+                elif net_score_temp <= -5:
+                    temp_signal = "SELL"
+                else:
+                    temp_signal = "WAIT"
+                
+                if temp_signal == "BUY" and base_strength < quote_strength:
+                    scores['BUY'] -= 1  # خصم نقطة
+                    details['Currency_Strength'] = f"⚠️ {base} أضعف من {quote} (-1 BUY)"
+                elif temp_signal == "SELL" and quote_strength < base_strength:
+                    scores['SELL'] -= 1
+                    details['Currency_Strength'] = f"⚠️ {quote} أضعف من {base} (-1 SELL)"
+                elif temp_signal == "BUY" and base_strength > quote_strength + 0.5:
+                    scores['BUY'] += 1
+                    details['Currency_Strength'] = f"✅ {base} قوي مقابل {quote} (+1 BUY)"
+                elif temp_signal == "SELL" and quote_strength > base_strength + 0.5:
+                    scores['SELL'] += 1
+                    details['Currency_Strength'] = f"✅ {quote} قوي مقابل {base} (+1 SELL)"
 
     # النتيجة الأولية
     net_score = scores['BUY'] - scores['SELL']
@@ -1449,6 +1569,69 @@ with st.sidebar:
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
     st.markdown("---")
     
+    # ===== مؤشرات العملات =====
+    st.markdown("### 💰 قوة العملات")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 تحديث القوة", use_container_width=True):
+            with st.spinner("جارٍ حساب القوة..."):
+                st.session_state.currency_strength = get_currency_strength()
+                st.rerun()
+    with col2:
+        if st.button("🗑️ مسح", use_container_width=True):
+            st.session_state.currency_strength = None
+            st.rerun()
+    
+    if st.session_state.currency_strength:
+        strength = st.session_state.currency_strength
+        sorted_currencies = sorted(strength.items(), key=lambda x: x[1], reverse=True)
+        
+        # عرض بطاقات العملات
+        cols = st.columns(4)
+        for i, (currency, value) in enumerate(sorted_currencies):
+            if i >= 4:
+                break
+            color = "🟢" if value > 0.5 else ("🟡" if value > -0.5 else "🔴")
+            with cols[i % 4]:
+                st.metric(
+                    f"{color} {currency}",
+                    f"{value:+.2f}%",
+                    delta_color="normal"
+                )
+        
+        # عرض أقوى وأضعف
+        if len(sorted_currencies) >= 2:
+            strongest = sorted_currencies[0]
+            weakest = sorted_currencies[-1]
+            st.markdown(f"""
+            <div style="font-size: 0.8rem; background: rgba(10,10,10,0.4); border-radius: 8px; padding: 10px; margin: 5px 0;">
+                <span style="color: #00ff88;">▲ {strongest[0]} {strongest[1]:+.2f}%</span><br>
+                <span style="color: #ff4444;">▼ {weakest[0]} {weakest[1]:+.2f}%</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # أفضل صفقات بناءً على قوة العملات
+            best_pairs = []
+            if strongest[0] != weakest[0]:
+                best_buy = f"{strongest[0]}/{weakest[0]}"
+                best_sell = f"{weakest[0]}/{strongest[0]}"
+                for pair_name, symbol in PAIRS.items():
+                    if best_buy in pair_name and "XAU" not in pair_name and "XAG" not in pair_name and "BTC" not in pair_name and "ETH" not in pair_name:
+                        best_pairs.append(("🟢 شراء", best_buy))
+                    if best_sell in pair_name and "XAU" not in pair_name and "XAG" not in pair_name and "BTC" not in pair_name and "ETH" not in pair_name:
+                        best_pairs.append(("🔴 بيع", best_sell))
+            
+            if best_pairs:
+                st.markdown("**📊 أفضل الصفقات:**")
+                for action, pair in best_pairs[:2]:
+                    st.markdown(f"- {action} {pair}")
+    else:
+        st.info("اضغط 'تحديث القوة'")
+    
+    st.markdown("---")
+    
+    # ===== جميع الإشارات =====
     st.markdown("### 📋 جميع الإشارات المتاحة")
     col1, col2 = st.columns(2)
     with col1:
@@ -1684,7 +1867,140 @@ with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
+# ==========================================
+# تحليل الارتباط بين العملات
+# ==========================================
+st.markdown("---")
+st.markdown("### 🔗 تحليل الارتباط بين العملات")
+
+# اختيار الأزواج للتحليل
+corr_pairs = st.multiselect(
+    "اختر الأزواج لتحليل الارتباط:",
+    options=list(PAIRS.keys()),
+    default=["XAU/USD (Gold)", "EUR/USD", "USD/JPY", "GBP/USD"]
+)
+
+if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", use_container_width=True):
+    with st.spinner("جارٍ حساب الارتباطات..."):
+        symbols = [PAIRS[pair] for pair in corr_pairs]
+        corr_matrix = get_correlation_matrix(symbols)
+        
+        if not corr_matrix.empty:
+            st.dataframe(
+                corr_matrix.round(3),
+                use_container_width=True,
+                column_config={col: st.column_config.NumberColumn(format="%.3f") for col in corr_matrix.columns}
+            )
+            
+            fig_corr = go.Figure()
+            pair_names = list(corr_matrix.columns)
+            for i, pair1 in enumerate(pair_names):
+                fig_corr.add_trace(go.Bar(
+                    x=pair_names,
+                    y=corr_matrix.iloc[i].values,
+                    name=pair1,
+                    text=[f"{val:.2f}" for val in corr_matrix.iloc[i].values],
+                    textposition='outside'
+                ))
+            
+            fig_corr.update_layout(
+                height=400,
+                template='plotly_dark',
+                title="مصفوفة الارتباط بين الأزواج",
+                barmode='group',
+                xaxis_title="الأزواج",
+                yaxis_title="معامل الارتباط",
+                yaxis=dict(range=[-1, 1])
+            )
+            st.plotly_chart(fig_corr, use_container_width=True)
+            
+            strong_correlations = []
+            for i, pair1 in enumerate(pair_names):
+                for j, pair2 in enumerate(pair_names):
+                    if i < j:
+                        corr_val = corr_matrix.iloc[i, j]
+                        if abs(corr_val) > 0.7:
+                            direction = "موجب (نفس الاتجاه)" if corr_val > 0 else "سالب (عكس الاتجاه)"
+                            strong_correlations.append(f"**{corr_pairs[i]}** ↔ **{corr_pairs[j]}**: {corr_val:.3f} ({direction})")
+            
+            if strong_correlations:
+                st.markdown("#### 📌 ارتباطات قوية مكتشفة:")
+                for corr in strong_correlations:
+                    st.markdown(f"- {corr}")
+        else:
+            st.warning("لا توجد بيانات كافية لحساب الارتباط")
+
+# ==========================================
+# تحليل ارتباط الأزواج بالذهب
+# ==========================================
+st.markdown("---")
+st.markdown("### 📊 ارتباط الأزواج بالذهب")
+
+if st.button("🔄 تحليل ارتباط الأزواج بالذهب", use_container_width=True):
+    with st.spinner("جارٍ التحليل..."):
+        gold_symbol = "GC=F"
+        correlation_results = []
+        
+        for pair_name, symbol in PAIRS.items():
+            if symbol != gold_symbol and "Gold" not in pair_name and "Silver" not in pair_name:
+                corr = get_pair_correlation(gold_symbol, symbol)
+                if corr is not None:
+                    correlation_results.append({
+                        "الزوج": pair_name,
+                        "الارتباط بالذهب": corr,
+                        "القوة": "قوي" if abs(corr) > 0.7 else ("متوسط" if abs(corr) > 0.4 else "ضعيف"),
+                        "الاتجاه": "نفس" if corr > 0 else "عكس"
+                    })
+        
+        if correlation_results:
+            df_corr = pd.DataFrame(correlation_results)
+            df_corr = df_corr.sort_values("الارتباط بالذهب", ascending=False)
+            
+            st.dataframe(
+                df_corr,
+                column_config={
+                    "الزوج": st.column_config.TextColumn("الزوج"),
+                    "الارتباط بالذهب": st.column_config.NumberColumn("الارتباط", format="%.3f"),
+                    "القوة": st.column_config.TextColumn("القوة"),
+                    "الاتجاه": st.column_config.TextColumn("الاتجاه")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            fig_gold_corr = go.Figure()
+            fig_gold_corr.add_trace(go.Bar(
+                x=df_corr["الزوج"],
+                y=df_corr["الارتباط بالذهب"],
+                marker_color=['#00ff88' if val > 0 else '#ff4444' for val in df_corr["الارتباط بالذهب"]],
+                text=[f"{val:.3f}" for val in df_corr["الارتباط بالذهب"]],
+                textposition='outside'
+            ))
+            fig_gold_corr.update_layout(
+                height=400,
+                template='plotly_dark',
+                title="ارتباط الأزواج بالذهب",
+                xaxis_title="الزوج",
+                yaxis_title="معامل الارتباط",
+                yaxis=dict(range=[-1, 1])
+            )
+            st.plotly_chart(fig_gold_corr, use_container_width=True)
+            
+            # عرض أقوى ارتباط
+            if correlation_results:
+                max_pos = max([r for r in correlation_results if r["الارتباط بالذهب"] > 0], key=lambda x: x["الارتباط بالذهب"]) if any(r["الارتباط بالذهب"] > 0 for r in correlation_results) else None
+                max_neg = min([r for r in correlation_results if r["الارتباط بالذهب"] < 0], key=lambda x: x["الارتباط بالذهب"]) if any(r["الارتباط بالذهب"] < 0 for r in correlation_results) else None
+                
+                if max_pos:
+                    st.info(f"🟢 أقوى ارتباط موجب: **{max_pos['الزوج']}** ({max_pos['الارتباط بالذهب']:.3f}) - يتحرك بنفس اتجاه الذهب")
+                if max_neg:
+                    st.info(f"🔴 أقوى ارتباط سالب: **{max_neg['الزوج']}** ({max_neg['الارتباط بالذهب']:.3f}) - يتحرك بعكس اتجاه الذهب")
+        else:
+            st.info("لا توجد بيانات كافية لحساب الارتباطات")
+
+# ==========================================
 # جميع الصفقات المقترحة
+# ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
 
@@ -1924,6 +2240,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Integrated Signals & Trade Management
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Integrated Signals & Trade Management
 </div>
 """, unsafe_allow_html=True)
