@@ -831,23 +831,29 @@ def get_dynamic_weights(df, asset_type="forex"):
     if asset_type == "gold":
         weights = {
             'rsi': 3, 'macd': 4, 'bb': 3, 'vwap': 2, 'adx': 2,
-            'ichimoku': 4, 'smc': 5, 'patterns': 5, 'tbs': 5,
-            'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
-            'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 3
+            'ichimoku': 4, 'smc': 5, 'patterns': 6,  # رفع
+            'tbs': 6,  # رفع
+            'mfi': 3, 'smr': 4, 'candle': 4, 
+            'divergence': 5, 'fresh_ob': 4, 
+            'fibonacci': 3, 'macd_hist': 3
         }
     elif asset_type == "crypto":
         weights = {
             'rsi': 2, 'macd': 4, 'bb': 3, 'vwap': 2, 'adx': 2,
-            'ichimoku': 5, 'smc': 5, 'patterns': 5, 'tbs': 5,
-            'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
-            'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 3
+            'ichimoku': 5, 'smc': 5, 'patterns': 6,  # رفع
+            'tbs': 6,  # رفع
+            'mfi': 3, 'smr': 4, 'candle': 4, 
+            'divergence': 5, 'fresh_ob': 4, 
+            'fibonacci': 3, 'macd_hist': 3
         }
     else:  # forex
         weights = {
             'rsi': 3, 'macd': 3, 'bb': 3, 'vwap': 2, 'adx': 2,
-            'ichimoku': 3, 'smc': 4, 'patterns': 5, 'tbs': 5,
-            'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
-            'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 2
+            'ichimoku': 3, 'smc': 4, 'patterns': 6,  # رفع
+            'tbs': 6,  # رفع
+            'mfi': 3, 'smr': 4, 'candle': 4, 
+            'divergence': 5, 'fresh_ob': 4, 
+            'fibonacci': 3, 'macd_hist': 2
         }
     
     # ====== الأوزان الديناميكية حسب حالة السوق ======
@@ -1355,7 +1361,7 @@ def get_pair_correlation(symbol1, symbol2):
     return None
 
 # ==========================================
-# الإشارة المتكاملة (النسخة النهائية مع الإعدادات الديناميكية)
+# الإشارة المتكاملة (النسخة النهائية مع الإعدادات الديناميكية والمحسنة)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     if df is None or len(df) < 100:
@@ -1555,15 +1561,18 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         scores['SELL'] += weights['smr']
         details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
 
-    # ===== الأنماط الهيكلية =====
+    # ===== الأنماط الهيكلية (مع ترجيح حسب القوة) =====
     if patterns:
         for p in patterns:
+            score_multiplier = p['score'] / 5  # 1.0, 0.8, 0.6 حسب قوة النمط
             if p['direction'] == 'BULLISH':
-                scores['BUY'] += weights['patterns']
-                details['Structure'] = f"{p['pattern']} (صاعد) +{weights['patterns']}"
+                points = weights['patterns'] * score_multiplier
+                scores['BUY'] += points
+                details['Structure'] = f"{p['pattern']} (صاعد) +{points:.1f}"
             else:
-                scores['SELL'] += weights['patterns']
-                details['Structure'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
+                points = weights['patterns'] * score_multiplier
+                scores['SELL'] += points
+                details['Structure'] = f"{p['pattern']} (هابط) +{points:.1f}"
 
     # ===== TBS =====
     if tbs_type == "BULLISH":
@@ -1611,6 +1620,19 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         except Exception as e:
             pass
 
+    # ===== غلبية النماذج الهيكلية (مكافأة) =====
+    if patterns and len(patterns) >= 3:
+        bullish_patterns = sum(1 for p in patterns if p['direction'] == 'BULLISH')
+        bearish_patterns = len(patterns) - bullish_patterns
+        if bullish_patterns > bearish_patterns:
+            bonus = min(3, bullish_patterns - bearish_patterns)
+            scores['BUY'] += bonus
+            details['Pattern_Dominance'] = f"غلبية النماذج صاعدة ({bullish_patterns}/{len(patterns)}) +{bonus}"
+        elif bearish_patterns > bullish_patterns:
+            bonus = min(3, bearish_patterns - bullish_patterns)
+            scores['SELL'] += bonus
+            details['Pattern_Dominance'] = f"غلبية النماذج هابطة ({bearish_patterns}/{len(patterns)}) +{bonus}"
+
     # ===== كتل الأوامر الطازجة =====
     is_fresh, fresh_dir = check_fresh_order_block(df_smc)
     if is_fresh and fresh_dir:
@@ -1657,15 +1679,16 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     
     if net_score >= 5:
         signal = "BUY"
-        confidence = min(100, 60 + (net_score / total_weight) * 100)
+        # تحسين معادلة الثقة: 50 + (net_score/total_weight) * 150
+        confidence = min(100, 50 + (net_score / total_weight) * 150)
     elif net_score <= -5:
         signal = "SELL"
-        confidence = min(100, 60 + (abs(net_score) / total_weight) * 100)
+        confidence = min(100, 50 + (abs(net_score) / total_weight) * 150)
     else:
         signal = "WAIT"
         confidence = 50 + (net_score / total_weight) * 50
 
-    # ===== MTF Filter =====
+    # ===== MTF Filter (تعديل العقوبة) =====
     mtf_signal = "NEUTRAL"
     mtf_count = 0
     if symbol and symbol != "":
@@ -1677,8 +1700,9 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     
     if signal != "WAIT" and mtf_signal != "NEUTRAL":
         if signal != mtf_signal:
-            confidence = confidence * 0.7
-            details['MTF_Filter'] = f"⚠️ تعارض مع MTF ({mtf_signal}) ثقة ×0.7"
+            # تخفيض العقوبة من 30% إلى 10%
+            confidence = confidence * 0.9
+            details['MTF_Filter'] = f"⚠️ تعارض مع MTF ({mtf_signal}) ثقة ×0.9"
         else:
             confidence = min(100, confidence * 1.1)
             details['MTF_Filter'] = f"✅ متوافق مع MTF ({mtf_signal}) +10% ثقة"
