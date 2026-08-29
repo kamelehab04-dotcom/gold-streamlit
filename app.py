@@ -1,5 +1,5 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
+# BLACK PYRAMID – الإصدار 2002 (الإعدادات الديناميكية المحسنة)
 # تاريخ التحديث: 2026-08-29
 # المصدر: GoldAPI + yfinance + FMP API + تحليلات متقدمة
 # ==========================================
@@ -165,594 +165,138 @@ CURRENCY_INDICES = {
 }
 
 # ==========================================
-# تهيئة حالة الجلسة
-# ==========================================
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "current_trade" not in st.session_state:
-    st.session_state.current_trade = None
-if "trades" not in st.session_state:
-    st.session_state.trades = []
-if "price_data" not in st.session_state:
-    st.session_state.price_data = None
-if "show_form" not in st.session_state:
-    st.session_state.show_form = False
-if "daily_pnl" not in st.session_state:
-    st.session_state.daily_pnl = 0
-if "daily_trades" not in st.session_state:
-    st.session_state.daily_trades = 0
-if "last_update" not in st.session_state:
-    st.session_state.last_update = datetime.now()
-if "refresh_trigger" not in st.session_state:
-    st.session_state.refresh_trigger = False
-if "all_signals" not in st.session_state:
-    st.session_state.all_signals = None
-if "show_indicators" not in st.session_state:
-    st.session_state.show_indicators = True
-if "currency_strength" not in st.session_state:
-    st.session_state.currency_strength = None
-if "economic_events" not in st.session_state:
-    st.session_state.economic_events = None
-if "news_analysis" not in st.session_state:
-    st.session_state.news_analysis = None
-
-# ==========================================
-# دوال جلب البيانات
-# ==========================================
-def get_market_status():
-    eastern = pytz.timezone('US/Eastern')
-    now = datetime.now(eastern)
-    weekday = now.weekday()
-    open_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
-    close_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
-    if weekday == 5:
-        next_open = open_time + timedelta(days=1)
-        return "CLOSED", "عطلة نهاية الأسبوع (السبت)", next_open, close_time
-    if weekday == 6:
-        if now < open_time:
-            return "CLOSED", "انتظار افتتاح الأسبوع", open_time, close_time
-        else:
-            return "OPEN", "السوق مفتوح (الأحد)", close_time, close_time
-    if 0 <= weekday <= 3:
-        if close_time <= now < open_time:
-            return "CLOSED", "الاستراحة اليومية (17:00-18:00 ET)", open_time, close_time
-        else:
-            next_close = close_time if now < close_time else close_time + timedelta(days=1)
-            return "OPEN", "السوق مفتوح", next_close, close_time
-    if weekday == 4:
-        if now < close_time:
-            return "OPEN", "السوق مفتوح (الجمعة)", close_time, close_time
-        else:
-            next_open = open_time + timedelta(days=2)
-            return "CLOSED", "نهاية الأسبوع (إغلاق الجمعة)", next_open, close_time
-    return "UNKNOWN", "حالة غير معروفة", None, None
-
-def format_time(dt):
-    if dt is None:
-        return "N/A"
-    return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
-
-def time_remaining(dt):
-    if dt is None:
-        return "N/A"
-    diff = dt - datetime.now(pytz.timezone('US/Eastern'))
-    if diff.total_seconds() < 0:
-        return "انتهى"
-    hours = int(diff.total_seconds() // 3600)
-    minutes = int((diff.total_seconds() % 3600) // 60)
-    return f"{hours}h {minutes}m"
-
-# ==========================================
-# دوال FMP API
+# إعدادات المؤشرات الديناميكية لكل نوع أصل
 # ==========================================
 
-@st.cache_data(ttl=300)
-def get_fmp_economic_calendar():
+def get_indicator_settings(symbol_name):
     """
-    جلب التقويم الاقتصادي من FMP API
+    إرجاع إعدادات المؤشرات المناسبة حسب نوع الأصل
     """
-    try:
-        url = f"https://financialmodelingprep.com/api/v3/economic_calendar?apikey={FMP_API_KEY}"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            events = []
-            for item in data[:20]:  # آخر 20 حدث
-                events.append({
-                    'country': item.get('country', ''),
-                    'event': item.get('event', ''),
-                    'date': item.get('date', ''),
-                    'time': item.get('time', ''),
-                    'impact': item.get('impact', ''),
-                    'actual': item.get('actual', ''),
-                    'forecast': item.get('forecast', ''),
-                    'previous': item.get('previous', '')
-                })
-            return events
-    except Exception as e:
-        pass
-    return []
-
-@st.cache_data(ttl=300)
-def get_fmp_news():
-    """
-    جلب الأخبار من FMP API
-    """
-    try:
-        url = f"https://financialmodelingprep.com/api/v3/fmp-news?apikey={FMP_API_KEY}&limit=10"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            news_list = []
-            for item in data[:10]:
-                news_list.append({
-                    'title': item.get('title', ''),
-                    'source': 'FMP',
-                    'publishedAt': item.get('publishedDate', ''),
-                    'url': item.get('url', ''),
-                    'content': item.get('text', '')
-                })
-            return news_list
-    except Exception as e:
-        pass
-    return []
-
-@st.cache_data(ttl=300)
-def get_fmp_market_sentiment():
-    """
-    جلب مؤشرات السوق من FMP API
-    """
-    try:
-        url = f"https://financialmodelingprep.com/api/v4/market_risk_premium?apikey={FMP_API_KEY}"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return data
-    except Exception as e:
-        pass
-    return None
-
-@st.cache_data(ttl=300)
-def get_fmp_commodity_price(commodity="gold"):
-    """
-    جلب أسعار السلع من FMP API
-    """
-    try:
-        url = f"https://financialmodelingprep.com/api/v3/quote/{commodity}?apikey={FMP_API_KEY}"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                return data[0]
-    except Exception as e:
-        pass
-    return None
-
-# ==========================================
-# تحليل الأخبار المتقدم
-# ==========================================
-
-# كلمات مفتاحية للتصنيف
-NEWS_KEYWORDS = {
-    'positive': {
-        'gold': ['gold rally', 'gold surge', 'gold bullish', 'gold gains', 'gold positive', 'gold up', 'gold rises', 'gold strong', 'gold support', 'gold buying', 'gold rebound'],
-        'forex': ['dollar weak', 'dollar down', 'dollar falls', 'euro strong', 'pound strong', 'currency rally', 'forex positive', 'dollar negative', 'yen weak'],
-        'economy': ['fed cut', 'rate cut', 'stimulus', 'economic growth', 'gdp up', 'jobs strong', 'inflation down', 'recovery', 'boom']
-    },
-    'negative': {
-        'gold': ['gold drop', 'gold falls', 'gold bearish', 'gold decline', 'gold down', 'gold selling', 'gold crash', 'gold weak', 'gold resistance', 'gold plunge'],
-        'forex': ['dollar strong', 'dollar up', 'dollar rises', 'euro weak', 'pound weak', 'currency drop', 'forex negative', 'dollar positive', 'yen strong'],
-        'economy': ['fed hike', 'rate hike', 'inflation up', 'economic slowdown', 'gdp down', 'jobs weak', 'recession', 'crisis', 'crash']
+    # تحديد نوع الأصل
+    if "Gold" in symbol_name or "XAU" in symbol_name or "Silver" in symbol_name or "XAG" in symbol_name:
+        asset_type = "gold"
+    elif "BTC" in symbol_name or "ETH" in symbol_name or "Bitcoin" in symbol_name or "Ethereum" in symbol_name:
+        asset_type = "crypto"
+    else:
+        asset_type = "forex"
+    
+    settings = {
+        'asset_type': asset_type,
+        'macd': {},
+        'rsi': {},
+        'mfi': {},
+        'bb': {},
+        'ichimoku': {}
     }
-}
-
-def analyze_news_impact(news_list):
-    """
-    تحليل الأخبار وتصنيفها وتقييم تأثيرها
-    """
-    if not news_list:
-        return {
-            'gold_sentiment': 0,
-            'forex_sentiment': 0,
-            'overall_sentiment': 0,
-            'high_impact_news': [],
-            'news_analysis': [],
-            'summary': "لا توجد أخبار للتحليل",
-            'count': 0
+    
+    if asset_type == "gold":
+        # ===== إعدادات الذهب =====
+        settings['macd'] = {
+            'fast': 5,
+            'slow': 13,
+            'signal': 4,
+            'description': 'سريع للمضاربة'
         }
-    
-    gold_score = 0
-    forex_score = 0
-    high_impact = []
-    news_analysis = []
-    
-    for item in news_list:
-        title = item.get('title', '').lower()
-        content = item.get('content', '').lower()
-        combined_text = title + " " + content
-        source = item.get('source', '')
-        impact = 0
-        category = 'neutral'
+        settings['rsi'] = {
+            'period': 14,
+            'overbought': 80,
+            'oversold': 20,
+            'description': 'مستويات موسعة للترند القوي'
+        }
+        settings['mfi'] = {
+            'period': 9,
+            'overbought': 80,
+            'oversold': 20,
+            'description': 'فترة قصيرة للسيولة'
+        }
+        settings['bb'] = {
+            'period': 20,
+            'std_dev': 2.5,
+            'description': 'نطاق موسع للتقلبات الحادة'
+        }
+        settings['ichimoku'] = {
+            'tenkan': 10,
+            'kijun': 30,
+            'senkou': 60,
+            'description': 'معدل لنظام 5 أيام'
+        }
+        settings['atr_period'] = 14
+        settings['adx_period'] = 14
         
-        # تحليل الذهب
-        gold_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['gold'])
-        gold_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['gold'])
+    elif asset_type == "crypto":
+        # ===== إعدادات البتكوين والعملات الرقمية =====
+        settings['macd'] = {
+            'fast': 6,
+            'slow': 13,
+            'signal': 5,
+            'description': 'سريع للمضاربة'
+        }
+        settings['rsi'] = {
+            'period': 14,
+            'overbought': 80,
+            'oversold': 20,
+            'description': 'مستويات موسعة للترندات العنيفة'
+        }
+        settings['mfi'] = {
+            'period': 10,
+            'overbought': 85,
+            'oversold': 15,
+            'description': 'مستويات واسعة جداً'
+        }
+        settings['bb'] = {
+            'period': 50,
+            'std_dev': 2.3,
+            'description': 'فترة طويلة لتخفيف الضوضاء'
+        }
+        settings['ichimoku'] = {
+            'tenkan': 10,
+            'kijun': 30,
+            'senkou': 60,
+            'description': 'معدل لسوق 24/7'
+        }
+        settings['atr_period'] = 14
+        settings['adx_period'] = 14
         
-        if gold_positive:
-            gold_score += 2
-            impact += 2
-            category = 'positive_gold'
-        elif gold_negative:
-            gold_score -= 2
-            impact -= 2
-            category = 'negative_gold'
-        
-        # تحليل الفوركس
-        forex_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['forex'])
-        forex_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['forex'])
-        
-        if forex_positive:
-            forex_score += 2
-            impact += 1
-            if category == 'neutral':
-                category = 'positive_forex'
-        elif forex_negative:
-            forex_score -= 2
-            impact -= 1
-            if category == 'neutral':
-                category = 'negative_forex'
-        
-        # تحليل الاقتصاد العام
-        eco_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['economy'])
-        eco_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['economy'])
-        
-        if eco_positive:
-            gold_score += 1
-            forex_score += 1
-            impact += 1
-        elif eco_negative:
-            gold_score -= 1
-            forex_score -= 1
-            impact -= 1
-        
-        # تحديد مستوى التأثير
-        impact_level = "منخفض"
-        if abs(impact) >= 3:
-            impact_level = "عالٍ"
-            high_impact.append({
-                'title': item.get('title', ''),
-                'source': source,
-                'impact': impact,
-                'category': category
-            })
-        elif abs(impact) >= 1:
-            impact_level = "متوسط"
-        
-        news_analysis.append({
-            'title': item.get('title', ''),
-            'source': source,
-            'category': category,
-            'impact': impact,
-            'impact_level': impact_level,
-            'date': item.get('publishedAt', '')
-        })
+    else:  # forex
+        # ===== إعدادات الفوركس =====
+        settings['macd'] = {
+            'fast': 12,
+            'slow': 26,
+            'signal': 9,
+            'description': 'قياسي'
+        }
+        settings['rsi'] = {
+            'period': 14,
+            'overbought': 70,
+            'oversold': 30,
+            'description': 'قياسي'
+        }
+        settings['mfi'] = {
+            'period': 14,
+            'overbought': 80,
+            'oversold': 20,
+            'description': 'قياسي'
+        }
+        settings['bb'] = {
+            'period': 20,
+            'std_dev': 2,
+            'description': 'قياسي'
+        }
+        settings['ichimoku'] = {
+            'tenkan': 9,
+            'kijun': 26,
+            'senkou': 52,
+            'description': 'كلاسيكي'
+        }
+        settings['atr_period'] = 14
+        settings['adx_period'] = 14
     
-    # حساب المؤشرات النهائية
-    gold_sentiment = min(100, max(-100, gold_score * 10))
-    forex_sentiment = min(100, max(-100, forex_score * 10))
-    overall_sentiment = (gold_sentiment + forex_sentiment) / 2
-    
-    # توليد الملخص
-    if overall_sentiment > 30:
-        summary = "📈 الأخبار إيجابية بشكل عام، تدعم الشراء"
-    elif overall_sentiment < -30:
-        summary = "📉 الأخبار سلبية بشكل عام، تدعم البيع"
-    elif high_impact:
-        summary = f"⚠️ أخبار عالية التأثير: {len(high_impact)} خبر"
-    else:
-        summary = "➡️ الأخبار محايدة، لا تأثير كبير"
-    
-    return {
-        'gold_sentiment': gold_sentiment,
-        'forex_sentiment': forex_sentiment,
-        'overall_sentiment': overall_sentiment,
-        'high_impact_news': high_impact,
-        'news_analysis': news_analysis,
-        'summary': summary,
-        'count': len(news_list)
-    }
-
-def get_news_impact_score(news_analysis, symbol=""):
-    """
-    حساب درجة تأثير الأخبار على الإشارة
-    """
-    if not news_analysis or news_analysis.get('count', 0) == 0:
-        return 0, "لا توجد أخبار"
-    
-    impact_score = 0
-    impact_details = []
-    
-    if "Gold" in symbol or "XAU" in symbol:
-        impact_score = news_analysis.get('gold_sentiment', 0)
-        impact_details.append(f"الذهب: {impact_score:+.0f}")
-    elif any(x in symbol for x in ["EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"]):
-        impact_score = news_analysis.get('forex_sentiment', 0)
-        impact_details.append(f"الفوركس: {impact_score:+.0f}")
-    else:
-        impact_score = news_analysis.get('overall_sentiment', 0)
-        impact_details.append(f"عام: {impact_score:+.0f}")
-    
-    high_impact = news_analysis.get('high_impact_news', [])
-    if high_impact:
-        impact_score -= len(high_impact) * 5
-        impact_details.append(f"أخبار عالية التأثير: -{len(high_impact) * 5}")
-    
-    return impact_score, " | ".join(impact_details)
-
-def display_news_analysis(news_analysis):
-    """
-    عرض تحليل الأخبار بشكل جميل
-    """
-    if not news_analysis or news_analysis.get('count', 0) == 0:
-        st.info("لا توجد أخبار للتحليل")
-        return
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        gold_sent = news_analysis.get('gold_sentiment', 0)
-        color = "🟢" if gold_sent > 0 else ("🔴" if gold_sent < 0 else "🟡")
-        st.metric(f"{color} الذهب", f"{gold_sent:+.0f}")
-    
-    with col2:
-        forex_sent = news_analysis.get('forex_sentiment', 0)
-        color = "🟢" if forex_sent > 0 else ("🔴" if forex_sent < 0 else "🟡")
-        st.metric(f"{color} الفوركس", f"{forex_sent:+.0f}")
-    
-    with col3:
-        overall = news_analysis.get('overall_sentiment', 0)
-        color = "🟢" if overall > 0 else ("🔴" if overall < 0 else "🟡")
-        st.metric(f"{color} الإجمالي", f"{overall:+.0f}")
-    
-    st.info(news_analysis.get('summary', ''))
-    
-    if news_analysis.get('news_analysis'):
-        st.markdown("#### 📰 تحليل الأخبار:")
-        for item in news_analysis['news_analysis'][:5]:
-            impact = item.get('impact', 0)
-            impact_level = item.get('impact_level', '')
-            if impact_level == "عالٍ":
-                icon = "🔴"
-            elif impact_level == "متوسط":
-                icon = "🟡"
-            else:
-                icon = "🟢"
-            
-            st.markdown(f"""
-            <div class="news-card">
-                <div class="news-title">
-                    {icon} {item.get('title', '')[:100]}...
-                </div>
-                <div class="news-date">
-                    {item.get('source', '')} | التأثير: {impact_level} ({impact:+.0f}) | {item.get('date', '')}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-def display_economic_events(events):
-    """
-    عرض الأحداث الاقتصادية بشكل جميل
-    """
-    if not events:
-        st.info("لا توجد أحداث اقتصادية")
-        return
-    
-    # عرض الأحداث بتنسيق جميل
-    for event in events[:15]:
-        impact = event.get('impact', '')
-        if impact == 'High' or impact == 'عالٍ':
-            impact_icon = "🔴"
-            impact_class = "event-high"
-        elif impact == 'Medium' or impact == 'متوسط':
-            impact_icon = "🟡"
-            impact_class = "event-medium"
-        else:
-            impact_icon = "🟢"
-            impact_class = "event-low"
-        
-        st.markdown(f"""
-        <div class="news-card {impact_class}">
-            <div class="news-title">
-                {impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}
-            </div>
-            <div class="news-date">
-                🕐 {event.get('date', '')} {event.get('time', '')} | 
-                التوقع: {event.get('forecast', 'N/A')} | 
-                السابق: {event.get('previous', 'N/A')} | 
-                الفعلي: {event.get('actual', 'N/A')}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    return settings
 
 # ==========================================
-# دوال جلب البيانات الأساسية (مستمرة)
+# المؤشرات الأساسية (معدلة للإعدادات الديناميكية)
 # ==========================================
 
-@st.cache_data(ttl=5)
-def get_spot_price(symbol="GC=F"):
-    if symbol == "GC=F" and GOLD_API_KEY:
-        try:
-            url = "https://www.goldapi.io/api/XAU/USD"
-            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                price = float(data.get('price', 0))
-                change = float(data.get('change_percent', 0))
-                return price, change
-        except Exception as e:
-            pass
-    
-    if symbol == "SI=F" and GOLD_API_KEY:
-        try:
-            url = "https://www.goldapi.io/api/XAG/USD"
-            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                price = float(data.get('price', 0))
-                change = float(data.get('change_percent', 0))
-                return price, change
-        except:
-            pass
-    
-    try:
-        ticker = yf.Ticker(symbol)
-        data = ticker.history(period="1d", interval="5m")
-        if not data.empty and len(data) > 1:
-            last = data.iloc[-1]
-            first = data.iloc[0]
-            change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-            return float(last['Close']), float(change)
-        else:
-            data = ticker.history(period="5d", interval="1h")
-            if not data.empty:
-                last = data.iloc[-1]
-                first = data.iloc[0]
-                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                return float(last['Close']), float(change)
-    except:
-        pass
-    return None, None
-
-@st.cache_data(ttl=300)
-def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
-    alternative_symbols = {
-        "GC=F": ["XAUUSD=X", "GOLD"],
-        "SI=F": ["XAGUSD=X", "SILVER"],
-        "DX-Y.NYB": ["DX=F", "DXY"],
-        "BTC-USD": ["BTCUSD=X"],
-        "ETH-USD": ["ETHUSD=X"]
-    }
-    symbols_to_try = [symbol] + alternative_symbols.get(symbol, [])
-    
-    for attempt in range(max_retries):
-        for sym in symbols_to_try:
-            try:
-                ticker = yf.Ticker(sym)
-                df = ticker.history(period=period, interval=interval)
-                if not df.empty and len(df) > 10:
-                    df.columns = [col.lower() for col in df.columns]
-                    return df
-            except Exception as e:
-                continue
-        if attempt < max_retries - 1:
-            time.sleep(3)
-    
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period="3mo", interval="1d")
-        if not df.empty and len(df) > 10:
-            df.columns = [col.lower() for col in df.columns]
-            return df
-    except:
-        pass
-    
-    return None
-
-@st.cache_data(ttl=60)
-def get_all_forex():
-    main_symbols = {
-        "DXY": "DX-Y.NYB",
-        "EURUSD": "EURUSD=X",
-        "GBPUSD": "GBPUSD=X",
-        "USDJPY": "USDJPY=X",
-        "USDCHF": "USDCHF=X",
-        "AUDUSD": "AUDUSD=X",
-        "NZDUSD": "NZDUSD=X",
-        "USDCAD": "USDCAD=X"
-    }
-    results = {}
-    for name, symbol in main_symbols.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period="1d", interval="5m")
-            if not data.empty:
-                last = data.iloc[-1]
-                first = data.iloc[0]
-                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                results[name] = {'price': float(last['Close']), 'change': float(change)}
-            else:
-                results[name] = {'price': 0, 'change': 0}
-        except:
-            results[name] = {'price': 0, 'change': 0}
-    return results
-
-@st.cache_data(ttl=60)
-def get_currency_strength():
-    """
-    حساب قوة كل عملة بناءً على متوسط التغير في أزواجها مقابل العملات الأخرى
-    """
-    strength = {}
-    for currency, pairs in CURRENCY_INDICES.items():
-        changes = []
-        for pair in pairs:
-            try:
-                ticker = yf.Ticker(pair)
-                data = ticker.history(period="1d", interval="5m")
-                if not data.empty and len(data) > 1:
-                    last = data.iloc[-1]
-                    first = data.iloc[0]
-                    change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                    if pair.split('=')[0].startswith(currency):
-                        changes.append(change)
-                    else:
-                        changes.append(-change)
-            except Exception as e:
-                continue
-        if changes:
-            strength[currency] = round(sum(changes) / len(changes), 2)
-        else:
-            strength[currency] = 0.0
-    return strength
-
-@st.cache_data(ttl=120)
-def get_correlation_matrix(pairs):
-    """
-    حساب مصفوفة الارتباط بين الأزواج المختارة
-    """
-    correlation_data = {}
-    for pair in pairs:
-        try:
-            df = get_historical_data(pair, period="5d", interval="1h")
-            if df is not None and not df.empty:
-                correlation_data[pair] = df['close']
-        except:
-            continue
-    
-    if correlation_data:
-        df_corr = pd.DataFrame(correlation_data)
-        return df_corr.corr()
-    return pd.DataFrame()
-
-@st.cache_data(ttl=120)
-def get_pair_correlation(symbol1, symbol2):
-    """
-    حساب الارتباط بين زوجين محددين
-    """
-    try:
-        df1 = get_historical_data(symbol1, period="5d", interval="1h")
-        df2 = get_historical_data(symbol2, period="5d", interval="1h")
-        if df1 is not None and df2 is not None and not df1.empty and not df2.empty:
-            df1_aligned = df1['close'].reindex(df2.index, method='nearest')
-            return round(df1_aligned.corr(df2['close']), 3)
-    except:
-        pass
-    return None
-
-# ==========================================
-# المؤشرات الأساسية
-# ==========================================
 def calc_rsi(data, period=14):
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -768,13 +312,13 @@ def calc_atr(df, period=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(window=period).mean()
 
-def calc_macd(data):
-    ema12 = data.ewm(span=12, adjust=False).mean()
-    ema26 = data.ewm(span=26, adjust=False).mean()
-    macd = ema12 - ema26
-    signal = macd.ewm(span=9, adjust=False).mean()
-    histogram = macd - signal
-    return macd, signal, histogram
+def calc_macd(data, fast=12, slow=26, signal=9):
+    ema_fast = data.ewm(span=fast, adjust=False).mean()
+    ema_slow = data.ewm(span=slow, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    signal_line = macd.ewm(span=signal, adjust=False).mean()
+    histogram = macd - signal_line
+    return macd, signal_line, histogram
 
 def calc_bollinger_bands(data, period=20, std_dev=2):
     sma = data.rolling(window=period).mean()
@@ -794,14 +338,14 @@ def calc_adx(df, period=14):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     return dx.rolling(window=period).mean(), plus_di, minus_di
 
-def calc_ichimoku(df):
+def calc_ichimoku(df, tenkan=9, kijun=26, senkou=52):
     high, low, close = df['high'], df['low'], df['close']
-    tenkan = (high.rolling(window=9).max() + low.rolling(window=9).min()) / 2
-    kijun = (high.rolling(window=26).max() + low.rolling(window=26).min()) / 2
-    senkou_a = ((tenkan + kijun) / 2).shift(26)
-    senkou_b = ((high.rolling(window=52).max() + low.rolling(window=52).min()) / 2).shift(26)
-    chikou = close.shift(-26)
-    return tenkan, kijun, senkou_a, senkou_b, chikou
+    tenkan_line = (high.rolling(window=tenkan).max() + low.rolling(window=tenkan).min()) / 2
+    kijun_line = (high.rolling(window=kijun).max() + low.rolling(window=kijun).min()) / 2
+    senkou_a = ((tenkan_line + kijun_line) / 2).shift(kijun)
+    senkou_b = ((high.rolling(window=senkou).max() + low.rolling(window=senkou).min()) / 2).shift(kijun)
+    chikou = close.shift(-kijun)
+    return tenkan_line, kijun_line, senkou_a, senkou_b, chikou
 
 def calc_vwap(df):
     return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
@@ -1266,8 +810,10 @@ def get_major_trend(df):
         return "BEARISH"
     return "NEUTRAL"
 
-def get_dynamic_weights(df):
-    """تعديل أوزان المؤشرات حسب حالة السوق (اتجاهي أو عرضي)"""
+def get_dynamic_weights(df, asset_type="forex"):
+    """
+    تعديل أوزان المؤشرات حسب حالة السوق ونوع الأصل
+    """
     adx_val = 20
     if 'adx' in df.columns and not df['adx'].empty:
         try:
@@ -1277,30 +823,579 @@ def get_dynamic_weights(df):
         except:
             pass
     
-    weights = {
-        'rsi': 2, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 
-        'ichimoku': 2, 'smc': 3, 'patterns': 4, 'tbs': 4, 
-        'mfi': 2, 'smr': 3, 'candle': 3, 'divergence': 4, 'fresh_ob': 3,
-        'fibonacci': 2, 'macd_hist': 1
-    }
+    # ====== الأوزان الأساسية حسب نوع الأصل ======
+    if asset_type == "gold":
+        weights = {
+            'rsi': 3, 'macd': 4, 'bb': 3, 'vwap': 2, 'adx': 2,
+            'ichimoku': 4, 'smc': 5, 'patterns': 5, 'tbs': 5,
+            'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
+            'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 3
+        }
+    elif asset_type == "crypto":
+        weights = {
+            'rsi': 2, 'macd': 4, 'bb': 3, 'vwap': 2, 'adx': 2,
+            'ichimoku': 5, 'smc': 5, 'patterns': 5, 'tbs': 5,
+            'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
+            'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 3
+        }
+    else:  # forex
+        weights = {
+            'rsi': 3, 'macd': 3, 'bb': 3, 'vwap': 2, 'adx': 2,
+            'ichimoku': 3, 'smc': 4, 'patterns': 5, 'tbs': 5,
+            'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
+            'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 2
+        }
     
-    if adx_val > 25:
-        weights['ichimoku'] = 4
-        weights['rsi'] = 1
-        weights['bb'] = 1
-    else:
-        weights['bb'] = 4
-        weights['rsi'] = 4
-        weights['ichimoku'] = 1
+    # ====== الأوزان الديناميكية حسب حالة السوق ======
+    if adx_val > 25:  # سوق اتجاهي قوي
+        weights['ichimoku'] = weights.get('ichimoku', 3) + 1
+        weights['macd'] = weights.get('macd', 3) + 1
+        weights['rsi'] = max(1, weights.get('rsi', 3) - 1)
+        weights['bb'] = max(1, weights.get('bb', 3) - 1)
+        weights['adx'] = weights.get('adx', 2) + 1
+    else:  # سوق عرضي
+        weights['bb'] = weights.get('bb', 3) + 2
+        weights['rsi'] = weights.get('rsi', 3) + 2
+        weights['ichimoku'] = max(1, weights.get('ichimoku', 3) - 2)
+        weights['macd'] = max(1, weights.get('macd', 3) - 1)
+        weights['mfi'] = weights.get('mfi', 3) + 1
     
     return weights
 
 # ==========================================
-# الإشارة المتكاملة (النسخة النهائية)
+# دوال جلب البيانات
 # ==========================================
-def generate_advanced_signal(df, current_price, symbol=""):
+def get_market_status():
+    eastern = pytz.timezone('US/Eastern')
+    now = datetime.now(eastern)
+    weekday = now.weekday()
+    open_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
+    close_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
+    if weekday == 5:
+        next_open = open_time + timedelta(days=1)
+        return "CLOSED", "عطلة نهاية الأسبوع (السبت)", next_open, close_time
+    if weekday == 6:
+        if now < open_time:
+            return "CLOSED", "انتظار افتتاح الأسبوع", open_time, close_time
+        else:
+            return "OPEN", "السوق مفتوح (الأحد)", close_time, close_time
+    if 0 <= weekday <= 3:
+        if close_time <= now < open_time:
+            return "CLOSED", "الاستراحة اليومية (17:00-18:00 ET)", open_time, close_time
+        else:
+            next_close = close_time if now < close_time else close_time + timedelta(days=1)
+            return "OPEN", "السوق مفتوح", next_close, close_time
+    if weekday == 4:
+        if now < close_time:
+            return "OPEN", "السوق مفتوح (الجمعة)", close_time, close_time
+        else:
+            next_open = open_time + timedelta(days=2)
+            return "CLOSED", "نهاية الأسبوع (إغلاق الجمعة)", next_open, close_time
+    return "UNKNOWN", "حالة غير معروفة", None, None
+
+def format_time(dt):
+    if dt is None:
+        return "N/A"
+    return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+def time_remaining(dt):
+    if dt is None:
+        return "N/A"
+    diff = dt - datetime.now(pytz.timezone('US/Eastern'))
+    if diff.total_seconds() < 0:
+        return "انتهى"
+    hours = int(diff.total_seconds() // 3600)
+    minutes = int((diff.total_seconds() % 3600) // 60)
+    return f"{hours}h {minutes}m"
+
+# ==========================================
+# دوال FMP API
+# ==========================================
+
+@st.cache_data(ttl=300)
+def get_fmp_economic_calendar():
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/economic_calendar?apikey={FMP_API_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            events = []
+            for item in data[:20]:
+                events.append({
+                    'country': item.get('country', ''),
+                    'event': item.get('event', ''),
+                    'date': item.get('date', ''),
+                    'time': item.get('time', ''),
+                    'impact': item.get('impact', ''),
+                    'actual': item.get('actual', ''),
+                    'forecast': item.get('forecast', ''),
+                    'previous': item.get('previous', '')
+                })
+            return events
+    except Exception as e:
+        pass
+    return []
+
+@st.cache_data(ttl=300)
+def get_fmp_news():
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/fmp-news?apikey={FMP_API_KEY}&limit=10"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            news_list = []
+            for item in data[:10]:
+                news_list.append({
+                    'title': item.get('title', ''),
+                    'source': 'FMP',
+                    'publishedAt': item.get('publishedDate', ''),
+                    'url': item.get('url', ''),
+                    'content': item.get('text', '')
+                })
+            return news_list
+    except Exception as e:
+        pass
+    return []
+
+# ==========================================
+# تحليل الأخبار المتقدم
+# ==========================================
+
+NEWS_KEYWORDS = {
+    'positive': {
+        'gold': ['gold rally', 'gold surge', 'gold bullish', 'gold gains', 'gold positive', 'gold up', 'gold rises', 'gold strong', 'gold support', 'gold buying', 'gold rebound'],
+        'forex': ['dollar weak', 'dollar down', 'dollar falls', 'euro strong', 'pound strong', 'currency rally', 'forex positive', 'dollar negative', 'yen weak'],
+        'economy': ['fed cut', 'rate cut', 'stimulus', 'economic growth', 'gdp up', 'jobs strong', 'inflation down', 'recovery', 'boom']
+    },
+    'negative': {
+        'gold': ['gold drop', 'gold falls', 'gold bearish', 'gold decline', 'gold down', 'gold selling', 'gold crash', 'gold weak', 'gold resistance', 'gold plunge'],
+        'forex': ['dollar strong', 'dollar up', 'dollar rises', 'euro weak', 'pound weak', 'currency drop', 'forex negative', 'dollar positive', 'yen strong'],
+        'economy': ['fed hike', 'rate hike', 'inflation up', 'economic slowdown', 'gdp down', 'jobs weak', 'recession', 'crisis', 'crash']
+    }
+}
+
+def analyze_news_impact(news_list):
+    if not news_list:
+        return {
+            'gold_sentiment': 0,
+            'forex_sentiment': 0,
+            'overall_sentiment': 0,
+            'high_impact_news': [],
+            'news_analysis': [],
+            'summary': "لا توجد أخبار للتحليل",
+            'count': 0
+        }
+    
+    gold_score = 0
+    forex_score = 0
+    high_impact = []
+    news_analysis = []
+    
+    for item in news_list:
+        title = item.get('title', '').lower()
+        content = item.get('content', '').lower()
+        combined_text = title + " " + content
+        source = item.get('source', '')
+        impact = 0
+        category = 'neutral'
+        
+        gold_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['gold'])
+        gold_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['gold'])
+        
+        if gold_positive:
+            gold_score += 2
+            impact += 2
+            category = 'positive_gold'
+        elif gold_negative:
+            gold_score -= 2
+            impact -= 2
+            category = 'negative_gold'
+        
+        forex_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['forex'])
+        forex_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['forex'])
+        
+        if forex_positive:
+            forex_score += 2
+            impact += 1
+            if category == 'neutral':
+                category = 'positive_forex'
+        elif forex_negative:
+            forex_score -= 2
+            impact -= 1
+            if category == 'neutral':
+                category = 'negative_forex'
+        
+        eco_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['economy'])
+        eco_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['economy'])
+        
+        if eco_positive:
+            gold_score += 1
+            forex_score += 1
+            impact += 1
+        elif eco_negative:
+            gold_score -= 1
+            forex_score -= 1
+            impact -= 1
+        
+        impact_level = "منخفض"
+        if abs(impact) >= 3:
+            impact_level = "عالٍ"
+            high_impact.append({
+                'title': item.get('title', ''),
+                'source': source,
+                'impact': impact,
+                'category': category
+            })
+        elif abs(impact) >= 1:
+            impact_level = "متوسط"
+        
+        news_analysis.append({
+            'title': item.get('title', ''),
+            'source': source,
+            'category': category,
+            'impact': impact,
+            'impact_level': impact_level,
+            'date': item.get('publishedAt', '')
+        })
+    
+    gold_sentiment = min(100, max(-100, gold_score * 10))
+    forex_sentiment = min(100, max(-100, forex_score * 10))
+    overall_sentiment = (gold_sentiment + forex_sentiment) / 2
+    
+    if overall_sentiment > 30:
+        summary = "📈 الأخبار إيجابية بشكل عام، تدعم الشراء"
+    elif overall_sentiment < -30:
+        summary = "📉 الأخبار سلبية بشكل عام، تدعم البيع"
+    elif high_impact:
+        summary = f"⚠️ أخبار عالية التأثير: {len(high_impact)} خبر"
+    else:
+        summary = "➡️ الأخبار محايدة، لا تأثير كبير"
+    
+    return {
+        'gold_sentiment': gold_sentiment,
+        'forex_sentiment': forex_sentiment,
+        'overall_sentiment': overall_sentiment,
+        'high_impact_news': high_impact,
+        'news_analysis': news_analysis,
+        'summary': summary,
+        'count': len(news_list)
+    }
+
+def get_news_impact_score(news_analysis, symbol=""):
+    if not news_analysis or news_analysis.get('count', 0) == 0:
+        return 0, "لا توجد أخبار"
+    
+    impact_score = 0
+    impact_details = []
+    
+    if "Gold" in symbol or "XAU" in symbol:
+        impact_score = news_analysis.get('gold_sentiment', 0)
+        impact_details.append(f"الذهب: {impact_score:+.0f}")
+    elif any(x in symbol for x in ["EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"]):
+        impact_score = news_analysis.get('forex_sentiment', 0)
+        impact_details.append(f"الفوركس: {impact_score:+.0f}")
+    else:
+        impact_score = news_analysis.get('overall_sentiment', 0)
+        impact_details.append(f"عام: {impact_score:+.0f}")
+    
+    high_impact = news_analysis.get('high_impact_news', [])
+    if high_impact:
+        impact_score -= len(high_impact) * 5
+        impact_details.append(f"أخبار عالية التأثير: -{len(high_impact) * 5}")
+    
+    return impact_score, " | ".join(impact_details)
+
+def display_news_analysis(news_analysis):
+    if not news_analysis or news_analysis.get('count', 0) == 0:
+        st.info("لا توجد أخبار للتحليل")
+        return
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        gold_sent = news_analysis.get('gold_sentiment', 0)
+        color = "🟢" if gold_sent > 0 else ("🔴" if gold_sent < 0 else "🟡")
+        st.metric(f"{color} الذهب", f"{gold_sent:+.0f}")
+    
+    with col2:
+        forex_sent = news_analysis.get('forex_sentiment', 0)
+        color = "🟢" if forex_sent > 0 else ("🔴" if forex_sent < 0 else "🟡")
+        st.metric(f"{color} الفوركس", f"{forex_sent:+.0f}")
+    
+    with col3:
+        overall = news_analysis.get('overall_sentiment', 0)
+        color = "🟢" if overall > 0 else ("🔴" if overall < 0 else "🟡")
+        st.metric(f"{color} الإجمالي", f"{overall:+.0f}")
+    
+    st.info(news_analysis.get('summary', ''))
+    
+    if news_analysis.get('news_analysis'):
+        st.markdown("#### 📰 تحليل الأخبار:")
+        for item in news_analysis['news_analysis'][:5]:
+            impact = item.get('impact', 0)
+            impact_level = item.get('impact_level', '')
+            if impact_level == "عالٍ":
+                icon = "🔴"
+            elif impact_level == "متوسط":
+                icon = "🟡"
+            else:
+                icon = "🟢"
+            
+            st.markdown(f"""
+            <div class="news-card">
+                <div class="news-title">
+                    {icon} {item.get('title', '')[:100]}...
+                </div>
+                <div class="news-date">
+                    {item.get('source', '')} | التأثير: {impact_level} ({impact:+.0f}) | {item.get('date', '')}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+def display_economic_events(events):
+    if not events:
+        st.info("لا توجد أحداث اقتصادية")
+        return
+    
+    for event in events[:15]:
+        impact = event.get('impact', '')
+        if impact == 'High' or impact == 'عالٍ':
+            impact_icon = "🔴"
+            impact_class = "event-high"
+        elif impact == 'Medium' or impact == 'متوسط':
+            impact_icon = "🟡"
+            impact_class = "event-medium"
+        else:
+            impact_icon = "🟢"
+            impact_class = "event-low"
+        
+        st.markdown(f"""
+        <div class="news-card {impact_class}">
+            <div class="news-title">
+                {impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}
+            </div>
+            <div class="news-date">
+                🕐 {event.get('date', '')} {event.get('time', '')} | 
+                التوقع: {event.get('forecast', 'N/A')} | 
+                السابق: {event.get('previous', 'N/A')} | 
+                الفعلي: {event.get('actual', 'N/A')}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ==========================================
+# دوال جلب البيانات الأساسية
+# ==========================================
+
+@st.cache_data(ttl=5)
+def get_spot_price(symbol="GC=F"):
+    if symbol == "GC=F" and GOLD_API_KEY:
+        try:
+            url = "https://www.goldapi.io/api/XAU/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                price = float(data.get('price', 0))
+                change = float(data.get('change_percent', 0))
+                return price, change
+        except Exception as e:
+            pass
+    
+    if symbol == "SI=F" and GOLD_API_KEY:
+        try:
+            url = "https://www.goldapi.io/api/XAG/USD"
+            headers = {"x-access-token": GOLD_API_KEY, "Content-Type": "application/json"}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                price = float(data.get('price', 0))
+                change = float(data.get('change_percent', 0))
+                return price, change
+        except:
+            pass
+    
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d", interval="5m")
+        if not data.empty and len(data) > 1:
+            last = data.iloc[-1]
+            first = data.iloc[0]
+            change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+            return float(last['Close']), float(change)
+        else:
+            data = ticker.history(period="5d", interval="1h")
+            if not data.empty:
+                last = data.iloc[-1]
+                first = data.iloc[0]
+                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+                return float(last['Close']), float(change)
+    except:
+        pass
+    return None, None
+
+@st.cache_data(ttl=300)
+def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
+    alternative_symbols = {
+        "GC=F": ["XAUUSD=X", "GOLD"],
+        "SI=F": ["XAGUSD=X", "SILVER"],
+        "DX-Y.NYB": ["DX=F", "DXY"],
+        "BTC-USD": ["BTCUSD=X"],
+        "ETH-USD": ["ETHUSD=X"]
+    }
+    symbols_to_try = [symbol] + alternative_symbols.get(symbol, [])
+    
+    for attempt in range(max_retries):
+        for sym in symbols_to_try:
+            try:
+                ticker = yf.Ticker(sym)
+                df = ticker.history(period=period, interval=interval)
+                if not df.empty and len(df) > 10:
+                    df.columns = [col.lower() for col in df.columns]
+                    return df
+            except Exception as e:
+                continue
+        if attempt < max_retries - 1:
+            time.sleep(3)
+    
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="3mo", interval="1d")
+        if not df.empty and len(df) > 10:
+            df.columns = [col.lower() for col in df.columns]
+            return df
+    except:
+        pass
+    
+    return None
+
+@st.cache_data(ttl=60)
+def get_all_forex():
+    main_symbols = {
+        "DXY": "DX-Y.NYB",
+        "EURUSD": "EURUSD=X",
+        "GBPUSD": "GBPUSD=X",
+        "USDJPY": "USDJPY=X",
+        "USDCHF": "USDCHF=X",
+        "AUDUSD": "AUDUSD=X",
+        "NZDUSD": "NZDUSD=X",
+        "USDCAD": "USDCAD=X"
+    }
+    results = {}
+    for name, symbol in main_symbols.items():
+        try:
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period="1d", interval="5m")
+            if not data.empty:
+                last = data.iloc[-1]
+                first = data.iloc[0]
+                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+                results[name] = {'price': float(last['Close']), 'change': float(change)}
+            else:
+                results[name] = {'price': 0, 'change': 0}
+        except:
+            results[name] = {'price': 0, 'change': 0}
+    return results
+
+@st.cache_data(ttl=60)
+def get_currency_strength():
+    strength = {}
+    for currency, pairs in CURRENCY_INDICES.items():
+        changes = []
+        for pair in pairs:
+            try:
+                ticker = yf.Ticker(pair)
+                data = ticker.history(period="1d", interval="5m")
+                if not data.empty and len(data) > 1:
+                    last = data.iloc[-1]
+                    first = data.iloc[0]
+                    change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+                    if pair.split('=')[0].startswith(currency):
+                        changes.append(change)
+                    else:
+                        changes.append(-change)
+            except Exception as e:
+                continue
+        if changes:
+            strength[currency] = round(sum(changes) / len(changes), 2)
+        else:
+            strength[currency] = 0.0
+    return strength
+
+@st.cache_data(ttl=120)
+def get_correlation_matrix(pairs):
+    correlation_data = {}
+    for pair in pairs:
+        try:
+            df = get_historical_data(pair, period="5d", interval="1h")
+            if df is not None and not df.empty:
+                correlation_data[pair] = df['close']
+        except:
+            continue
+    
+    if correlation_data:
+        df_corr = pd.DataFrame(correlation_data)
+        return df_corr.corr()
+    return pd.DataFrame()
+
+@st.cache_data(ttl=120)
+def get_pair_correlation(symbol1, symbol2):
+    try:
+        df1 = get_historical_data(symbol1, period="5d", interval="1h")
+        df2 = get_historical_data(symbol2, period="5d", interval="1h")
+        if df1 is not None and df2 is not None and not df1.empty and not df2.empty:
+            df1_aligned = df1['close'].reindex(df2.index, method='nearest')
+            return round(df1_aligned.corr(df2['close']), 3)
+    except:
+        pass
+    return None
+
+# ==========================================
+# الإشارة المتكاملة (النسخة النهائية مع الإعدادات الديناميكية)
+# ==========================================
+def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
+
+    # ===== الحصول على الإعدادات حسب نوع الأصل =====
+    settings = get_indicator_settings(symbol_name)
+    asset_type = settings['asset_type']
+    
+    # ===== حساب المؤشرات بالإعدادات الديناميكية =====
+    macd_settings = settings['macd']
+    rsi_settings = settings['rsi']
+    mfi_settings = settings['mfi']
+    bb_settings = settings['bb']
+    ichimoku_settings = settings['ichimoku']
+    
+    # إعادة حساب المؤشرات بالإعدادات الجديدة
+    df['rsi'] = calc_rsi(df['close'], period=rsi_settings['period'])
+    df['atr'] = calc_atr(df, period=settings['atr_period'])
+    df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(
+        df['close'], 
+        fast=macd_settings['fast'],
+        slow=macd_settings['slow'],
+        signal=macd_settings['signal']
+    )
+    df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(
+        df['close'],
+        period=bb_settings['period'],
+        std_dev=bb_settings['std_dev']
+    )
+    df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df, period=settings['adx_period'])
+    df['vwap'] = calc_vwap(df)
+    tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(
+        df,
+        tenkan=ichimoku_settings['tenkan'],
+        kijun=ichimoku_settings['kijun'],
+        senkou=ichimoku_settings['senkou']
+    )
+    df['tenkan'] = tenkan
+    df['kijun'] = kijun
+    df['senkou_a'] = senkou_a
+    df['senkou_b'] = senkou_b
+    df['chikou'] = chikou
+    df['mfi'] = calc_mfi(df['close'], period=mfi_settings['period'])
 
     df_smc = analyze_smc_ict(df)
     last_smc = df_smc.iloc[-1]
@@ -1308,36 +1403,38 @@ def generate_advanced_signal(df, current_price, symbol=""):
     tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
     last = df.iloc[-1]
 
-    weights = get_dynamic_weights(df)
+    # ===== الحصول على الأوزان الديناميكية =====
+    weights = get_dynamic_weights(df, asset_type)
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
 
-    # مؤشرات أساسية
+    # ===== RSI =====
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
-        if rsi < 30:
+        if rsi < rsi_settings['oversold']:
             scores['BUY'] += weights['rsi']
-            details['RSI'] = f"مفرط البيع ({rsi:.1f}) +{weights['rsi']}"
-        elif rsi > 70:
+            details['RSI'] = f"مفرط البيع ({rsi:.1f}) - المستوى {rsi_settings['oversold']} +{weights['rsi']}"
+        elif rsi > rsi_settings['overbought']:
             scores['SELL'] += weights['rsi']
-            details['RSI'] = f"مفرط الشراء ({rsi:.1f}) +{weights['rsi']}"
+            details['RSI'] = f"مفرط الشراء ({rsi:.1f}) - المستوى {rsi_settings['overbought']} +{weights['rsi']}"
         else:
             details['RSI'] = f"محايد ({rsi:.1f})"
 
+    # ===== MACD =====
     if 'macd' in df.columns and 'macd_signal' in df.columns:
         if not pd.isna(last['macd']) and not pd.isna(last['macd_signal']):
             if last['macd'] > last['macd_signal'] and last['macd'] > 0:
                 scores['BUY'] += weights['macd']
-                details['MACD'] = f"إيجابي +{weights['macd']}"
+                details['MACD'] = f"إيجابي ({macd_settings['fast']},{macd_settings['slow']},{macd_settings['signal']}) +{weights['macd']}"
             elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
                 scores['SELL'] += weights['macd']
-                details['MACD'] = f"سلبي +{weights['macd']}"
+                details['MACD'] = f"سلبي ({macd_settings['fast']},{macd_settings['slow']},{macd_settings['signal']}) +{weights['macd']}"
             else:
                 details['MACD'] = "محايد"
         else:
             details['MACD'] = "بيانات غير كافية"
 
-    # MACD Histogram
+    # ===== MACD Histogram =====
     if 'macd_histogram' in df.columns and not pd.isna(last['macd_histogram']):
         if last['macd_histogram'] > 0 and last['macd_histogram'] > df['macd_histogram'].iloc[-3]:
             scores['BUY'] += weights['macd_hist']
@@ -1348,19 +1445,21 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['MACD_Hist'] = "هيستوجرام محايد"
 
+    # ===== Bollinger Bands =====
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
         if not pd.isna(last['bb_upper']) and not pd.isna(last['bb_lower']):
             if current_price <= last['bb_lower'] * 1.005:
                 scores['BUY'] += weights['bb']
-                details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
+                details['BB'] = f"قرب الحد السفلي ({bb_settings['period']},{bb_settings['std_dev']}) +{weights['bb']}"
             elif current_price >= last['bb_upper'] * 0.995:
                 scores['SELL'] += weights['bb']
-                details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
+                details['BB'] = f"قرب الحد الأعلى ({bb_settings['period']},{bb_settings['std_dev']}) +{weights['bb']}"
             else:
                 details['BB'] = "وسط النطاق"
         else:
             details['BB'] = "بيانات غير كافية"
 
+    # ===== VWAP =====
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
             scores['BUY'] += weights['vwap']
@@ -1369,40 +1468,43 @@ def generate_advanced_signal(df, current_price, symbol=""):
             scores['SELL'] += weights['vwap']
             details['VWAP'] = f"تحت VWAP +{weights['vwap']}"
 
+    # ===== ADX =====
     if 'adx' in df.columns and not pd.isna(last['adx']):
         if last['adx'] > 25:
             if df['close'].iloc[-1] > df['close'].iloc[-5]:
-                scores['BUY'] += 1
-                details['ADX'] = f"اتجاه قوي صاعد +1"
+                scores['BUY'] += weights['adx']
+                details['ADX'] = f"اتجاه قوي صاعد +{weights['adx']}"
             else:
-                scores['SELL'] += 1
-                details['ADX'] = f"اتجاه قوي هابط +1"
+                scores['SELL'] += weights['adx']
+                details['ADX'] = f"اتجاه قوي هابط +{weights['adx']}"
         else:
             details['ADX'] = f"اتجاه ضعيف ({last['adx']:.1f})"
 
+    # ===== Ichimoku =====
     if 'senkou_a' in df.columns and 'senkou_b' in df.columns:
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
                 scores['BUY'] += weights['ichimoku']
-                details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
+                details['Ichimoku'] = f"فوق السحابة ({ichimoku_settings['tenkan']},{ichimoku_settings['kijun']},{ichimoku_settings['senkou']}) +{weights['ichimoku']}"
             elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
                 scores['SELL'] += weights['ichimoku']
-                details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
+                details['Ichimoku'] = f"تحت السحابة ({ichimoku_settings['tenkan']},{ichimoku_settings['kijun']},{ichimoku_settings['senkou']}) +{weights['ichimoku']}"
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
+    # ===== MFI =====
     if 'mfi' in df.columns and not pd.isna(last['mfi']):
         mfi = last['mfi']
-        if mfi < 20:
+        if mfi < mfi_settings['oversold']:
             scores['BUY'] += weights['mfi']
-            details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
-        elif mfi > 80:
+            details['MFI'] = f"مفرط البيع ({mfi:.1f}) - المستوى {mfi_settings['oversold']} +{weights['mfi']}"
+        elif mfi > mfi_settings['overbought']:
             scores['SELL'] += weights['mfi']
-            details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
+            details['MFI'] = f"مفرط الشراء ({mfi:.1f}) - المستوى {mfi_settings['overbought']} +{weights['mfi']}"
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
-    # Fibonacci
+    # ===== Fibonacci =====
     recent_high = df['high'].iloc[-50:].max()
     recent_low = df['low'].iloc[-50:].min()
     fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
@@ -1416,7 +1518,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details['Fibonacci'] = "منطقة وسط"
 
-    # SMC/SMR
+    # ===== SMC/SMR =====
     if last_smc.get('order_block_bullish', False):
         scores['BUY'] += weights['smc']
         details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
@@ -1449,7 +1551,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         scores['SELL'] += weights['smr']
         details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
 
-    # الأنماط الهيكلية
+    # ===== الأنماط الهيكلية =====
     if patterns:
         for p in patterns:
             if p['direction'] == 'BULLISH':
@@ -1459,7 +1561,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 scores['SELL'] += weights['patterns']
                 details['Structure'] = f"{p['pattern']} (هابط) +{weights['patterns']}"
 
-    # TBS
+    # ===== TBS =====
     if tbs_type == "BULLISH":
         scores['BUY'] += weights['tbs']
         details['TBS'] = f"TBS شراء (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
@@ -1467,7 +1569,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         scores['SELL'] += weights['tbs']
         details['TBS'] = f"TBS بيع (الدخول: {tbs_entry:.4f}) +{weights['tbs']}"
 
-    # أنماط الشموع والتباعد
+    # ===== أنماط الشموع =====
     candle_patterns = detect_candlestick_patterns(df)
     for cp in candle_patterns:
         if cp['direction'] == 'BULLISH':
@@ -1479,6 +1581,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         else:
             details[f"Candle_{cp['pattern']}"] = f"{cp['pattern']} (محايد)"
 
+    # ===== تباعد RSI =====
     div_type, div_score = detect_rsi_divergence(df)
     if div_type:
         if "BULLISH" in div_type:
@@ -1488,7 +1591,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
             scores['SELL'] += weights['divergence']
             details['Divergence'] = f"{div_type} (+{weights['divergence']})"
 
-    # تكامل الأنماط الهيكلية مع الشموع (مصحح)
+    # ===== تكامل الأنماط =====
     if patterns and candle_patterns:
         try:
             last_struct = next((p for p in reversed(patterns) if p.get('direction') != 'NEUTRAL'), None)
@@ -1502,17 +1605,17 @@ def generate_advanced_signal(df, current_price, symbol=""):
         except Exception as e:
             pass
 
-    # كتل الأوامر الطازجة
+    # ===== كتل الأوامر الطازجة =====
     is_fresh, fresh_dir = check_fresh_order_block(df_smc)
     if is_fresh and fresh_dir:
         scores[fresh_dir] += weights['fresh_ob']
         details['Fresh_OB'] = f"كتلة أوامر طازجة لصالح {fresh_dir} (+{weights['fresh_ob']})"
 
-    # Currency Strength Filter
+    # ===== Currency Strength =====
     if symbol in PAIRS.values():
         currency_strength = get_currency_strength()
         if currency_strength:
-            pair_name = [k for k, v in PAIRS.items() if v == symbol][0] if symbol in PAIRS.values() else ""
+            pair_name = symbol_name
             currencies = pair_name.split("/") if "/" in pair_name else []
             
             if len(currencies) == 2:
@@ -1542,7 +1645,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
                     scores['SELL'] += 1
                     details['Currency_Strength'] = f"✅ {quote} قوي مقابل {base} (+1 SELL)"
 
-    # النتيجة الأولية
+    # ===== النتيجة الأولية =====
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
     
@@ -1556,7 +1659,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         signal = "WAIT"
         confidence = 50 + (net_score / total_weight) * 50
 
-    # MTF Filter
+    # ===== MTF Filter =====
     mtf_signal = "NEUTRAL"
     mtf_count = 0
     if symbol and symbol != "":
@@ -1596,7 +1699,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     except:
         pass
 
-    # مرشح الاتجاه الرئيسي
+    # ===== Trend Filter =====
     major_trend = get_major_trend(df)
     if signal != "WAIT":
         if signal == "BUY" and major_trend == "BEARISH":
@@ -1609,13 +1712,13 @@ def generate_advanced_signal(df, current_price, symbol=""):
             confidence = min(100, confidence * 1.15)
             details['Trend_Filter'] = f"✅ متوافق مع الاتجاه الرئيسي ({major_trend}) +15% ثقة"
 
-    # مكافأة مناطق القتل ICT
+    # ===== Killzone =====
     killzone, kz_bonus = is_ict_killzone()
     if killzone and signal != "WAIT":
         confidence = min(100, confidence + kz_bonus * 2)
         details['ICT_Killzone'] = f"إشارة داخل منطقة {killzone} (+{kz_bonus*2}% ثقة)"
 
-    # Session Filter
+    # ===== Session Filter =====
     eastern = pytz.timezone('US/Eastern')
     now = datetime.now(eastern)
     hour = now.hour
@@ -1626,7 +1729,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
         confidence = min(100, confidence * 1.05)
         details['Session_Filter'] = "✅ ذروة السيولة في نيويورك +5% ثقة"
 
-    # تصفية التقلب
+    # ===== ATR Filter =====
     if 'atr' in df.columns and len(df) > 50:
         current_atr = last['atr']
         avg_atr = df['atr'].iloc[-50:].mean()
@@ -1635,7 +1738,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 confidence = confidence * 0.6
                 details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة ×0.6)"
 
-    # تصفية إضافية للإشارات الضعيفة
+    # ===== Weak Signal Filter =====
     if signal != "WAIT":
         has_strong_signal = False
         if last_smc.get('order_block_bullish', False) or last_smc.get('order_block_bearish', False):
@@ -1651,7 +1754,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
 
-    # حساب وقف الخسارة والأهداف
+    # ===== Stop Loss & Targets =====
     stop_loss = None
     entry_price = None
     targets = {}
@@ -1765,23 +1868,7 @@ def get_all_signals_with_trades():
                 continue
             current_price = df['close'].iloc[-1]
             
-            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-            df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-            df['rsi'] = calc_rsi(df['close'])
-            df['atr'] = calc_atr(df)
-            df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
-            df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
-            df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
-            df['vwap'] = calc_vwap(df)
-            tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
-            df['tenkan'] = tenkan
-            df['kijun'] = kijun
-            df['senkou_a'] = senkou_a
-            df['senkou_b'] = senkou_b
-            df['chikou'] = chikou
-            df['mfi'] = calc_mfi(df)
-            
-            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, symbol)
+            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, pair_name, symbol)
             
             if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
                 price_str = f"${current_price:,.2f}"
@@ -2011,7 +2098,6 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
             if tbs_stop:
                 explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
 
-    # إضافة تأثير الأخبار
     if 'News_Impact' in details:
         explanation += f"\n\n📰 **تأثير الأخبار:** {details['News_Impact']}"
 
@@ -2020,6 +2106,36 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
 # ==========================================
 # بداية الواجهة الرئيسية (Streamlit)
 # ==========================================
+
+# تهيئة حالة الجلسة
+if "df" not in st.session_state:
+    st.session_state.df = None
+if "current_trade" not in st.session_state:
+    st.session_state.current_trade = None
+if "trades" not in st.session_state:
+    st.session_state.trades = []
+if "price_data" not in st.session_state:
+    st.session_state.price_data = None
+if "show_form" not in st.session_state:
+    st.session_state.show_form = False
+if "daily_pnl" not in st.session_state:
+    st.session_state.daily_pnl = 0
+if "daily_trades" not in st.session_state:
+    st.session_state.daily_trades = 0
+if "last_update" not in st.session_state:
+    st.session_state.last_update = datetime.now()
+if "refresh_trigger" not in st.session_state:
+    st.session_state.refresh_trigger = False
+if "all_signals" not in st.session_state:
+    st.session_state.all_signals = None
+if "show_indicators" not in st.session_state:
+    st.session_state.show_indicators = True
+if "currency_strength" not in st.session_state:
+    st.session_state.currency_strength = None
+if "economic_events" not in st.session_state:
+    st.session_state.economic_events = None
+if "news_analysis" not in st.session_state:
+    st.session_state.news_analysis = None
 
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
@@ -2168,25 +2284,8 @@ if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
 
-# حساب المؤشرات
-df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-df['rsi'] = calc_rsi(df['close'])
-df['atr'] = calc_atr(df)
-df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
-df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'])
-df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df)
-df['vwap'] = calc_vwap(df)
-tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
-df['tenkan'] = tenkan
-df['kijun'] = kijun
-df['senkou_a'] = senkou_a
-df['senkou_b'] = senkou_b
-df['chikou'] = chikou
-df['mfi'] = calc_mfi(df)
-
 # توليد الإشارة
-signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_symbol)
+signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_pair_name, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # عرض السعر
@@ -2362,7 +2461,6 @@ if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_anal
 if st.session_state.news_analysis:
     display_news_analysis(st.session_state.news_analysis)
     
-    # عرض التأثير على الإشارة الحالية
     if signal != "WAIT":
         news_impact, _ = get_news_impact_score(st.session_state.news_analysis, selected_symbol)
         if abs(news_impact) > 10:
@@ -2727,6 +2825,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • News Analysis • Integrated Signals & Trade Management
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • News Analysis • Dynamic Settings • Integrated Signals & Trade Management
 </div>
 """, unsafe_allow_html=True)
