@@ -1,6 +1,6 @@
 # ============================================================
-# BLACK PYRAMID v2003 – HIERARCHICAL LAYERS INTEGRATION
-# Original Signal Engine + 7-Layer Verification Filter
+# BLACK PYRAMID v2003 – HIERARCHICAL PRECISION ENGINE
+# Full Integration: 7 Layers + Smart Filters + 1-3 Trades/Day
 # ============================================================
 
 import streamlit as st
@@ -21,14 +21,14 @@ from typing import Dict, Tuple, List, Optional
 # ============================================================
 
 st.set_page_config(
-    page_title="Black Pyramid v2003 - Layers",
+    page_title="Black Pyramid v2003 - Precision",
     page_icon="▲",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ============================================================
-# Visual identity – كما هي (محسنة)
+# Visual identity
 # ============================================================
 
 st.markdown("""
@@ -248,13 +248,13 @@ st.markdown("""
         <div class="main-title">
             <span class="pyramid-icon">▲</span> BLACK PYRAMID v2003 <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Hierarchical Layers • Regime • Bias • Confirmation • Trigger • Price • News • Risk</div>
+        <div class="main-subtitle">7 Layers • Regime • 4H Bias • 1H Confirmation • 15M Trigger • Price • News • Risk</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================================
-# API Keys & Configuration (نفس القديم)
+# API Keys & Configuration
 # ============================================================
 
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
@@ -265,6 +265,8 @@ BUY_THRESHOLD = 8
 SELL_THRESHOLD = -8
 COOLDOWN_BARS = 4
 MAX_TRADES_PER_DAY = 3
+MAX_OPEN_RISK = 0.05
+RISK_PER_TRADE = 0.02
 
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
@@ -273,36 +275,14 @@ PAIRS = {
     "EUR/USD": "EURUSD=X",
     "GBP/USD": "GBPUSD=X",
     "USD/JPY": "USDJPY=X",
-    "USD/CHF": "USDCHF=X",
     "AUD/USD": "AUDUSD=X",
     "NZD/USD": "NZDUSD=X",
-    "USD/CAD": "USDCAD=X",
-    "EUR/GBP": "EURGBP=X",
-    "EUR/JPY": "EURJPY=X",
-    "EUR/CHF": "EURCHF=X",
-    "EUR/AUD": "EURAUD=X",
-    "EUR/NZD": "EURNZD=X",
-    "EUR/CAD": "EURCAD=X",
-    "GBP/JPY": "GBPJPY=X",
-    "GBP/CHF": "GBPCHF=X",
-    "GBP/AUD": "GBPAUD=X",
-    "GBP/NZD": "GBPNZD=X",
-    "GBP/CAD": "GBPCAD=X",
-    "AUD/JPY": "AUDJPY=X",
-    "AUD/CHF": "AUDCHF=X",
-    "AUD/NZD": "AUDNZD=X",
-    "AUD/CAD": "AUDCAD=X",
-    "NZD/JPY": "NZDJPY=X",
-    "NZD/CHF": "NZDCHF=X",
-    "NZD/CAD": "NZDCAD=X",
-    "CAD/JPY": "CADJPY=X",
-    "CAD/CHF": "CADCHF=X",
     "BTC/USD (Bitcoin)": "BTC-USD",
     "ETH/USD (Ethereum)": "ETH-USD"
 }
 
 # ============================================================
-# Session state (نفس القديم)
+# Session state
 # ============================================================
 
 if "all_signals" not in st.session_state:
@@ -321,7 +301,7 @@ if "trade_stats" not in st.session_state:
     st.session_state.trade_stats = {"day": None, "count": 0, "last_closed_bar": {}}
 
 # ============================================================
-# DATA RETRIEVAL (نفس القديم)
+# DATA RETRIEVAL
 # ============================================================
 
 @st.cache_data(ttl=5)
@@ -418,11 +398,8 @@ def time_remaining(dt):
     m = int((diff.total_seconds() % 3600) // 60)
     return f"{h}h {m}m"
 
-def format_time(dt):
-    return dt.strftime("%Y-%m-%d %H:%M:%S %Z") if dt else "N/A"
-
 # ============================================================
-# INDICATORS (نفس القديم)
+# INDICATORS
 # ============================================================
 
 def calc_rsi(data, period=14):
@@ -495,7 +472,7 @@ def calc_mfi(df, period=14):
     return 100 - (100 / (1 + pos / neg))
 
 # ============================================================
-# SMC / ICT (نفس القديم مع تصحيح بسيط)
+# SMC / ICT
 # ============================================================
 
 def find_swings(df, order=5):
@@ -567,7 +544,7 @@ def detect_smc_ict(df):
     return df
 
 # ============================================================
-# TBS (نفس القديم مع تصحيح منطق الانعكاس)
+# TBS (Turtle Body Soup)
 # ============================================================
 
 def detect_tbs_correct(df, lookback=20, body_mult=1.5):
@@ -580,16 +557,14 @@ def detect_tbs_correct(df, lookback=20, body_mult=1.5):
     current_body = abs(last['close'] - last['open'])
     if current_body < avg_body * body_mult:
         return None, None, None, None
-    # Bearish Turtle Soup: اختراق القمة والعودة للأسفل
     if last['high'] > lookback_high and last['close'] < lookback_high:
         return "BEARISH", last['close'], last['high'], lookback_high
-    # Bullish Turtle Soup: كسر القاع والعودة للأعلى
     elif last['low'] < lookback_low and last['close'] > lookback_low:
         return "BULLISH", last['close'], last['low'], lookback_low
     return None, None, None, None
 
 # ============================================================
-# DXY (نفس القديم)
+# DXY
 # ============================================================
 
 def get_dxy_correlation(df_pair, df_dxy, lookback=50):
@@ -638,7 +613,7 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
     return net_score + adjustment, status, adjustment
 
 # ============================================================
-# Regime & MTF (نفس القديم)
+# ORIGINAL SIGNAL ENGINE (v2003) – لم يتغير
 # ============================================================
 
 def detect_regime(df):
@@ -698,15 +673,10 @@ def mtf_analysis(df, symbol):
         count = 0
     return consensus, count, results
 
-# ============================================================
-# MAIN SIGNAL ENGINE (الأصلي) – لم يتغير
-# ============================================================
-
 def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     if df is None or len(df) < 100:
         return "WAIT", 0, {}, {}, None, None, None, None, None, None, (None,None,None,None)
 
-    # Calculate indicators
     df['ema20'] = df['close'].ewm(20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(50, adjust=False).mean()
     df['rsi'] = calc_rsi(df['close'])
@@ -723,156 +693,97 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
     df['mfi'] = calc_mfi(df)
     df['vwap'] = calc_vwap_anchor(df)
 
-    # SMC
     df_smc = detect_smc_ict(df)
     last_smc = df_smc.iloc[-1]
 
-    # TBS
     tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs_correct(df)
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
 
-    # Regime
     regime = detect_regime(df)
-
-    # MTF
     mtf_consensus, mtf_count, mtf_details = mtf_analysis(df, symbol)
 
     last = df.iloc[-1]
     current_price = last['close']
 
-    # ========== Factor system (نفس القديم) ==========
     factors = {
-        "structure": 0.0,
-        "liquidity": 0.0,
-        "smc": 0.0,
-        "mtf": 0.0,
-        "dxy": 0.0,
-        "momentum": 0.0,
-        "volatility": 0.0,
-        "pattern": 0.0,
-        "volume": 0.0
+        "structure": 0.0, "liquidity": 0.0, "smc": 0.0, "mtf": 0.0,
+        "dxy": 0.0, "momentum": 0.0, "volatility": 0.0, "pattern": 0.0, "volume": 0.0
     }
     details = {}
 
-    # 1. Structure
     if last_smc.get('bos_bullish', False) or last_smc.get('mss_bullish', False):
-        factors['structure'] += 25.0
-        details['Structure'] = "Bullish BOS/MSS"
+        factors['structure'] += 25.0; details['Structure'] = "Bullish BOS/MSS"
     elif last_smc.get('bos_bearish', False) or last_smc.get('mss_bearish', False):
-        factors['structure'] -= 25.0
-        details['Structure'] = "Bearish BOS/MSS"
-    else:
-        details['Structure'] = "Neutral"
+        factors['structure'] -= 25.0; details['Structure'] = "Bearish BOS/MSS"
+    else: details['Structure'] = "Neutral"
 
-    # 2. Liquidity
     if last_smc.get('liquidity_sweep_bullish', False):
-        factors['liquidity'] += 20.0
-        details['Liquidity'] = "Buy-side liquidity sweep"
+        factors['liquidity'] += 20.0; details['Liquidity'] = "Buy-side sweep"
     elif last_smc.get('liquidity_sweep_bearish', False):
-        factors['liquidity'] -= 20.0
-        details['Liquidity'] = "Sell-side liquidity sweep"
-    else:
-        details['Liquidity'] = "No sweep detected"
+        factors['liquidity'] -= 20.0; details['Liquidity'] = "Sell-side sweep"
+    else: details['Liquidity'] = "No sweep"
 
-    # 3. SMC
     if last_smc.get('ob_bullish', False) or last_smc.get('fvg_bullish', False):
-        factors['smc'] += 20.0
-        details['SMC'] = "Bullish OB/FVG"
+        factors['smc'] += 20.0; details['SMC'] = "Bullish OB/FVG"
     elif last_smc.get('ob_bearish', False) or last_smc.get('fvg_bearish', False):
-        factors['smc'] -= 20.0
-        details['SMC'] = "Bearish OB/FVG"
-    else:
-        details['SMC'] = "No SMC signal"
+        factors['smc'] -= 20.0; details['SMC'] = "Bearish OB/FVG"
+    else: details['SMC'] = "No SMC signal"
 
-    # 4. MTF
     if mtf_consensus == "BUY":
-        factors['mtf'] += 15.0
-        details['MTF'] = f"Bullish ({mtf_count} timeframes)"
+        factors['mtf'] += 15.0; details['MTF'] = f"Bullish ({mtf_count})"
     elif mtf_consensus == "SELL":
-        factors['mtf'] -= 15.0
-        details['MTF'] = f"Bearish ({mtf_count} timeframes)"
-    else:
-        details['MTF'] = "Neutral"
+        factors['mtf'] -= 15.0; details['MTF'] = f"Bearish ({mtf_count})"
+    else: details['MTF'] = "Neutral"
 
-    # 5. DXY
     if dxy_signal is not None and dxy_signal != "WAIT":
         raw_direction = "BUY" if factors['structure'] + factors['liquidity'] + factors['smc'] + factors['mtf'] > 0 else "SELL"
         if raw_direction == "WAIT":
             raw_direction = "BUY" if factors['structure'] > 0 else "SELL"
         adjusted, status, adj = apply_dxy_filter(raw_direction, 0, dxy_signal, dxy_correlation)
-        factors['dxy'] = float(adj)
-        details['DXY'] = f"{status} (تعديل: {adj})"
-    else:
-        details['DXY'] = "No DXY signal"
+        factors['dxy'] = float(adj); details['DXY'] = f"{status} (تعديل: {adj})"
+    else: details['DXY'] = "No DXY"
 
-    # 6. Momentum
     if last['rsi'] < 30:
-        factors['momentum'] += 10.0
-        details['Momentum'] = f"Oversold RSI={last['rsi']:.1f}"
+        factors['momentum'] += 10.0; details['Momentum'] = f"Oversold RSI={last['rsi']:.1f}"
     elif last['rsi'] > 70:
-        factors['momentum'] -= 10.0
-        details['Momentum'] = f"Overbought RSI={last['rsi']:.1f}"
+        factors['momentum'] -= 10.0; details['Momentum'] = f"Overbought RSI={last['rsi']:.1f}"
     else:
-        factors['momentum'] += (50 - last['rsi']) / 10.0
-        details['Momentum'] = f"RSI Neutral {last['rsi']:.1f}"
-    if last['macd'] > last['macd_signal']:
-        factors['momentum'] += 5.0
-    else:
-        factors['momentum'] -= 5.0
+        factors['momentum'] += (50 - last['rsi']) / 10.0; details['Momentum'] = f"RSI Neutral {last['rsi']:.1f}"
+    if last['macd'] > last['macd_signal']: factors['momentum'] += 5.0
+    else: factors['momentum'] -= 5.0
 
-    # 7. Volatility
     atr_ratio = last['atr'] / df['atr'].iloc[-20:].mean() if df['atr'].iloc[-20:].mean() > 0 else 1.0
     if atr_ratio > 1.5:
-        factors['volatility'] -= 10.0
-        details['Volatility'] = "High volatility"
+        factors['volatility'] -= 10.0; details['Volatility'] = "High"
     elif atr_ratio < 0.7:
-        factors['volatility'] += 5.0
-        details['Volatility'] = "Low Volatility"
-    else:
-        details['Volatility'] = "Normal volatility"
+        factors['volatility'] += 5.0; details['Volatility'] = "Low"
+    else: details['Volatility'] = "Normal"
 
-    # 8. Pattern
     if tbs_type == "BULLISH":
-        factors['pattern'] += 20.0
-        details['Pattern'] = f"TBS BUY"
+        factors['pattern'] += 20.0; details['Pattern'] = "TBS BUY"
     elif tbs_type == "BEARISH":
-        factors['pattern'] -= 20.0
-        details['Pattern'] = f"TBS SELL"
-    else:
-        details['Pattern'] = "No TBS"
+        factors['pattern'] -= 20.0; details['Pattern'] = "TBS SELL"
+    else: details['Pattern'] = "No TBS"
 
-    # 9. Volume / MFI
     if last['mfi'] < 20:
-        factors['volume'] += 5.0
-        details['Volume'] = f"MFI Oversold {last['mfi']:.1f}"
+        factors['volume'] += 5.0; details['Volume'] = f"MFI Oversold {last['mfi']:.1f}"
     elif last['mfi'] > 80:
-        factors['volume'] -= 5.0
-        details['Volume'] = f"MFI Overbought {last['mfi']:.1f}"
-    else:
-        details['Volume'] = f"MFI Neutral {last['mfi']:.1f}"
+        factors['volume'] -= 5.0; details['Volume'] = f"MFI Overbought {last['mfi']:.1f}"
+    else: details['Volume'] = f"MFI Neutral {last['mfi']:.1f}"
 
     total_score = sum(factors.values())
 
-    # Determine signal (الأصلي)
     if total_score >= BUY_THRESHOLD:
-        signal = "BUY"
-        confidence = min(90, 50 + total_score * 0.5)
+        signal = "BUY"; confidence = min(90, 50 + total_score * 0.5)
     elif total_score <= SELL_THRESHOLD:
-        signal = "SELL"
-        confidence = min(90, 50 + abs(total_score) * 0.5)
+        signal = "SELL"; confidence = min(90, 50 + abs(total_score) * 0.5)
     else:
-        signal = "WAIT"
-        confidence = 50 + total_score * 0.2
+        signal = "WAIT"; confidence = 50 + total_score * 0.2
 
     confidence = max(0, min(100, confidence))
+    if "HIGH_VOL" in regime: confidence *= 0.9
+    elif "LOW_VOL" in regime: confidence *= 1.1
 
-    # Adjust confidence by regime
-    if "HIGH_VOL" in regime:
-        confidence *= 0.9
-    elif "LOW_VOL" in regime:
-        confidence *= 1.1
-
-    # ========== Stop Loss & Targets (نفس القديم) ==========
     stop_loss = None
     entry_price = current_price
     targets = {}
@@ -896,28 +807,19 @@ def generate_signal_v2003(df, symbol, dxy_signal=None, dxy_correlation=0.0):
             risk = atr_val * 0.5
 
         if signal == "BUY":
-            targets = {
-                'target1': entry_price + risk * 1.0,
-                'target2': entry_price + risk * 1.5,
-                'target3': entry_price + risk * 2.0,
-                'risk_reward': 2.0
-            }
+            targets = {'target1': entry_price + risk * 1.0, 'target2': entry_price + risk * 1.5,
+                       'target3': entry_price + risk * 2.0, 'risk_reward': 2.0}
         else:
-            targets = {
-                'target1': entry_price - risk * 1.0,
-                'target2': entry_price - risk * 1.5,
-                'target3': entry_price - risk * 2.0,
-                'risk_reward': 2.0
-            }
+            targets = {'target1': entry_price - risk * 1.0, 'target2': entry_price - risk * 1.5,
+                       'target3': entry_price - risk * 2.0, 'risk_reward': 2.0}
 
     return signal, confidence, total_score, details, factors, regime, mtf_consensus, mtf_count, stop_loss, entry_price, targets, tbs_info
 
 # ============================================================
-# ========== NEW: HIERARCHICAL LAYERS (الإضافات الجديدة) ==========
+# HIERARCHICAL LAYERS (المضافة الجديدة)
 # ============================================================
 
 def get_swing_levels(df):
-    """استخراج أعلى وأدنى قمة وقاع حديثة لاستخدامها في Fibonacci و SL"""
     if df is None or len(df) < 20:
         return df['high'].max(), df['low'].min()
     peaks, troughs = find_swings(df, order=5)
@@ -943,9 +845,12 @@ def calculate_fib_levels(swing_high, swing_low):
         'fib_786': swing_high - diff * 0.786,
     }
 
-# --- Layer 1: Market Regime ---
+def get_news_impact(symbol):
+    """محاكاة الأخبار – استبدلها بـ API حقيقي"""
+    return None  # لا توجد أخبار مؤثرة
+
+# ---- Layer 1: Market Regime ----
 def layer_regime(df_4h):
-    """تحديد حالة السوق (Trending, Ranging, High/Low Vol)"""
     if df_4h is None or len(df_4h) < 50:
         return "NEUTRAL", "بيانات غير كافية"
     last = df_4h.iloc[-1]
@@ -966,230 +871,334 @@ def layer_regime(df_4h):
         return "LOW_VOL", "تقلب منخفض - انتظار اختراق"
     return "NEUTRAL", "حالة سوق غير محددة"
 
-# --- Layer 2: 4H Bias ---
-def layer_4h_bias(df_4h):
-    """تحديد الاتجاه الرئيسي من 4H"""
+# ---- Layer 2: 4H Bias (محسّن) ----
+def layer_4h_bias_advanced(df_4h):
     if df_4h is None or len(df_4h) < 50:
         return "NEUTRAL", "بيانات 4H غير كافية"
     last = df_4h.iloc[-1]
-    # EMA
-    ema20 = last['ema20'] if 'ema20' in df_4h.columns else df_4h['close'].iloc[-1]
-    ema50 = last['ema50'] if 'ema50' in df_4h.columns else df_4h['close'].iloc[-1]
-    # Ichimoku Cloud
+    price = last['close']
+    
+    ema20 = last['ema20'] if 'ema20' in df_4h.columns else price
+    ema50 = last['ema50'] if 'ema50' in df_4h.columns else price
+    ema200 = last['ema200'] if 'ema200' in df_4h.columns else price
+    
     in_cloud = False
     if all(k in df_4h.columns for k in ['senkou_a','senkou_b']):
-        price = last['close']
         if price > min(last['senkou_a'], last['senkou_b']) and price < max(last['senkou_a'], last['senkou_b']):
             in_cloud = True
-    if in_cloud:
-        return "NEUTRAL", "السعر داخل Ichimoku Cloud"
-    if ema20 > ema50:
-        return "BULLISH", "EMA20 > EMA50 (اتجاه صاعد)"
-    elif ema20 < ema50:
-        return "BEARISH", "EMA20 < EMA50 (اتجاه هابط)"
-    return "NEUTRAL", "EMA متقاربة"
+    
+    adx = last['adx'] if 'adx' in df_4h.columns else 0
+    plus_di = last['plus_di'] if 'plus_di' in df_4h.columns else 0
+    minus_di = last['minus_di'] if 'minus_di' in df_4h.columns else 0
+    
+    bos_bull = last.get('bos_bullish', False)
+    bos_bear = last.get('bos_bearish', False)
+    mss_bull = last.get('mss_bullish', False)
+    mss_bear = last.get('mss_bearish', False)
+    
+    bullish_points = 0
+    bearish_points = 0
+    
+    if ema20 > ema50: bullish_points += 1
+    else: bearish_points += 1
+    if ema50 > ema200: bullish_points += 1
+    else: bearish_points += 1
+    if not in_cloud:
+        if price > max(last['senkou_a'], last['senkou_b']): bullish_points += 1
+        elif price < min(last['senkou_a'], last['senkou_b']): bearish_points += 1
+    if adx >= 25:
+        if plus_di > minus_di: bullish_points += 1
+        elif minus_di > plus_di: bearish_points += 1
+    if bos_bull or mss_bull: bullish_points += 1
+    if bos_bear or mss_bear: bearish_points += 1
+    
+    if bullish_points >= 3 and bullish_points > bearish_points:
+        return "BULLISH", f"صاعد ({bullish_points}/{bullish_points+bearish_points})"
+    elif bearish_points >= 3 and bearish_points > bullish_points:
+        return "BEARISH", f"هابط ({bearish_points}/{bullish_points+bearish_points})"
+    else:
+        return "NEUTRAL", f"محايد ({bullish_points}/{bearish_points})"
 
-# --- Layer 3: 1H Confirmation ---
-def layer_1h_confirmation(df_1h, bias):
-    """تأكيد الاتجاه من 1H باستخدام EMA, MACD, ADX+DI, BOS/MSS"""
+# ---- Layer 3: 1H Confirmation (محسّن) ----
+def layer_1h_confirmation_advanced(df_1h, bias):
     if df_1h is None or len(df_1h) < 50 or bias == "NEUTRAL":
         return False, "الـ Bias محايد أو بيانات غير كافية"
     last = df_1h.iloc[-1]
-    # EMA alignment
-    ema20 = last['ema20'] if 'ema20' in df_1h.columns else df_1h['close'].iloc[-1]
-    ema50 = last['ema50'] if 'ema50' in df_1h.columns else df_1h['close'].iloc[-1]
+    price = last['close']
+    
+    ema20 = last['ema20'] if 'ema20' in df_1h.columns else price
+    ema50 = last['ema50'] if 'ema50' in df_1h.columns else price
+    
     if bias == "BULLISH" and ema20 < ema50:
         return False, "1H يخالف الاتجاه (EMA20 < EMA50)"
     if bias == "BEARISH" and ema20 > ema50:
         return False, "1H يخالف الاتجاه (EMA20 > EMA50)"
-
-    # MACD
+    
     if all(k in df_1h.columns for k in ['macd','macd_signal']):
         if bias == "BULLISH" and last['macd'] < last['macd_signal']:
             return False, "1H MACD سلبي"
         if bias == "BEARISH" and last['macd'] > last['macd_signal']:
             return False, "1H MACD إيجابي"
-
-    # ADX + DI
-    if all(k in df_1h.columns for k in ['adx','plus_di','minus_di']):
-        if last['adx'] < 25:
-            return False, "ADX ضعيف (<25)"
-        if bias == "BULLISH" and last['plus_di'] < last['minus_di']:
-            return False, "1H -DI > +DI (اتجاه هابط)"
-        if bias == "BEARISH" and last['minus_di'] < last['plus_di']:
-            return False, "1H +DI > -DI (اتجاه صاعد)"
-
-    # BOS/MSS
-    if bias == "BULLISH":
-        if not (last.get('bos_bullish', False) or last.get('mss_bullish', False)):
-            return False, "لا يوجد BOS/MSS صاعد على 1H"
+    
+    adx = last['adx'] if 'adx' in df_1h.columns else 0
+    plus_di = last['plus_di'] if 'plus_di' in df_1h.columns else 0
+    minus_di = last['minus_di'] if 'minus_di' in df_1h.columns else 0
+    
+    bos_bull = last.get('bos_bullish', False)
+    bos_bear = last.get('bos_bearish', False)
+    mss_bull = last.get('mss_bullish', False)
+    mss_bear = last.get('mss_bearish', False)
+    
+    if adx < 25:
+        if bias == "BULLISH" and not (bos_bull or mss_bull):
+            return False, "ADX ضعيف ولا يوجد BOS/MSS صاعد"
+        if bias == "BEARISH" and not (bos_bear or mss_bear):
+            return False, "ADX ضعيف ولا يوجد BOS/MSS هابط"
     else:
-        if not (last.get('bos_bearish', False) or last.get('mss_bearish', False)):
-            return False, "لا يوجد BOS/MSS هابط على 1H"
-
+        if bias == "BULLISH" and plus_di < minus_di:
+            return False, "ADX قوي لكن -DI > +DI (اتجاه هابط)"
+        if bias == "BEARISH" and minus_di < plus_di:
+            return False, "ADX قوي لكن +DI > -DI (اتجاه صاعد)"
+    
     return True, "1H مؤكد للاتجاه"
 
-# --- Layer 4: 15M Trigger ---
-def layer_15m_trigger(df_15m, bias):
-    """تحديد Trigger من 15M (Liquidity Sweep, MSS, FVG, OB, شمعة تأكيد)"""
+# ---- Layer 4: 15M Trigger (محسّن) ----
+def layer_15m_trigger_advanced(df_15m, bias):
     if df_15m is None or len(df_15m) < 30 or bias == "NEUTRAL":
-        return False, "لا يوجد Trigger (بيانات غير كافية أو Bias محايد)"
-    last = df_15m.iloc[-1]
-    if bias == "BULLISH":
-        if last.get('liquidity_sweep_bullish', False) or last.get('mss_bullish', False) or last.get('bos_bullish', False):
-            if last.get('fvg_bullish', False) or last.get('ob_bullish', False):
-                return True, "Trigger: Liquidity Sweep + FVG/OB صاعد"
-        # شمعة تأكيد
-        body = abs(last['close'] - last['open'])
-        avg_body = abs(df_15m['close'] - df_15m['open']).rolling(20).mean().iloc[-1]
-        if body > avg_body * 1.5 and last['close'] > last['open']:
-            return True, "Trigger: شمعة تأكيد صاعدة قوية"
-        return False, "لا يوجد Trigger صاعد مناسب"
-    else:  # BEARISH
-        if last.get('liquidity_sweep_bearish', False) or last.get('mss_bearish', False) or last.get('bos_bearish', False):
-            if last.get('fvg_bearish', False) or last.get('ob_bearish', False):
-                return True, "Trigger: Liquidity Sweep + FVG/OB هابط"
-        body = abs(last['close'] - last['open'])
-        avg_body = abs(df_15m['close'] - df_15m['open']).rolling(20).mean().iloc[-1]
-        if body > avg_body * 1.5 and last['close'] < last['open']:
-            return True, "Trigger: شمعة تأكيد هابطة قوية"
-        return False, "لا يوجد Trigger هابط مناسب"
-
-# --- Layer 5: Price Location ---
-def layer_price_location(df_15m, symbol, bias):
-    """التحقق من موقع السعر: Premium/Discount, Fibonacci, BB, Support/Resistance"""
-    if df_15m is None or len(df_15m) < 30:
-        return False, "بيانات غير كافية لتحديد الموقع"
+        return False, "لا يوجد Trigger", None
+    
     last = df_15m.iloc[-1]
     price = last['close']
+    
+    triggers = []
+    
+    if bias == "BULLISH":
+        if last.get('liquidity_sweep_bullish', False) and (last.get('mss_bullish', False) or last.get('bos_bullish', False)):
+            if last.get('fvg_bullish', False) or last.get('ob_bullish', False):
+                triggers.append(("Liquidity Sweep + FVG/OB", price))
+    else:
+        if last.get('liquidity_sweep_bearish', False) and (last.get('mss_bearish', False) or last.get('bos_bearish', False)):
+            if last.get('fvg_bearish', False) or last.get('ob_bearish', False):
+                triggers.append(("Liquidity Sweep + FVG/OB", price))
+    
+    body = abs(last['close'] - last['open'])
+    avg_body = abs(df_15m['close'] - df_15m['open']).rolling(20).mean().iloc[-1]
+    if body > avg_body * 1.5:
+        if bias == "BULLISH" and last['close'] > last['open']:
+            triggers.append(("شمعة تأكيد صاعدة", price))
+        elif bias == "BEARISH" and last['close'] < last['open']:
+            triggers.append(("شمعة تأكيد هابطة", price))
+    
+    if bias == "BULLISH":
+        if last['high'] > df_15m['high'].iloc[-5:-1].max():
+            triggers.append(("اختراق قمة", last['high']))
+    else:
+        if last['low'] < df_15m['low'].iloc[-5:-1].min():
+            triggers.append(("اختراق قاع", last['low']))
+    
+    if triggers:
+        for trigger_type, trigger_price in triggers:
+            if "Liquidity" in trigger_type:
+                return True, f"Trigger: {trigger_type}", trigger_price
+        for trigger_type, trigger_price in triggers:
+            if "تأكيد" in trigger_type:
+                return True, f"Trigger: {trigger_type}", trigger_price
+        return True, f"Trigger: {triggers[0][0]}", triggers[0][1]
+    
+    return False, "لا يوجد Trigger مناسب", None
+
+# ---- Layer 5: Price Location (محسّن) ----
+def layer_price_location_advanced(df_15m, symbol, bias):
+    if df_15m is None or len(df_15m) < 30:
+        return False, "بيانات غير كافية", None
+    
+    last = df_15m.iloc[-1]
+    price = last['close']
+    
     swing_high, swing_low = get_swing_levels(df_15m)
     fibs = calculate_fib_levels(swing_high, swing_low)
     if not fibs:
-        return False, "لا يمكن حساب Fibonacci"
+        return False, "لا يمكن حساب Fibonacci", None
+    
     fib_382 = fibs['fib_382']
     fib_618 = fibs['fib_618']
+    fib_500 = fibs['fib_500']
+    
     bb_lower = last['bb_lower'] if 'bb_lower' in df_15m.columns else price * 0.95
     bb_upper = last['bb_upper'] if 'bb_upper' in df_15m.columns else price * 1.05
-
+    
     if bias == "BULLISH":
         if price < fib_382:
-            return True, "السعر في منطقة Discount (تحت 0.382)"
+            return True, f"منطقة شراء ممتازة (تحت 0.382)", fib_382
+        elif price < fib_500:
+            return True, f"منطقة شراء جيدة (تحت 0.5)", fib_500
         elif price < bb_lower:
-            return True, "السعر تحت Bollinger Lower (منطقة شراء)"
+            return True, f"منطقة شراء (تحت BB Lower)", bb_lower
         else:
-            return False, "السعر ليس في منطقة شراء مناسبة (Premium)"
+            if price - swing_low < (swing_high - swing_low) * 0.1:
+                return True, f"قرب الدعم الرئيسي", swing_low
+            return False, "السعر ليس في منطقة شراء مناسبة", None
     else:
         if price > fib_618:
-            return True, "السعر في منطقة Premium (فوق 0.618)"
+            return True, f"منطقة بيع ممتازة (فوق 0.618)", fib_618
+        elif price > fib_500:
+            return True, f"منطقة بيع جيدة (فوق 0.5)", fib_500
         elif price > bb_upper:
-            return True, "السعر فوق Bollinger Upper (منطقة بيع)"
+            return True, f"منطقة بيع (فوق BB Upper)", bb_upper
         else:
-            return False, "السعر ليس في منطقة بيع مناسبة (Discount)"
+            if swing_high - price < (swing_high - swing_low) * 0.1:
+                return True, f"قرب المقاومة الرئيسية", swing_high
+            return False, "السعر ليس في منطقة بيع مناسبة", None
 
-# --- Layer 6: News Filter (محاكاة) ---
-def layer_news(symbol, bias):
-    """فحص الأخبار المؤثرة على الأصل"""
-    # في النسخة الحقيقية، استخدم API لجلب الأخبار وتحليل المشاعر
-    # هنا نعيد None (لا توجد أخبار مؤثرة)
-    # يمكنك تعديل هذه الدالة لاستخدام NewsAPI أو Alpha Vantage
-    return True, "لا توجد أخبار مؤثرة"
+# ---- Layer 6: News (محسّن) ----
+def layer_news_advanced(symbol, bias):
+    news = get_news_impact(symbol)
+    if news is None:
+        return True, "لا توجد أخبار مؤثرة"
+    impact, sentiment, headline = news
+    if impact == "HIGH":
+        if (bias == "BULLISH" and sentiment == "BEARISH") or (bias == "BEARISH" and sentiment == "BULLISH"):
+            return False, f"خبر عالي التأثير ضد الاتجاه: {headline}"
+        else:
+            return True, f"خبر عالي التأثير لكنه مع الاتجاه"
+    else:
+        return True, "الأخبار لا تعارض الصفقة"
 
-# --- Layer 7: Risk Management (جزء من القرار) ---
-def layer_risk_check(active_trades, new_risk, max_open_risk=0.05):
-    """التحقق من أن إجمالي المخاطرة لا يتجاوز الحد الأقصى"""
-    total_risk = sum(t.get('risk', 0) for t in active_trades.values())
-    if total_risk + new_risk > max_open_risk:
-        return False, f"إجمالي المخاطرة تجاوز الحد الأقصى ({max_open_risk*100:.0f}%)"
-    return True, "المخاطرة مسموحة"
+# ---- حساب Stop Loss متقدم ----
+def calculate_advanced_stop_loss(df, entry_price, bias):
+    if df is None or len(df) < 20:
+        return entry_price - (entry_price * 0.01) if bias == "BULLISH" else entry_price + (entry_price * 0.01), "افتراضي"
+    
+    last = df.iloc[-1]
+    atr = last['atr'] if 'atr' in df.columns else (df['high'] - df['low']).rolling(14).mean().iloc[-1]
+    
+    if bias == "BULLISH":
+        swing_low = df['low'].iloc[-10:].min()
+        liquidity_levels = df['low'].iloc[-5:].tolist()
+        if entry_price - swing_low < atr * 0.5:
+            sl = entry_price - atr * 1.2
+        else:
+            sl = min(swing_low, entry_price - atr * 1.0)
+        if sl in liquidity_levels:
+            sl = sl - atr * 0.3
+        return sl, f"Swing Low {swing_low:.2f} + ATR"
+    else:
+        swing_high = df['high'].iloc[-10:].max()
+        liquidity_levels = df['high'].iloc[-5:].tolist()
+        if swing_high - entry_price < atr * 0.5:
+            sl = entry_price + atr * 1.2
+        else:
+            sl = max(swing_high, entry_price + atr * 1.0)
+        if sl in liquidity_levels:
+            sl = sl + atr * 0.3
+        return sl, f"Swing High {swing_high:.2f} + ATR"
 
-# --- الدالة الرئيسية التي تدمج الإشارة القديمة مع الطبقات ---
+# ---- حساب الأهداف المتقدمة ----
+def calculate_advanced_targets(entry, stop_loss, bias):
+    risk = abs(entry - stop_loss)
+    if bias == "BULLISH":
+        targets = {
+            'target1': entry + risk * 1.5,
+            'target2': entry + risk * 2.5,
+            'target3': entry + risk * 4.0,
+            'risk_reward': 2.5,
+            'breakeven': entry,
+            'trailing_activation': entry + risk * 1.8
+        }
+    else:
+        targets = {
+            'target1': entry - risk * 1.5,
+            'target2': entry - risk * 2.5,
+            'target3': entry - risk * 4.0,
+            'risk_reward': 2.5,
+            'breakeven': entry,
+            'trailing_activation': entry - risk * 1.8
+        }
+    return targets
+
+# ---- MAIN DECISION ENGINE مع الطبقات ----
 def generate_signal_with_layers(df_4h, df_1h, df_15m, symbol, dxy_signal=None, dxy_correlation=0.0):
-    """
-    تجمع بين الإشارة الأصلية (من generate_signal_v2003) ونظام الطبقات الجديد.
-    إذا كانت الإشارة الأصلية WAIT → WAIT.
-    إذا كانت BUY/SELL، يتم تمريرها عبر الطبقات للتأكيد.
-    إذا اجتازت جميع الطبقات، تُصدر الإشارة مع ثقة مُعدَّلة وسبب.
-    وإلا تُحوَّل إلى WAIT مع سبب محدد.
-    """
-    # 1. الحصول على الإشارة الأصلية (باستخدام الإطار 1H كمدخل رئيسي)
     original_signal, original_conf, score, details, factors, regime, mtf_cons, mtf_count, sl, entry, targets, tbs_info = generate_signal_v2003(
         df_1h, symbol, dxy_signal, dxy_correlation
     )
-
-    # إذا كانت الإشارة الأصلية WAIT، نعيدها كما هي
+    
     if original_signal == "WAIT":
         return "WAIT", original_conf, "الإشارة الأصلية WAIT", details, targets, sl, entry
 
-    # 2. تمرير الإشارة عبر الطبقات
     # Layer 1: Regime
     regime_status, regime_reason = layer_regime(df_4h)
     if regime_status in ["RANGING", "LOW_VOL"]:
-        return "WAIT", original_conf * 0.5, f"WAIT — {regime_reason}", details, targets, sl, entry
+        if original_conf < 70:
+            return "WAIT", original_conf * 0.5, f"WAIT — {regime_reason}", details, targets, sl, entry
 
     # Layer 2: 4H Bias
-    bias, bias_reason = layer_4h_bias(df_4h)
+    bias, bias_reason = layer_4h_bias_advanced(df_4h)
     if bias == "NEUTRAL":
         return "WAIT", original_conf * 0.6, f"WAIT — {bias_reason}", details, targets, sl, entry
-    # التحقق من تطابق Bias مع الإشارة الأصلية
     if (original_signal == "BUY" and bias != "BULLISH") or (original_signal == "SELL" and bias != "BEARISH"):
         return "WAIT", original_conf * 0.5, f"WAIT — 4H Bias ({bias}) يخالف الإشارة", details, targets, sl, entry
 
     # Layer 3: 1H Confirmation
-    confirmed, conf_reason = layer_1h_confirmation(df_1h, bias)
+    confirmed, conf_reason = layer_1h_confirmation_advanced(df_1h, bias)
     if not confirmed:
         return "WAIT", original_conf * 0.6, f"WAIT — {conf_reason}", details, targets, sl, entry
 
     # Layer 4: 15M Trigger
-    triggered, trigger_reason = layer_15m_trigger(df_15m, bias)
+    triggered, trigger_reason, trigger_price = layer_15m_trigger_advanced(df_15m, bias)
     if not triggered:
         return "WAIT", original_conf * 0.6, f"WAIT — {trigger_reason}", details, targets, sl, entry
 
     # Layer 5: Price Location
-    price_ok, price_reason = layer_price_location(df_15m, symbol, bias)
+    price_ok, price_reason, optimal_entry = layer_price_location_advanced(df_15m, symbol, bias)
     if not price_ok:
         return "WAIT", original_conf * 0.6, f"WAIT — {price_reason}", details, targets, sl, entry
 
     # Layer 6: News
-    news_ok, news_reason = layer_news(symbol, bias)
+    news_ok, news_reason = layer_news_advanced(symbol, bias)
     if not news_ok:
-        return "WAIT", original_conf * 0.7, f"WAIT — {news_reason}", details, targets, sl, entry
+        confidence_penalty = 10
+    else:
+        confidence_penalty = 0
 
-    # Layer 7: Risk (يتم التحقق في UI عند فتح الصفقة)
+    # ---- حساب الإشارة النهائية ----
+    if trigger_price is not None:
+        entry_price = trigger_price
+    elif optimal_entry is not None:
+        entry_price = optimal_entry
+    else:
+        entry_price = df_15m['close'].iloc[-1]
 
-    # إذا وصلنا هنا، الإشارة مؤكدة
-    # نعدل الثقة بناءً على عدد الطبقات المتوافقة (كلما زاد التوافق زادت الثقة)
-    confidence_boost = 10  # زيادة ثقة
-    new_conf = min(95, original_conf + confidence_boost)
+    stop_loss, sl_reason = calculate_advanced_stop_loss(df_15m, entry_price, bias)
+    targets = calculate_advanced_targets(entry_price, stop_loss, bias)
 
-    # إضافة معلومات الطبقات إلى التفاصيل
+    confidence = min(95, original_conf + 10 - confidence_penalty)
+
     details['Regime'] = regime_reason
     details['4H_Bias'] = bias_reason
     details['1H_Confirmation'] = conf_reason
     details['15M_Trigger'] = trigger_reason
     details['Price_Location'] = price_reason
     details['News'] = news_reason
+    details['Entry_Price'] = entry_price
+    details['Stop_Loss'] = stop_loss
+    details['SL_Reason'] = sl_reason
 
-    return original_signal, new_conf, f"{original_signal} — جميع الطبقات متوافقة", details, targets, sl, entry
+    return original_signal, confidence, f"{original_signal} — جميع الطبقات متوافقة", details, targets, stop_loss, entry_price
 
 # ============================================================
-# BACKTEST (نفس القديم)
+# BACKTEST (الأصلي)
 # ============================================================
 
 def _bar_exit(direction, bar, stop, tp):
     if direction == "BUY":
-        if bar['low'] <= stop:
-            return "SL", stop
-        if bar['high'] >= tp:
-            return "TP", tp
+        if bar['low'] <= stop: return "SL", stop
+        if bar['high'] >= tp: return "TP", tp
     else:
-        if bar['high'] >= stop:
-            return "SL", stop
-        if bar['low'] <= tp:
-            return "TP", tp
+        if bar['high'] >= stop: return "SL", stop
+        if bar['low'] <= tp: return "TP", tp
     return None, None
 
 def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
-    # نستخدم الإشارة الأصلية بدون الطبقات للتبسيط (يمكن تعديلها لاحقاً)
     if df is None or len(df) < 150:
         return {}
     test_df = df.iloc[-min(lookback, len(df)):].copy()
@@ -1261,7 +1270,7 @@ def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
     }
 
 # ============================================================
-# COLLECT SIGNALS (للجدول) – مع الطبقات
+# COLLECT SIGNALS (للجدول)
 # ============================================================
 
 @st.cache_data(ttl=120)
@@ -1276,51 +1285,37 @@ def get_all_signals_with_layers():
 
     for pair_name, symbol in PAIRS.items():
         try:
-            # جلب البيانات للأطر الزمنية المختلفة
             df_4h = get_historical_data(symbol, period="1mo", interval="4h")
             df_1h = get_historical_data(symbol, period="1mo", interval="1h")
             df_15m = get_historical_data(symbol, period="7d", interval="15m")
             if df_4h is None or df_1h is None or df_15m is None:
                 continue
 
-            # حساب المؤشرات لكل إطار
-            df_4h = df_4h.copy()
-            df_4h['ema20'] = df_4h['close'].ewm(20).mean()
-            df_4h['ema50'] = df_4h['close'].ewm(50).mean()
-            df_4h['rsi'] = calc_rsi(df_4h['close'])
-            df_4h['atr'] = calc_atr(df_4h)
-            df_4h['macd'], df_4h['macd_signal'], _ = calc_macd(df_4h['close'])
-            df_4h['bb_upper'], df_4h['bb_middle'], df_4h['bb_lower'] = calc_bollinger(df_4h['close'])
-            df_4h['adx'], df_4h['plus_di'], df_4h['minus_di'] = calc_adx_correct(df_4h)
-            tenkan, kijun, senkou_a, senkou_b, _ = calc_ichimoku(df_4h)
-            df_4h['tenkan'] = tenkan; df_4h['kijun'] = kijun; df_4h['senkou_a'] = senkou_a; df_4h['senkou_b'] = senkou_b
-            smc_4h = detect_smc_ict(df_4h)
-            for col in ['bos_bullish','bos_bearish','mss_bullish','mss_bearish']:
-                df_4h[col] = smc_4h[col]
+            def prepare_df(df):
+                if df is None or len(df) < 30:
+                    return df
+                df = df.copy()
+                df['ema20'] = df['close'].ewm(20).mean()
+                df['ema50'] = df['close'].ewm(50).mean()
+                df['ema200'] = df['close'].ewm(200).mean()
+                df['rsi'] = calc_rsi(df['close'])
+                df['atr'] = calc_atr(df)
+                df['macd'], df['macd_signal'], _ = calc_macd(df['close'])
+                df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger(df['close'])
+                df['adx'], df['plus_di'], df['minus_di'] = calc_adx_correct(df)
+                if len(df) >= 50:
+                    tenkan, kijun, senkou_a, senkou_b, _ = calc_ichimoku(df)
+                    df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b
+                smc = detect_smc_ict(df)
+                for col in ['bos_bullish','bos_bearish','mss_bullish','mss_bearish',
+                            'ob_bullish','ob_bearish','fvg_bullish','fvg_bearish',
+                            'liquidity_sweep_bullish','liquidity_sweep_bearish']:
+                    df[col] = smc[col]
+                return df
 
-            df_1h = df_1h.copy()
-            df_1h['ema20'] = df_1h['close'].ewm(20).mean()
-            df_1h['ema50'] = df_1h['close'].ewm(50).mean()
-            df_1h['rsi'] = calc_rsi(df_1h['close'])
-            df_1h['atr'] = calc_atr(df_1h)
-            df_1h['macd'], df_1h['macd_signal'], _ = calc_macd(df_1h['close'])
-            df_1h['bb_upper'], df_1h['bb_middle'], df_1h['bb_lower'] = calc_bollinger(df_1h['close'])
-            df_1h['adx'], df_1h['plus_di'], df_1h['minus_di'] = calc_adx_correct(df_1h)
-            smc_1h = detect_smc_ict(df_1h)
-            for col in ['bos_bullish','bos_bearish','mss_bullish','mss_bearish','ob_bullish','ob_bearish','fvg_bullish','fvg_bearish','liquidity_sweep_bullish','liquidity_sweep_bearish']:
-                df_1h[col] = smc_1h[col]
-
-            df_15m = df_15m.copy()
-            df_15m['ema20'] = df_15m['close'].ewm(20).mean()
-            df_15m['ema50'] = df_15m['close'].ewm(50).mean()
-            df_15m['rsi'] = calc_rsi(df_15m['close'])
-            df_15m['atr'] = calc_atr(df_15m)
-            df_15m['macd'], df_15m['macd_signal'], _ = calc_macd(df_15m['close'])
-            df_15m['bb_upper'], df_15m['bb_middle'], df_15m['bb_lower'] = calc_bollinger(df_15m['close'])
-            df_15m['adx'], df_15m['plus_di'], df_15m['minus_di'] = calc_adx_correct(df_15m)
-            smc_15m = detect_smc_ict(df_15m)
-            for col in ['bos_bullish','bos_bearish','mss_bullish','mss_bearish','ob_bullish','ob_bearish','fvg_bullish','fvg_bearish','liquidity_sweep_bullish','liquidity_sweep_bearish']:
-                df_15m[col] = smc_15m[col]
+            df_4h = prepare_df(df_4h)
+            df_1h = prepare_df(df_1h)
+            df_15m = prepare_df(df_15m)
 
             corr = get_dxy_correlation(df_1h, df_dxy, lookback=50)
 
@@ -1330,17 +1325,15 @@ def get_all_signals_with_layers():
 
             if signal != "WAIT":
                 if any(x in pair_name for x in ["Gold", "Silver", "Bitcoin", "Ethereum"]):
-                    price_str = f"${entry:,.2f}" if entry else "N/A"
                     fmt = "${:,.2f}"
                 else:
-                    price_str = f"{entry:.4f}" if entry else "N/A"
                     fmt = "{:.4f}"
 
                 results.append({
                     "Instrument": pair_name,
                     "Signal": signal,
                     "Confidence": round(conf, 1),
-                    "Reason": reason,
+                    "Reason": reason[:50] + "..." if len(reason) > 50 else reason,
                     "Entry": fmt.format(entry) if entry else "N/A",
                     "SL": fmt.format(sl) if sl else "N/A",
                     "TP1": fmt.format(targets['target1']) if targets else "N/A",
@@ -1353,7 +1346,7 @@ def get_all_signals_with_layers():
     return pd.DataFrame(results)
 
 # ============================================================
-# ACTIVE TRADE MANAGER (نفس القديم)
+# ACTIVE TRADE MANAGER
 # ============================================================
 
 def _today_key(ts):
@@ -1419,7 +1412,7 @@ def update_active_trade(symbol, df):
     return None
 
 # ============================================================
-# STREAMLIT INTERFACE (تم تعديل جزء عرض الإشارة فقط)
+# STREAMLIT UI
 # ============================================================
 
 with st.sidebar:
@@ -1455,7 +1448,7 @@ with st.sidebar:
             df_sig[["Instrument", "Signal", "Confidence", "Reason", "Entry", "SL", "TP1", "TP2", "TP3"]],
             hide_index=True,
             use_container_width=True,
-            height=300
+            height=350
         )
         buy = len(df_sig[df_sig["Signal"] == "🟢 BUY"])
         sell = len(df_sig[df_sig["Signal"] == "🔴 SELL"])
@@ -1478,12 +1471,11 @@ with st.sidebar:
         st.session_state.show_form = not st.session_state.show_form
 
 # ============================================================
-# LOAD SELECTED INSTRUMENT DATA (مع الأطر المتعددة)
+# LOAD SELECTED INSTRUMENT DATA
 # ============================================================
 
 price, change = get_spot_price(selected_symbol)
 
-# جلب البيانات لجميع الأطر الزمنية
 df_4h = get_historical_data(selected_symbol, period="1mo", interval="4h")
 df_1h = get_historical_data(selected_symbol, period="1mo", interval="1h")
 df_15m = get_historical_data(selected_symbol, period="7d", interval="15m")
@@ -1496,13 +1488,13 @@ if price is None:
     price = df_15m['close'].iloc[-1]
     change = 0
 
-# حساب المؤشرات لكل إطار (نفس ما فعلناه في get_all_signals_with_layers)
-def prepare_dataframe(df):
+def prepare_df_ui(df):
     if df is None or len(df) < 30:
         return df
     df = df.copy()
     df['ema20'] = df['close'].ewm(20).mean()
     df['ema50'] = df['close'].ewm(50).mean()
+    df['ema200'] = df['close'].ewm(200).mean()
     df['rsi'] = calc_rsi(df['close'])
     df['atr'] = calc_atr(df)
     df['macd'], df['macd_signal'], _ = calc_macd(df['close'])
@@ -1518,11 +1510,10 @@ def prepare_dataframe(df):
         df[col] = smc[col]
     return df
 
-df_4h = prepare_dataframe(df_4h)
-df_1h = prepare_dataframe(df_1h)
-df_15m = prepare_dataframe(df_15m)
+df_4h = prepare_df_ui(df_4h)
+df_1h = prepare_df_ui(df_1h)
+df_15m = prepare_df_ui(df_15m)
 
-# DXY
 df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
 dxy_signal = None
 corr = 0.0
@@ -1530,13 +1521,12 @@ if df_dxy is not None and len(df_dxy) > 100:
     dxy_signal, _, _, _, _, _, _, _, _, _, _, _ = generate_signal_v2003(df_dxy, "DX-Y.NYB")
     corr = get_dxy_correlation(df_1h, df_dxy, lookback=50)
 
-# توليد الإشارة باستخدام الطبقات
 signal, confidence, reason, details, targets, sl, entry = generate_signal_with_layers(
     df_4h, df_1h, df_15m, selected_symbol, dxy_signal, corr
 )
 
 # ============================================================
-# DISPLAY (مع عرض الطبقات)
+# DISPLAY
 # ============================================================
 
 if "Gold" in selected_pair or "Silver" in selected_pair or "Bitcoin" in selected_pair or "Ethereum" in selected_pair:
@@ -1554,7 +1544,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# DXY info
 if dxy_signal:
     dxy_col = "#00ff88" if dxy_signal=="BUY" else "#ff4444" if dxy_signal=="SELL" else "#ffaa00"
     st.markdown(f"""
@@ -1567,50 +1556,46 @@ if dxy_signal:
     </div>
     """, unsafe_allow_html=True)
 
-# عرض الإشارة
 if signal != "WAIT":
     direction_text = "BUY" if signal=="BUY" else "SELL"
     st.markdown(f"""
     <div class="suggested-trade">
-        <b>Direction:</b> {direction_text} (Confidence: {confidence:.0f}%)<br>
+        <b>Direction:</b> {direction_text} <span style="color:#00ff88;">(Confidence: {confidence:.0f}%)</span><br>
         <b>📍 Entry:</b> {price_fmt.format(entry)}<br>
         <b>🛑 Stop Loss:</b> {price_fmt.format(sl)}<br>
-        <div class="target-zone"><b>🎯 Target 1 (1:1):</b> {price_fmt.format(targets.get('target1'))}</div>
-        <div class="target-zone" style="border-left-color:#ffaa00;"><b>🎯 Target 2 (1:1.5):</b> {price_fmt.format(targets.get('target2'))}</div>
-        <div class="target-zone" style="border-left-color:#00ff88;"><b>🎯 Target 3 (1:2):</b> {price_fmt.format(targets.get('target3'))}</div>
-        <b>📈 R:R</b> 1:{targets.get('risk_reward',0):.1f}
+        <div class="target-zone"><b>🎯 TP1 (1.5R):</b> {price_fmt.format(targets['target1'])}</div>
+        <div class="target-zone" style="border-left-color:#ffaa00;"><b>🎯 TP2 (2.5R):</b> {price_fmt.format(targets['target2'])}</div>
+        <div class="target-zone" style="border-left-color:#00ff88;"><b>🎯 TP3 (4R):</b> {price_fmt.format(targets['target3'])}</div>
+        <b>📈 R:R</b> 1:{targets.get('risk_reward',0):.1f}<br>
+        <b>🔒 Breakeven:</b> عند TP1 | <b>Trailing:</b> عند TP2
     </div>
     """, unsafe_allow_html=True)
 
-    # عرض تفاصيل الطبقات
     with st.expander("📋 Layer Details", expanded=True):
         for key, value in details.items():
-            if key not in ['Entry', 'SL', 'TP1', 'TP2', 'TP3', 'Units', 'Risk']:
+            if key not in ['Entry_Price', 'Stop_Loss', 'SL_Reason']:
                 st.write(f"**{key}:** {value}")
 
 else:
     st.warning(f"🟡 WAIT — {reason}")
 
-# Regime (من الطبقات) – نستخرجها من التفاصيل إذا وجدت
+# Regime Badge
 if details and 'Regime' in details:
     regime_text = details['Regime']
-    regime_badge = ""
     if "اتجاه واضح" in regime_text:
-        regime_badge = '<span class="regime-badge regime-trending">📈 Trending</span>'
+        st.markdown('<span class="regime-badge regime-trending">📈 Trending</span>', unsafe_allow_html=True)
     elif "عرضي" in regime_text:
-        regime_badge = '<span class="regime-badge regime-ranging">➖ Ranging</span>'
+        st.markdown('<span class="regime-badge regime-ranging">➖ Ranging</span>', unsafe_allow_html=True)
     elif "تقلب مرتفع" in regime_text:
-        regime_badge = '<span class="regime-badge regime-volatile">⚡ High Volatility</span>'
+        st.markdown('<span class="regime-badge regime-volatile">⚡ High Volatility</span>', unsafe_allow_html=True)
     elif "تقلب منخفض" in regime_text:
-        regime_badge = '<span class="regime-badge" style="background:rgba(0,150,255,0.15);color:#0096ff;border:1px solid rgba(0,150,255,0.20);">🌊 Low Volatility</span>'
-    if regime_badge:
-        st.markdown(f"**Current Regime:** {regime_badge}", unsafe_allow_html=True)
+        st.markdown('<span class="regime-badge" style="background:rgba(0,150,255,0.15);color:#0096ff;border:1px solid rgba(0,150,255,0.20);">🌊 Low Volatility</span>', unsafe_allow_html=True)
 
 # ============================================================
-# BACKTEST (نفس القديم)
+# BACKTEST
 # ============================================================
 
-bt = run_backtest(df_1h, selected_symbol)  # نستخدم 1H للباك تست
+bt = run_backtest(df_1h, selected_symbol)
 if bt:
     st.markdown("#### 📈 Backtest (Last 500 Bars)")
     c1, c2, c3, c4 = st.columns(4)
@@ -1620,7 +1605,7 @@ if bt:
     c4.metric("Profit Factor", f"{bt['profit_factor']:.2f}")
 
 # ============================================================
-# CHART (نستخدم 15M)
+# CHART
 # ============================================================
 
 st.markdown("---")
@@ -1631,17 +1616,10 @@ df_smc = detect_smc_ict(df_15m)
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
 
 fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dot')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
-
-# SMC annotations
-if df_smc['ob_bullish'].iloc[-1]:
-    fig.add_annotation(x=df_15m.index[-1], y=df_15m['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
-if df_smc['ob_bearish'].iloc[-1]:
-    fig.add_annotation(x=df_15m.index[-1], y=df_15m['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
+if 'ema20' in df_15m.columns:
+    fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
+if 'ema50' in df_15m.columns:
+    fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
 
 if sl and entry:
     fig.add_hline(y=sl, line_dash="dash", line_color="red", opacity=0.7, row=1, col=1)
@@ -1650,19 +1628,21 @@ if sl and entry:
     fig.add_annotation(x=df_15m.index[-1], y=entry, text="Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
 # RSI
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
-fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
-fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
+if 'rsi' in df_15m.columns:
+    fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
 # MACD
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
-fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
+if 'macd' in df_15m.columns and 'macd_signal' in df_15m.columns:
+    fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
 
 fig.update_layout(height=800, template='plotly_dark', showlegend=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# TRADE MANAGEMENT (نفس القديم)
+# TRADE MANAGEMENT
 # ============================================================
 
 st.markdown("---")
@@ -1670,14 +1650,14 @@ st.markdown("### 💼 Trade Management")
 
 if selected_symbol in st.session_state.active_trades:
     active_trade = st.session_state.active_trades[selected_symbol]
-    st.success(f"🔒 Active trade locked: {active_trade['direction']} — It will not change until TP3 or SL")
+    st.success(f"🔒 Active trade locked: {active_trade['direction']} — TP3 or SL")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("الدخول", price_fmt.format(active_trade['entry']))
     c2.metric("SL", price_fmt.format(active_trade['stop']))
     c3.metric("TP3", price_fmt.format(active_trade['tp3']))
-    c4.metric("Confidence at Open", f"{active_trade['confidence']:.0f}%")
+    c4.metric("Confidence", f"{active_trade['confidence']:.0f}%")
 else:
-    st.info("No active trade — the system is scanning for a new opportunity within the daily limit and cooldown.")
+    st.info("No active trade — scanning for new opportunities")
 
 if st.session_state.closed_trades:
     hist = pd.DataFrame(st.session_state.closed_trades[-20:])
@@ -1693,7 +1673,7 @@ if st.session_state.closed_trades:
 
 st.markdown(f"""
 <div class="footer">
-    <span class="brand">▲ BLACK PYRAMID v2003</span> • Hierarchical Layers • Regime • Bias • Confirmation • Trigger • Price • News • Risk<br>
+    <span class="brand">▲ BLACK PYRAMID v2003</span> • 7 Layers • Precision Engine • 1-3 Trades/Day<br>
     {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
