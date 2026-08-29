@@ -2749,12 +2749,22 @@ if st.session_state.show_form:
             st.session_state.show_form = False
             st.rerun()
 
-# الرسم البياني
+# ==========================================
+# الرسم البياني (تم إصلاح الخطأ)
+# ==========================================
 st.markdown("---")
 st.markdown("### 📈 Price Chart")
+
 df_smc = analyze_smc_ict(df)
+
+# ===== إضافة المتوسطات المتحركة للرسم =====
+df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
                     row_heights=[0.6, 0.2, 0.2])
+
+# السعر والمتوسطات
 fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
@@ -2795,10 +2805,12 @@ if stop_loss and entry_price:
     fig.add_hline(y=entry_price, line_dash="dash", line_color="green", opacity=0.7, row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=entry_price, text="Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
+# RSI
 fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
+# MACD
 fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
 fig.add_bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color='gray', opacity=0.3, row=3, col=1)
