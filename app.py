@@ -1132,7 +1132,7 @@ def generate_advanced_signal(df, current_price, symbol=""):
                     temp_signal = "WAIT"
                 
                 if temp_signal == "BUY" and base_strength < quote_strength:
-                    scores['BUY'] -= 1  # خصم نقطة
+                    scores['BUY'] -= 1
                     details['Currency_Strength'] = f"⚠️ {base} أضعف من {quote} (-1 BUY)"
                 elif temp_signal == "SELL" and quote_strength < base_strength:
                     scores['SELL'] -= 1
@@ -1553,7 +1553,7 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     return explanation
 
 # ==========================================
-# بداية الواجهة الرئيسية (Streamlit)
+# بداية الواجهة الرئيسية (Streamlit) - مع مفاتيح فريدة لكل عنصر
 # ==========================================
 
 with st.sidebar:
@@ -1574,12 +1574,12 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 تحديث القوة", use_container_width=True):
+        if st.button("🔄 تحديث القوة", key="refresh_currency_strength", use_container_width=True):
             with st.spinner("جارٍ حساب القوة..."):
                 st.session_state.currency_strength = get_currency_strength()
                 st.rerun()
     with col2:
-        if st.button("🗑️ مسح", use_container_width=True):
+        if st.button("🗑️ مسح", key="clear_currency_strength", use_container_width=True):
             st.session_state.currency_strength = None
             st.rerun()
     
@@ -1635,13 +1635,13 @@ with st.sidebar:
     st.markdown("### 📋 جميع الإشارات المتاحة")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 تحديث الكل", use_container_width=True):
+        if st.button("🔄 تحديث الكل", key="refresh_all_signals", use_container_width=True):
             with st.spinner("جارٍ التحليل..."):
                 st.session_state.all_signals = get_all_signals_with_trades()
                 st.session_state.last_update = datetime.now()
                 st.rerun()
     with col2:
-        if st.button("🗑️ مسح", use_container_width=True):
+        if st.button("🗑️ مسح", key="clear_all_signals", use_container_width=True):
             st.session_state.all_signals = None
             st.rerun()
     
@@ -1678,11 +1678,11 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
-    selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0)
+    selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0, key="pair_selector")
     selected_symbol = PAIRS[selected_pair_name]
     st.markdown("---")
     st.markdown("### 📋 إدارة الصفقات اليدوية")
-    if st.button("➕ صفقة جديدة", use_container_width=True):
+    if st.button("➕ صفقة جديدة", key="new_trade_button", use_container_width=True):
         st.session_state.show_form = not st.session_state.show_form
         st.rerun()
 
@@ -1697,7 +1697,7 @@ df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 
 if df is None:
     st.error("⚠️ تعذر تحميل البيانات بعد عدة محاولات. يرجى التحقق من اتصال الإنترنت أو اختيار زوج آخر.")
-    if st.button("🔄 إعادة محاولة تحميل البيانات", use_container_width=True):
+    if st.button("🔄 إعادة محاولة تحميل البيانات", key="retry_load_data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     st.stop()
@@ -1748,7 +1748,7 @@ st.markdown(f"""
 # زر تحديث
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
-    if st.button("🔄 تحديث البيانات", use_container_width=True):
+    if st.button("🔄 تحديث البيانات", key="refresh_data_button", use_container_width=True):
         st.session_state.refresh_trigger = not st.session_state.refresh_trigger
         st.session_state.last_update = datetime.now()
         st.cache_data.clear()
@@ -1761,7 +1761,7 @@ st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
     btn_label = "📊 إخفاء" if st.session_state.show_indicators else "📊 إظهار"
-    if st.button(btn_label, use_container_width=True):
+    if st.button(btn_label, key="toggle_indicators", use_container_width=True):
         st.session_state.show_indicators = not st.session_state.show_indicators
         st.rerun()
 with col_title:
@@ -1797,7 +1797,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     </div>
     """, unsafe_allow_html=True)
     
-    if st.button("➕ إضافة هذه الصفقة", use_container_width=True):
+    if st.button("➕ إضافة هذه الصفقة", key="add_suggested_trade", use_container_width=True):
         trade_manager = TradeManager()
         account_balance = 100000
         risk_per_trade_pct = 2
@@ -1877,10 +1877,11 @@ st.markdown("### 🔗 تحليل الارتباط بين العملات")
 corr_pairs = st.multiselect(
     "اختر الأزواج لتحليل الارتباط:",
     options=list(PAIRS.keys()),
-    default=["XAU/USD (Gold)", "EUR/USD", "USD/JPY", "GBP/USD"]
+    default=["XAU/USD (Gold)", "EUR/USD", "USD/JPY", "GBP/USD"],
+    key="correlation_pairs"
 )
 
-if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", use_container_width=True):
+if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="show_correlation_matrix", use_container_width=True):
     with st.spinner("جارٍ حساب الارتباطات..."):
         symbols = [PAIRS[pair] for pair in corr_pairs]
         corr_matrix = get_correlation_matrix(symbols)
@@ -1936,7 +1937,7 @@ if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", use_con
 st.markdown("---")
 st.markdown("### 📊 ارتباط الأزواج بالذهب")
 
-if st.button("🔄 تحليل ارتباط الأزواج بالذهب", use_container_width=True):
+if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="analyze_gold_correlation", use_container_width=True):
     with st.spinner("جارٍ التحليل..."):
         gold_symbol = "GC=F"
         correlation_results = []
@@ -2083,19 +2084,19 @@ if trade_manager.open_trades:
         </div>
         """, unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
-        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_{trade['id']}"):
+        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_stop_{trade['id']}", use_container_width=True):
             if trade_manager.update_trailing_stop(trade["id"], current_price):
                 st.success("تم تحديث الوقف المتحرك!")
                 st.rerun()
             else:
                 st.info("الوقف في أفضل وضعية حالياً")
-        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"reversal_{trade['id']}"):
+        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"check_reversal_{trade['id']}", use_container_width=True):
             is_reversal, msg = detect_reversal(df, trade)
             if is_reversal:
                 st.warning(f"⚠️ انعكاس مكتشف: {msg}")
             else:
                 st.success("✅ لا توجد إشارة انعكاس حالياً")
-        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_{trade['id']}"):
+        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_trade_{trade['id']}", use_container_width=True):
             profit = trade_manager.close_trade(trade['id'], current_price)
             st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
             st.rerun()
@@ -2115,11 +2116,11 @@ if trade_manager.closed_trades:
 if st.session_state.show_form:
     with st.form("new_trade_form"):
         st.subheader("➕ تفاصيل الصفقة")
-        direction = st.selectbox("الاتجاه", ["BUY", "SELL"])
-        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f" if "Gold" in selected_pair_name else "%.4f")
-        stop = st.number_input("وقف الخسارة", value=float(current_price - 20 if "Gold" in selected_pair_name else 0.001), format="%.2f" if "Gold" in selected_pair_name else "%.4f")
-        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970" if "Gold" in selected_pair_name else "1.1050, 1.1080, 1.1120")
-        lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01)
+        direction = st.selectbox("الاتجاه", ["BUY", "SELL"], key="trade_direction")
+        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f" if "Gold" in selected_pair_name else "%.4f", key="trade_entry")
+        stop = st.number_input("وقف الخسارة", value=float(current_price - 20 if "Gold" in selected_pair_name else 0.001), format="%.2f" if "Gold" in selected_pair_name else "%.4f", key="trade_stop")
+        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970" if "Gold" in selected_pair_name else "1.1050, 1.1080, 1.1120", key="trade_targets")
+        lots = st.number_input("عدد اللوتات", min_value=0.01, value=0.1, step=0.01, key="trade_lots")
         submitted = st.form_submit_button("إضافة الصفقة")
         if submitted and entry > 0 and stop > 0:
             targets_list = [float(x.strip()) for x in targets_input.split(",") if x.strip()]
