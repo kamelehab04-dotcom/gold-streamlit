@@ -265,11 +265,18 @@ def get_spot_price(symbol="GC=F"):
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="5m")
-        if not data.empty:
+        if not data.empty and len(data) > 1:
             last = data.iloc[-1]
             first = data.iloc[0]
             change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
             return float(last['Close']), float(change)
+        else:
+            data = ticker.history(period="5d", interval="1h")
+            if not data.empty:
+                last = data.iloc[-1]
+                first = data.iloc[0]
+                change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+                return float(last['Close']), float(change)
     except:
         pass
     return None, None
@@ -290,13 +297,23 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
             try:
                 ticker = yf.Ticker(sym)
                 df = ticker.history(period=period, interval=interval)
-                if not df.empty:
+                if not df.empty and len(df) > 10:
                     df.columns = [col.lower() for col in df.columns]
                     return df
             except Exception as e:
                 continue
         if attempt < max_retries - 1:
             time.sleep(3)
+    
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="3mo", interval="1d")
+        if not df.empty and len(df) > 10:
+            df.columns = [col.lower() for col in df.columns]
+            return df
+    except:
+        pass
+    
     return None
 
 @st.cache_data(ttl=60)
@@ -337,13 +354,18 @@ def get_economic_news():
             articles = data.get('articles', [])
             news_list = []
             for art in articles[:5]:
-                news_list.append({
-                    'title': art.get('title', ''),
-                    'source': art.get('source', {}).get('name', ''),
-                    'publishedAt': art.get('publishedAt', ''),
-                    'url': art.get('url', '')
-                })
+                if art.get('title'):
+                    news_list.append({
+                        'title': art.get('title', ''),
+                        'source': art.get('source', {}).get('name', ''),
+                        'publishedAt': art.get('publishedAt', ''),
+                        'url': art.get('url', '')
+                    })
             return news_list
+    except requests.exceptions.Timeout:
+        pass
+    except requests.exceptions.RequestException:
+        pass
     except:
         pass
     return []
@@ -360,20 +382,20 @@ def get_currency_strength():
             try:
                 ticker = yf.Ticker(pair)
                 data = ticker.history(period="1d", interval="5m")
-                if not data.empty:
+                if not data.empty and len(data) > 1:
                     last = data.iloc[-1]
                     first = data.iloc[0]
                     change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
-                    if pair.startswith(currency):
+                    if pair.split('=')[0].startswith(currency):
                         changes.append(change)
                     else:
                         changes.append(-change)
-            except:
+            except Exception as e:
                 continue
         if changes:
             strength[currency] = round(sum(changes) / len(changes), 2)
         else:
-            strength[currency] = 0
+            strength[currency] = 0.0
     return strength
 
 @st.cache_data(ttl=120)
@@ -507,6 +529,7 @@ def detect_smart_money_reversal(df, lookback=20):
 # ==========================================
 # SMC/ICT
 # ==========================================
+@st.cache_data(ttl=300)
 def analyze_smc_ict(df):
     df = df.copy()
     df['order_block_bullish'] = False
@@ -529,65 +552,89 @@ def analyze_smc_ict(df):
     df['smr_bullish'] = False
     df['smr_bearish'] = False
     
+    if len(df) < 50:
+        return df
+    
     bsl, ssl = detect_liquidity_levels(df, lookback=50)
     df['bsl'] = bsl
     df['ssl'] = ssl
     df = detect_smart_money_reversal(df, lookback=20)
     
     for i in range(3, len(df)):
-        if df['close'].iloc[i] > df['open'].iloc[i]:
-            body = df['close'].iloc[i] - df['open'].iloc[i]
-            avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
-            if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
-                df.loc[df.index[i-1], 'order_block_bullish'] = True
-        if df['close'].iloc[i] < df['open'].iloc[i]:
-            body = df['open'].iloc[i] - df['close'].iloc[i]
-            avg_range = (df['high'].iloc[i-3:i].max() - df['low'].iloc[i-3:i].min()) / 3
-            if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
-                df.loc[df.index[i-1], 'order_block_bearish'] = True
+        try:
+            if df['close'].iloc[i] > df['open'].iloc[i]:
+                body = df['close'].iloc[i] - df['open'].iloc[i]
+                avg_range = (df['high'].iloc[max(0,i-3):i].max() - df['low'].iloc[max(0,i-3):i].min()) / 3
+                if body > avg_range and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
+                    df.loc[df.index[i-1], 'order_block_bullish'] = True
+            if df['close'].iloc[i] < df['open'].iloc[i]:
+                body = df['open'].iloc[i] - df['close'].iloc[i]
+                avg_range = (df['high'].iloc[max(0,i-3):i].max() - df['low'].iloc[max(0,i-3):i].min()) / 3
+                if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
+                    df.loc[df.index[i-1], 'order_block_bearish'] = True
+        except:
+            continue
 
     for i in range(2, len(df)):
-        if df['low'].iloc[i] > df['high'].iloc[i-2]:
-            df.loc[df.index[i], 'fvg_bullish'] = True
-        if df['high'].iloc[i] < df['low'].iloc[i-2]:
-            df.loc[df.index[i], 'fvg_bearish'] = True
+        try:
+            if df['low'].iloc[i] > df['high'].iloc[i-2]:
+                df.loc[df.index[i], 'fvg_bullish'] = True
+            if df['high'].iloc[i] < df['low'].iloc[i-2]:
+                df.loc[df.index[i], 'fvg_bearish'] = True
+        except:
+            continue
 
     for i in range(10, len(df)):
-        recent_lows = df['low'].iloc[i-10:i].tolist()
-        if df['low'].iloc[i] < min(recent_lows[:-1]):
-            df.loc[df.index[i], 'liquidity_sweep_bullish'] = True
-        recent_highs = df['high'].iloc[i-10:i].tolist()
-        if df['high'].iloc[i] > max(recent_highs[:-1]):
-            df.loc[df.index[i], 'liquidity_sweep_bearish'] = True
+        try:
+            recent_lows = df['low'].iloc[max(0,i-10):i].tolist()
+            if df['low'].iloc[i] < min(recent_lows[:-1]):
+                df.loc[df.index[i], 'liquidity_sweep_bullish'] = True
+            recent_highs = df['high'].iloc[max(0,i-10):i].tolist()
+            if df['high'].iloc[i] > max(recent_highs[:-1]):
+                df.loc[df.index[i], 'liquidity_sweep_bearish'] = True
+        except:
+            continue
 
     for i in range(5, len(df)):
-        if df['close'].iloc[i] > df['high'].iloc[i-5:i].max():
-            df.loc[df.index[i], 'bos_bullish'] = True
-        if df['close'].iloc[i] < df['low'].iloc[i-5:i].min():
-            df.loc[df.index[i], 'bos_bearish'] = True
+        try:
+            if df['close'].iloc[i] > df['high'].iloc[max(0,i-5):i].max():
+                df.loc[df.index[i], 'bos_bullish'] = True
+            if df['close'].iloc[i] < df['low'].iloc[max(0,i-5):i].min():
+                df.loc[df.index[i], 'bos_bearish'] = True
+        except:
+            continue
 
     for i in range(3, len(df)):
-        if df['bos_bearish'].iloc[i-1] and df['close'].iloc[i] > df['high'].iloc[i-2:i].max():
-            df.loc[df.index[i], 'mss_bullish'] = True
-        if df['bos_bullish'].iloc[i-1] and df['close'].iloc[i] < df['low'].iloc[i-2:i].min():
-            df.loc[df.index[i], 'mss_bearish'] = True
+        try:
+            if df['bos_bearish'].iloc[i-1] and df['close'].iloc[i] > df['high'].iloc[max(0,i-2):i].max():
+                df.loc[df.index[i], 'mss_bullish'] = True
+            if df['bos_bullish'].iloc[i-1] and df['close'].iloc[i] < df['low'].iloc[max(0,i-2):i].min():
+                df.loc[df.index[i], 'mss_bearish'] = True
+        except:
+            continue
 
     for i in range(50, len(df)):
-        range_high = df['high'].iloc[i-50:i].max()
-        range_low = df['low'].iloc[i-50:i].min()
-        if range_high != range_low:
-            discount = range_low + (range_high - range_low) * 0.382
-            premium = range_high - (range_high - range_low) * 0.382
-            if df['close'].iloc[i] <= discount:
-                df.loc[df.index[i], 'in_discount'] = True
-            if df['close'].iloc[i] >= premium:
-                df.loc[df.index[i], 'in_premium'] = True
+        try:
+            range_high = df['high'].iloc[max(0,i-50):i].max()
+            range_low = df['low'].iloc[max(0,i-50):i].min()
+            if range_high != range_low:
+                discount = range_low + (range_high - range_low) * 0.382
+                premium = range_high - (range_high - range_low) * 0.382
+                if df['close'].iloc[i] <= discount:
+                    df.loc[df.index[i], 'in_discount'] = True
+                if df['close'].iloc[i] >= premium:
+                    df.loc[df.index[i], 'in_premium'] = True
+        except:
+            continue
 
-    tbs_type, _, _, _ = detect_tbs(df)
-    if tbs_type == "BULLISH":
-        df.loc[df.index[-1], 'tbs_bullish'] = True
-    elif tbs_type == "BEARISH":
-        df.loc[df.index[-1], 'tbs_bearish'] = True
+    try:
+        tbs_type, _, _, _ = detect_tbs(df) or (None, None, None, None)
+        if tbs_type == "BULLISH":
+            df.loc[df.index[-1], 'tbs_bullish'] = True
+        elif tbs_type == "BEARISH":
+            df.loc[df.index[-1], 'tbs_bearish'] = True
+    except:
+        pass
 
     return df
 
@@ -595,20 +642,27 @@ def analyze_smc_ict(df):
 # TBS
 # ==========================================
 def detect_tbs(df, lookback=20, body_multiplier=1.5):
-    if len(df) < lookback + 2:
+    if df is None or len(df) < lookback + 2:
         return None, None, None, None
-    last_idx = len(df) - 1
-    current = df.iloc[last_idx]
-    lookback_high = df['high'].iloc[last_idx - lookback:last_idx].max()
-    lookback_low = df['low'].iloc[last_idx - lookback:last_idx].min()
-    avg_body = abs(df['close'] - df['open']).iloc[last_idx - lookback:last_idx].mean()
-    current_body = abs(current['close'] - current['open'])
-    if current_body < avg_body * body_multiplier:
-        return None, None, None, None
-    if current['high'] > lookback_high and current['close'] > lookback_high:
-        return "BEARISH", current['close'], current['low'], lookback_high
-    elif current['low'] < lookback_low and current['close'] < lookback_low:
-        return "BULLISH", current['close'], current['high'], lookback_low
+    
+    try:
+        last_idx = len(df) - 1
+        current = df.iloc[last_idx]
+        lookback_high = df['high'].iloc[max(0, last_idx - lookback):last_idx].max()
+        lookback_low = df['low'].iloc[max(0, last_idx - lookback):last_idx].min()
+        avg_body = abs(df['close'] - df['open']).iloc[max(0, last_idx - lookback):last_idx].mean()
+        current_body = abs(current['close'] - current['open'])
+        
+        if current_body < avg_body * body_multiplier:
+            return None, None, None, None
+            
+        if current['high'] > lookback_high and current['close'] > lookback_high:
+            return "BEARISH", current['close'], current['low'], lookback_high
+        elif current['low'] < lookback_low and current['close'] < lookback_low:
+            return "BULLISH", current['close'], current['high'], lookback_low
+    except:
+        pass
+    
     return None, None, None, None
 
 # ==========================================
@@ -616,11 +670,17 @@ def detect_tbs(df, lookback=20, body_multiplier=1.5):
 # ==========================================
 def find_peaks_troughs(series, order=5):
     peaks, troughs = [], []
+    if series is None or len(series) < order * 2 + 1:
+        return peaks, troughs
+    
     for i in range(order, len(series) - order):
-        if all(series[i] > series[i-j] for j in range(1, order+1)) and all(series[i] > series[i+j] for j in range(1, order+1)):
-            peaks.append((i, series[i]))
-        if all(series[i] < series[i-j] for j in range(1, order+1)) and all(series[i] < series[i+j] for j in range(1, order+1)):
-            troughs.append((i, series[i]))
+        try:
+            if all(series[i] > series[i-j] for j in range(1, order+1)) and all(series[i] > series[i+j] for j in range(1, order+1)):
+                peaks.append((i, series[i]))
+            if all(series[i] < series[i-j] for j in range(1, order+1)) and all(series[i] < series[i+j] for j in range(1, order+1)):
+                troughs.append((i, series[i]))
+        except:
+            continue
     return peaks, troughs
 
 def detect_head_shoulders(df, lookback=50):
@@ -751,7 +811,7 @@ def analyze_chart_patterns(df):
     p, s = detect_flag_pennant(df)
     if p:
         last_close = df['close'].iloc[-1]
-        prev_close = df['close'].iloc[-5]
+        prev_close = df['close'].iloc[-5] if len(df) >= 5 else df['close'].iloc[0]
         direction = "BULLISH" if last_close > prev_close else "BEARISH"
         patterns.append({"pattern": p, "score": s, "direction": direction})
         total_score += s
@@ -890,13 +950,22 @@ def get_major_trend(df):
 
 def get_dynamic_weights(df):
     """تعديل أوزان المؤشرات حسب حالة السوق (اتجاهي أو عرضي)"""
-    adx_val = df['adx'].iloc[-1] if not pd.isna(df['adx'].iloc[-1]) else 20
+    adx_val = 20
+    if 'adx' in df.columns and not df['adx'].empty:
+        try:
+            last_adx = df['adx'].iloc[-1]
+            if not pd.isna(last_adx):
+                adx_val = last_adx
+        except:
+            pass
+    
     weights = {
         'rsi': 2, 'macd': 2, 'bb': 2, 'vwap': 1, 'adx': 1, 
         'ichimoku': 2, 'smc': 3, 'patterns': 4, 'tbs': 4, 
         'mfi': 2, 'smr': 3, 'candle': 3, 'divergence': 4, 'fresh_ob': 3,
         'fibonacci': 2, 'macd_hist': 1
     }
+    
     if adx_val > 25:
         weights['ichimoku'] = 4
         weights['rsi'] = 1
@@ -905,6 +974,7 @@ def get_dynamic_weights(df):
         weights['bb'] = 4
         weights['rsi'] = 4
         weights['ichimoku'] = 1
+    
     return weights
 
 # ==========================================
@@ -937,14 +1007,17 @@ def generate_advanced_signal(df, current_price, symbol=""):
             details['RSI'] = f"محايد ({rsi:.1f})"
 
     if 'macd' in df.columns and 'macd_signal' in df.columns:
-        if last['macd'] > last['macd_signal'] and last['macd'] > 0:
-            scores['BUY'] += weights['macd']
-            details['MACD'] = f"إيجابي +{weights['macd']}"
-        elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
-            scores['SELL'] += weights['macd']
-            details['MACD'] = f"سلبي +{weights['macd']}"
+        if not pd.isna(last['macd']) and not pd.isna(last['macd_signal']):
+            if last['macd'] > last['macd_signal'] and last['macd'] > 0:
+                scores['BUY'] += weights['macd']
+                details['MACD'] = f"إيجابي +{weights['macd']}"
+            elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
+                scores['SELL'] += weights['macd']
+                details['MACD'] = f"سلبي +{weights['macd']}"
+            else:
+                details['MACD'] = "محايد"
         else:
-            details['MACD'] = "محايد"
+            details['MACD'] = "بيانات غير كافية"
 
     # MACD Histogram
     if 'macd_histogram' in df.columns and not pd.isna(last['macd_histogram']):
@@ -958,14 +1031,17 @@ def generate_advanced_signal(df, current_price, symbol=""):
             details['MACD_Hist'] = "هيستوجرام محايد"
 
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
-        if current_price <= last['bb_lower'] * 1.005:
-            scores['BUY'] += weights['bb']
-            details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
-        elif current_price >= last['bb_upper'] * 0.995:
-            scores['SELL'] += weights['bb']
-            details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
+        if not pd.isna(last['bb_upper']) and not pd.isna(last['bb_lower']):
+            if current_price <= last['bb_lower'] * 1.005:
+                scores['BUY'] += weights['bb']
+                details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
+            elif current_price >= last['bb_upper'] * 0.995:
+                scores['SELL'] += weights['bb']
+                details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
+            else:
+                details['BB'] = "وسط النطاق"
         else:
-            details['BB'] = "وسط النطاق"
+            details['BB'] = "بيانات غير كافية"
 
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
         if current_price > last['vwap']:
@@ -1122,7 +1198,6 @@ def generate_advanced_signal(df, current_price, symbol=""):
                 base_strength = currency_strength.get(base, 0)
                 quote_strength = currency_strength.get(quote, 0)
                 
-                # حساب النتيجة المبدئية قبل تطبيق المرشحات
                 net_score_temp = scores['BUY'] - scores['SELL']
                 if net_score_temp >= 5:
                     temp_signal = "BUY"
@@ -1159,7 +1234,15 @@ def generate_advanced_signal(df, current_price, symbol=""):
         confidence = 50 + (net_score / total_weight) * 50
 
     # MTF Filter
-    mtf_signal, mtf_count = get_mtf_signal(symbol, current_price)
+    mtf_signal = "NEUTRAL"
+    mtf_count = 0
+    if symbol and symbol != "":
+        try:
+            mtf_signal, mtf_count = get_mtf_signal(symbol, current_price)
+        except:
+            mtf_signal = "NEUTRAL"
+            mtf_count = 0
+    
     if signal != "WAIT" and mtf_signal != "NEUTRAL":
         if signal != mtf_signal:
             confidence = confidence * 0.7
@@ -1206,6 +1289,19 @@ def generate_advanced_signal(df, current_price, symbol=""):
             if current_atr < avg_atr * 0.7:
                 confidence = confidence * 0.6
                 details['ATR_Filter'] = "⚠️ تقلب منخفض (إشارة ضعيفة ×0.6)"
+
+    # تصفية إضافية للإشارات الضعيفة
+    if signal != "WAIT":
+        has_strong_signal = False
+        if last_smc.get('order_block_bullish', False) or last_smc.get('order_block_bearish', False):
+            has_strong_signal = True
+        if patterns:
+            for p in patterns:
+                if p['score'] >= 4:
+                    has_strong_signal = True
+        if not has_strong_signal and confidence < 70:
+            confidence = confidence * 0.8
+            details['Weak_Signal_Filter'] = "⚠️ إشارة ضعيفة بدون دعم قوي ×0.8"
 
     confidence = max(0, min(100, confidence))
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
@@ -1282,15 +1378,19 @@ def get_mtf_signal(symbol, current_price):
     timeframes = ['15m', '1h', '4h']
     signals = []
     for tf in timeframes:
-        df = get_historical_data(symbol, period="5d", interval=tf)
-        if df is not None and len(df) > 50:
-            rsi = calc_rsi(df['close']).iloc[-1]
-            if rsi < 30:
-                signals.append(('BUY', tf))
-            elif rsi > 70:
-                signals.append(('SELL', tf))
-            else:
-                signals.append(('NEUTRAL', tf))
+        try:
+            df = get_historical_data(symbol, period="5d", interval=tf)
+            if df is not None and len(df) > 50:
+                rsi = calc_rsi(df['close']).iloc[-1]
+                if rsi < 30:
+                    signals.append(('BUY', tf))
+                elif rsi > 70:
+                    signals.append(('SELL', tf))
+                else:
+                    signals.append(('NEUTRAL', tf))
+        except:
+            signals.append(('NEUTRAL', tf))
+    
     buy_count = sum(1 for s in signals if s[0] == 'BUY')
     sell_count = sum(1 for s in signals if s[0] == 'SELL')
     if buy_count > sell_count:
@@ -1306,7 +1406,14 @@ def get_mtf_signal(symbol, current_price):
 @st.cache_data(ttl=120)
 def get_all_signals_with_trades():
     results = []
-    for pair_name, symbol in PAIRS.items():
+    total_pairs = len(PAIRS)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, (pair_name, symbol) in enumerate(PAIRS.items()):
+        status_text.text(f"جاري تحليل {pair_name}... ({idx+1}/{total_pairs})")
+        progress_bar.progress((idx + 1) / total_pairs)
+        
         try:
             df = get_historical_data(symbol, period="1mo", interval="1h")
             if df is None or len(df) < 100:
@@ -1364,6 +1471,9 @@ def get_all_signals_with_trades():
             })
         except Exception as e:
             continue
+    
+    progress_bar.empty()
+    status_text.empty()
     return pd.DataFrame(results)
 
 # ==========================================
@@ -1511,20 +1621,21 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(word in v for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "متوافق", "لندن", "نيويورك"]):
+            if v and ("+" in str(v) or any(word in str(v) for word in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "متوافق", "لندن", "نيويورك"])):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
-            if "-" in v or any(word in v for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط"]):
+            if v and ("-" in str(v) or any(word in str(v) for word in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط"])):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
         explanation = "⏳ **قرار الانتظار** بسبب:\n"
         explanation += f"- النتيجة الصافية {net_score} بين -5 و +5 (لا يوجد إجماع).\n- تفاصيل النقاط:\n"
         for k, v in details.items():
-            explanation += f"  - {k}: {v}\n"
+            if v:
+                explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
     
     if stop_loss and entry_price and targets:
@@ -1543,17 +1654,22 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
         for p in patterns:
             explanation += f"- {p['pattern']} ({p['direction']}) - قوة: {p['score']}/5\n"
-    if tbs_info[0]:
+    
+    if tbs_info and tbs_info[0]:
         tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
-        explanation += f"\n\n🐢 **TBS (Turtle Body Soup) مكتشف:** {tbs_type}\n"
-        explanation += f"   - المستوى القديم المُختَرق: {tbs_level:.4f}\n"
-        explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
-        explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
+        if tbs_type:
+            explanation += f"\n\n🐢 **TBS (Turtle Body Soup) مكتشف:** {tbs_type}\n"
+            if tbs_level:
+                explanation += f"   - المستوى القديم المُختَرق: {tbs_level:.4f}\n"
+            if tbs_entry:
+                explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
+            if tbs_stop:
+                explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
 
     return explanation
 
 # ==========================================
-# بداية الواجهة الرئيسية (Streamlit) - مع مفاتيح فريدة لكل عنصر
+# بداية الواجهة الرئيسية (Streamlit)
 # ==========================================
 
 with st.sidebar:
@@ -1587,7 +1703,6 @@ with st.sidebar:
         strength = st.session_state.currency_strength
         sorted_currencies = sorted(strength.items(), key=lambda x: x[1], reverse=True)
         
-        # عرض بطاقات العملات
         cols = st.columns(4)
         for i, (currency, value) in enumerate(sorted_currencies):
             if i >= 4:
@@ -1600,7 +1715,6 @@ with st.sidebar:
                     delta_color="normal"
                 )
         
-        # عرض أقوى وأضعف
         if len(sorted_currencies) >= 2:
             strongest = sorted_currencies[0]
             weakest = sorted_currencies[-1]
@@ -1611,7 +1725,6 @@ with st.sidebar:
             </div>
             """, unsafe_allow_html=True)
             
-            # أفضل صفقات بناءً على قوة العملات
             best_pairs = []
             if strongest[0] != weakest[0]:
                 best_buy = f"{strongest[0]}/{weakest[0]}"
@@ -1768,13 +1881,14 @@ with col_title:
     st.markdown("### مؤشرات السوق")
 
 if st.session_state.show_indicators:
-    cols = st.columns(5)
+    cols = st.columns(6)
     last = df.iloc[-1]
     cols[0].metric("RSI", f"{last['rsi']:.1f}")
     cols[1].metric("ATR", f"${last['atr']:.2f}" if "Gold" in selected_pair_name else f"{last['atr']:.4f}")
     cols[2].metric("ADX", f"{last['adx']:.1f}")
     cols[3].metric("VWAP", f"${last['vwap']:.2f}" if "Gold" in selected_pair_name else f"{last['vwap']:.4f}")
     cols[4].metric("MFI", f"{last['mfi']:.1f}")
+    cols[5].metric("MACD Hist", f"{last['macd_histogram']:.4f}")
 else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
 
@@ -1873,7 +1987,6 @@ with st.expander("📝 شرح القرار", expanded=True):
 st.markdown("---")
 st.markdown("### 🔗 تحليل الارتباط بين العملات")
 
-# اختيار الأزواج للتحليل
 corr_pairs = st.multiselect(
     "اختر الأزواج لتحليل الارتباط:",
     options=list(PAIRS.keys()),
@@ -1987,7 +2100,6 @@ if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="an
             )
             st.plotly_chart(fig_gold_corr, use_container_width=True)
             
-            # عرض أقوى ارتباط
             if correlation_results:
                 max_pos = max([r for r in correlation_results if r["الارتباط بالذهب"] > 0], key=lambda x: x["الارتباط بالذهب"]) if any(r["الارتباط بالذهب"] > 0 for r in correlation_results) else None
                 max_neg = min([r for r in correlation_results if r["الارتباط بالذهب"] < 0], key=lambda x: x["الارتباط بالذهب"]) if any(r["الارتباط بالذهب"] < 0 for r in correlation_results) else None
