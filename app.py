@@ -1,7 +1,7 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
 # تاريخ التحديث: 2026-08-29
-# المصدر: GoldAPI + yfinance + FMP API + تحليلات متقدمة
+# المصدر: GoldAPI + yfinance + FMP API + تحليلات متقدمة + نظام هرمي
 # ==========================================
 
 import streamlit as st
@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# الهوية البصرية
+# الهوية البصرية (نفسها)
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -99,7 +99,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar • News Analysis</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar • News Analysis • Hierarchical Decision System</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -180,118 +180,33 @@ def get_indicator_settings(symbol_name):
     else:
         asset_type = "forex"
     
-    settings = {
+    # إعدادات افتراضية
+    default_settings = {
         'asset_type': asset_type,
-        'macd': {},
-        'rsi': {},
-        'mfi': {},
-        'bb': {},
-        'ichimoku': {}
+        'macd': {'fast': 12, 'slow': 26, 'signal': 9, 'description': 'قياسي'},
+        'rsi': {'period': 14, 'overbought': 70, 'oversold': 30, 'description': 'قياسي'},
+        'mfi': {'period': 14, 'overbought': 80, 'oversold': 20, 'description': 'قياسي'},
+        'bb': {'period': 20, 'std_dev': 2, 'description': 'قياسي'},
+        'ichimoku': {'tenkan': 9, 'kijun': 26, 'senkou': 52, 'description': 'كلاسيكي'},
+        'atr_period': 14,
+        'adx_period': 14
     }
     
+    # إعدادات مخصصة حسب نوع الأصل
     if asset_type == "gold":
-        # ===== إعدادات الذهب =====
-        settings['macd'] = {
-            'fast': 5,
-            'slow': 13,
-            'signal': 4,
-            'description': 'سريع للمضاربة'
-        }
-        settings['rsi'] = {
-            'period': 14,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'مستويات موسعة للترند القوي'
-        }
-        settings['mfi'] = {
-            'period': 9,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'فترة قصيرة للسيولة'
-        }
-        settings['bb'] = {
-            'period': 20,
-            'std_dev': 2.5,
-            'description': 'نطاق موسع للتقلبات الحادة'
-        }
-        settings['ichimoku'] = {
-            'tenkan': 10,
-            'kijun': 30,
-            'senkou': 60,
-            'description': 'معدل لنظام 5 أيام'
-        }
-        settings['atr_period'] = 14
-        settings['adx_period'] = 14
-        
+        default_settings['macd'] = {'fast': 5, 'slow': 13, 'signal': 4, 'description': 'سريع للمضاربة'}
+        default_settings['rsi'] = {'period': 14, 'overbought': 80, 'oversold': 20, 'description': 'مستويات موسعة للترند القوي'}
+        default_settings['mfi'] = {'period': 9, 'overbought': 80, 'oversold': 20, 'description': 'فترة قصيرة للسيولة'}
+        default_settings['bb'] = {'period': 20, 'std_dev': 2.5, 'description': 'نطاق موسع للتقلبات الحادة'}
+        default_settings['ichimoku'] = {'tenkan': 10, 'kijun': 30, 'senkou': 60, 'description': 'معدل لنظام 5 أيام'}
     elif asset_type == "crypto":
-        # ===== إعدادات البتكوين والعملات الرقمية =====
-        settings['macd'] = {
-            'fast': 6,
-            'slow': 13,
-            'signal': 5,
-            'description': 'سريع للمضاربة'
-        }
-        settings['rsi'] = {
-            'period': 14,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'مستويات موسعة للترندات العنيفة'
-        }
-        settings['mfi'] = {
-            'period': 10,
-            'overbought': 85,
-            'oversold': 15,
-            'description': 'مستويات واسعة جداً'
-        }
-        settings['bb'] = {
-            'period': 50,
-            'std_dev': 2.3,
-            'description': 'فترة طويلة لتخفيف الضوضاء'
-        }
-        settings['ichimoku'] = {
-            'tenkan': 10,
-            'kijun': 30,
-            'senkou': 60,
-            'description': 'معدل لسوق 24/7'
-        }
-        settings['atr_period'] = 14
-        settings['adx_period'] = 14
-        
-    else:  # forex
-        # ===== إعدادات الفوركس =====
-        settings['macd'] = {
-            'fast': 12,
-            'slow': 26,
-            'signal': 9,
-            'description': 'قياسي'
-        }
-        settings['rsi'] = {
-            'period': 14,
-            'overbought': 70,
-            'oversold': 30,
-            'description': 'قياسي'
-        }
-        settings['mfi'] = {
-            'period': 14,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'قياسي'
-        }
-        settings['bb'] = {
-            'period': 20,
-            'std_dev': 2,
-            'description': 'قياسي'
-        }
-        settings['ichimoku'] = {
-            'tenkan': 9,
-            'kijun': 26,
-            'senkou': 52,
-            'description': 'كلاسيكي'
-        }
-        settings['atr_period'] = 14
-        settings['adx_period'] = 14
+        default_settings['macd'] = {'fast': 6, 'slow': 13, 'signal': 5, 'description': 'سريع للمضاربة'}
+        default_settings['rsi'] = {'period': 14, 'overbought': 80, 'oversold': 20, 'description': 'مستويات موسعة للترندات العنيفة'}
+        default_settings['mfi'] = {'period': 10, 'overbought': 85, 'oversold': 15, 'description': 'مستويات واسعة جداً'}
+        default_settings['bb'] = {'period': 50, 'std_dev': 2.3, 'description': 'فترة طويلة لتخفيف الضوضاء'}
+        default_settings['ichimoku'] = {'tenkan': 10, 'kijun': 30, 'senkou': 60, 'description': 'معدل لسوق 24/7'}
     
-    return settings
+    return default_settings
 
 # ==========================================
 # المؤشرات الأساسية
@@ -819,13 +734,13 @@ def get_dynamic_weights(df, asset_type="forex"):
     تعديل أوزان المؤشرات حسب حالة السوق ونوع الأصل
     """
     adx_val = 20
-    if 'adx' in df.columns and not df['adx'].empty:
-        try:
+    try:
+        if 'adx' in df.columns and not df['adx'].empty:
             last_adx = df['adx'].iloc[-1]
             if not pd.isna(last_adx):
                 adx_val = last_adx
-        except:
-            pass
+    except:
+        pass
     
     # ====== الأوزان الأساسية حسب نوع الأصل ======
     if asset_type == "gold":
@@ -854,23 +769,26 @@ def get_dynamic_weights(df, asset_type="forex"):
         }
     
     # ====== الأوزان الديناميكية حسب حالة السوق ======
-    if adx_val > 25:  # سوق اتجاهي قوي
-        weights['ichimoku'] = weights.get('ichimoku', 3) + 1
-        weights['macd'] = weights.get('macd', 3) + 1
-        weights['rsi'] = max(1, weights.get('rsi', 3) - 1)
-        weights['bb'] = max(1, weights.get('bb', 3) - 1)
-        weights['adx'] = weights.get('adx', 2) + 1
-    else:  # سوق عرضي
-        weights['bb'] = weights.get('bb', 3) + 2
-        weights['rsi'] = weights.get('rsi', 3) + 2
-        weights['ichimoku'] = max(1, weights.get('ichimoku', 3) - 2)
-        weights['macd'] = max(1, weights.get('macd', 3) - 1)
-        weights['mfi'] = weights.get('mfi', 3) + 1
+    try:
+        if adx_val > 25:
+            weights['ichimoku'] = weights.get('ichimoku', 3) + 1
+            weights['macd'] = weights.get('macd', 3) + 1
+            weights['rsi'] = max(1, weights.get('rsi', 3) - 1)
+            weights['bb'] = max(1, weights.get('bb', 3) - 1)
+            weights['adx'] = weights.get('adx', 2) + 1
+        else:
+            weights['bb'] = weights.get('bb', 3) + 2
+            weights['rsi'] = weights.get('rsi', 3) + 2
+            weights['ichimoku'] = max(1, weights.get('ichimoku', 3) - 2)
+            weights['macd'] = max(1, weights.get('macd', 3) - 1)
+            weights['mfi'] = weights.get('mfi', 3) + 1
+    except:
+        pass
     
     return weights
 
 # ==========================================
-# دوال جلب البيانات
+# دوال جلب البيانات (الأساسية)
 # ==========================================
 def get_market_status():
     eastern = pytz.timezone('US/Eastern')
@@ -916,7 +834,7 @@ def time_remaining(dt):
     return f"{hours}h {minutes}m"
 
 # ==========================================
-# دوال FMP API
+# دوال FMP API (للأخبار والتقويم)
 # ==========================================
 
 @st.cache_data(ttl=300)
@@ -968,196 +886,101 @@ def get_fmp_news():
 # تحليل الأخبار المتقدم
 # ==========================================
 
-NEWS_KEYWORDS = {
-    'positive': {
-        'gold': ['gold rally', 'gold surge', 'gold bullish', 'gold gains', 'gold positive', 'gold up', 'gold rises', 'gold strong', 'gold support', 'gold buying', 'gold rebound'],
-        'forex': ['dollar weak', 'dollar down', 'dollar falls', 'euro strong', 'pound strong', 'currency rally', 'forex positive', 'dollar negative', 'yen weak'],
-        'economy': ['fed cut', 'rate cut', 'stimulus', 'economic growth', 'gdp up', 'jobs strong', 'inflation down', 'recovery', 'boom']
-    },
-    'negative': {
-        'gold': ['gold drop', 'gold falls', 'gold bearish', 'gold decline', 'gold down', 'gold selling', 'gold crash', 'gold weak', 'gold resistance', 'gold plunge'],
-        'forex': ['dollar strong', 'dollar up', 'dollar rises', 'euro weak', 'pound weak', 'currency drop', 'forex negative', 'dollar positive', 'yen strong'],
-        'economy': ['fed hike', 'rate hike', 'inflation up', 'economic slowdown', 'gdp down', 'jobs weak', 'recession', 'crisis', 'crash']
-    }
-}
+def get_asset_type_from_symbol(symbol_name):
+    """تحديد نوع الأصل لتصفية الأخبار"""
+    symbol_lower = symbol_name.lower()
+    if "gold" in symbol_lower or "xau" in symbol_lower:
+        return "gold"
+    elif "silver" in symbol_lower or "xag" in symbol_lower:
+        return "silver"
+    elif "bitcoin" in symbol_lower or "btc" in symbol_lower:
+        return "bitcoin"
+    elif "ethereum" in symbol_lower or "eth" in symbol_lower:
+        return "ethereum"
+    elif any(x in symbol_lower for x in ["eur", "gbp", "jpy", "chf", "aud", "nzd", "cad"]):
+        return "forex"
+    elif "dxy" in symbol_lower:
+        return "index"
+    else:
+        return "crypto"
 
-def analyze_news_impact(news_list):
+def get_asset_specific_news(news_list, asset_type):
+    """تصفية الأخبار حسب نوع الأصل"""
+    if not news_list:
+        return []
+    
+    filtered_news = []
+    asset_keywords = {
+        "gold": ["gold", "federal reserve", "fed", "interest rate", "cpi", "nfp", "inflation", "dollar", "treasury", "geopolitical", "xau"],
+        "silver": ["silver", "xag", "federal reserve", "fed", "interest rate", "inflation", "dollar"],
+        "bitcoin": ["bitcoin", "btc", "etf", "regulation", "sec", "crypto", "fed", "institutional", "exchange"],
+        "ethereum": ["ethereum", "eth", "etf", "regulation", "sec", "crypto", "fed"],
+        "forex": ["ecb", "eurozone", "cpi", "nfp", "pce", "fed", "employment", "dollar", "euro", "pound", "yen", "swiss", "aud", "nzd", "cad"],
+        "crypto": ["bitcoin", "ethereum", "crypto", "etf", "regulation", "sec", "exchange", "fed"]
+    }
+    
+    keywords = asset_keywords.get(asset_type, [])
+    for item in news_list:
+        title = item.get('title', '').lower()
+        content = item.get('content', '').lower()
+        combined = title + " " + content
+        if any(kw in combined for kw in keywords):
+            filtered_news.append(item)
+        elif any(kw in combined for kw in ["fed", "federal reserve", "rate", "cpi", "nfp"]):
+            filtered_news.append(item)
+    
+    return filtered_news
+
+def analyze_asset_news(news_list, asset_type):
+    """تحليل الأخبار الخاصة بالأصل"""
     if not news_list:
         return {
-            'gold_sentiment': 0,
-            'forex_sentiment': 0,
-            'overall_sentiment': 0,
-            'high_impact_news': [],
-            'news_analysis': [],
-            'summary': "لا توجد أخبار للتحليل",
-            'count': 0
+            'impact_score': 0,
+            'high_impact': False,
+            'risk_level': 'منخفض',
+            'summary': "لا توجد أخبار خاصة بالأصل"
         }
     
-    gold_score = 0
-    forex_score = 0
-    high_impact = []
-    news_analysis = []
+    high_impact_keywords = {
+        "gold": ["fed", "federal reserve", "rate decision", "interest rate", "cpi", "nfp", "geopolitical"],
+        "forex": ["rate decision", "ecb", "fed", "cpi", "employment", "nfp"],
+        "bitcoin": ["sec", "etf", "regulation", "fed", "rate"],
+        "ethereum": ["sec", "etf", "regulation", "fed"],
+        "crypto": ["sec", "regulation", "fed"]
+    }
+    
+    high_keywords = high_impact_keywords.get(asset_type, ["fed", "rate", "cpi"])
+    impact_score = 0
+    high_impact = False
     
     for item in news_list:
         title = item.get('title', '').lower()
         content = item.get('content', '').lower()
-        combined_text = title + " " + content
-        source = item.get('source', '')
-        impact = 0
-        category = 'neutral'
-        
-        gold_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['gold'])
-        gold_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['gold'])
-        
-        if gold_positive:
-            gold_score += 2
-            impact += 2
-            category = 'positive_gold'
-        elif gold_negative:
-            gold_score -= 2
-            impact -= 2
-            category = 'negative_gold'
-        
-        forex_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['forex'])
-        forex_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['forex'])
-        
-        if forex_positive:
-            forex_score += 2
-            impact += 1
-            if category == 'neutral':
-                category = 'positive_forex'
-        elif forex_negative:
-            forex_score -= 2
-            impact -= 1
-            if category == 'neutral':
-                category = 'negative_forex'
-        
-        eco_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['economy'])
-        eco_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['economy'])
-        
-        if eco_positive:
-            gold_score += 1
-            forex_score += 1
-            impact += 1
-        elif eco_negative:
-            gold_score -= 1
-            forex_score -= 1
-            impact -= 1
-        
-        impact_level = "منخفض"
-        if abs(impact) >= 3:
-            impact_level = "عالٍ"
-            high_impact.append({
-                'title': item.get('title', ''),
-                'source': source,
-                'impact': impact,
-                'category': category
-            })
-        elif abs(impact) >= 1:
-            impact_level = "متوسط"
-        
-        news_analysis.append({
-            'title': item.get('title', ''),
-            'source': source,
-            'category': category,
-            'impact': impact,
-            'impact_level': impact_level,
-            'date': item.get('publishedAt', '')
-        })
+        combined = title + " " + content
+        if any(kw in combined for kw in high_keywords):
+            impact_score += 3
+            high_impact = True
+        elif any(kw in combined for kw in ["forecast", "expect", "inflation", "growth", "employment"]):
+            impact_score += 1
     
-    gold_sentiment = min(100, max(-100, gold_score * 10))
-    forex_sentiment = min(100, max(-100, forex_score * 10))
-    overall_sentiment = (gold_sentiment + forex_sentiment) / 2
-    
-    if overall_sentiment > 30:
-        summary = "📈 الأخبار إيجابية بشكل عام، تدعم الشراء"
-    elif overall_sentiment < -30:
-        summary = "📉 الأخبار سلبية بشكل عام، تدعم البيع"
-    elif high_impact:
-        summary = f"⚠️ أخبار عالية التأثير: {len(high_impact)} خبر"
-    else:
-        summary = "➡️ الأخبار محايدة، لا تأثير كبير"
+    risk_level = "منخفض"
+    if impact_score >= 5:
+        risk_level = "عالٍ"
+    elif impact_score >= 3:
+        risk_level = "متوسط"
     
     return {
-        'gold_sentiment': gold_sentiment,
-        'forex_sentiment': forex_sentiment,
-        'overall_sentiment': overall_sentiment,
-        'high_impact_news': high_impact,
-        'news_analysis': news_analysis,
-        'summary': summary,
-        'count': len(news_list)
+        'impact_score': impact_score,
+        'high_impact': high_impact,
+        'risk_level': risk_level,
+        'summary': f"تأثير الأخبار: {risk_level} (نقاط: {impact_score})"
     }
 
-def get_news_impact_score(news_analysis, symbol=""):
-    if not news_analysis or news_analysis.get('count', 0) == 0:
-        return 0, "لا توجد أخبار"
-    
-    impact_score = 0
-    impact_details = []
-    
-    if "Gold" in symbol or "XAU" in symbol:
-        impact_score = news_analysis.get('gold_sentiment', 0)
-        impact_details.append(f"الذهب: {impact_score:+.0f}")
-    elif any(x in symbol for x in ["EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"]):
-        impact_score = news_analysis.get('forex_sentiment', 0)
-        impact_details.append(f"الفوركس: {impact_score:+.0f}")
-    else:
-        impact_score = news_analysis.get('overall_sentiment', 0)
-        impact_details.append(f"عام: {impact_score:+.0f}")
-    
-    high_impact = news_analysis.get('high_impact_news', [])
-    if high_impact:
-        impact_score -= len(high_impact) * 5
-        impact_details.append(f"أخبار عالية التأثير: -{len(high_impact) * 5}")
-    
-    return impact_score, " | ".join(impact_details)
-
 def display_news_analysis(news_analysis):
-    if not news_analysis or news_analysis.get('count', 0) == 0:
+    if not news_analysis:
         st.info("لا توجد أخبار للتحليل")
         return
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        gold_sent = news_analysis.get('gold_sentiment', 0)
-        color = "🟢" if gold_sent > 0 else ("🔴" if gold_sent < 0 else "🟡")
-        st.metric(f"{color} الذهب", f"{gold_sent:+.0f}")
-    
-    with col2:
-        forex_sent = news_analysis.get('forex_sentiment', 0)
-        color = "🟢" if forex_sent > 0 else ("🔴" if forex_sent < 0 else "🟡")
-        st.metric(f"{color} الفوركس", f"{forex_sent:+.0f}")
-    
-    with col3:
-        overall = news_analysis.get('overall_sentiment', 0)
-        color = "🟢" if overall > 0 else ("🔴" if overall < 0 else "🟡")
-        st.metric(f"{color} الإجمالي", f"{overall:+.0f}")
-    
-    st.info(news_analysis.get('summary', ''))
-    
-    if news_analysis.get('news_analysis'):
-        st.markdown("#### 📰 تحليل الأخبار:")
-        for item in news_analysis['news_analysis'][:5]:
-            impact = item.get('impact', 0)
-            impact_level = item.get('impact_level', '')
-            if impact_level == "عالٍ":
-                icon = "🔴"
-            elif impact_level == "متوسط":
-                icon = "🟡"
-            else:
-                icon = "🟢"
-            
-            st.markdown(f"""
-            <div class="news-card">
-                <div class="news-title">
-                    {icon} {item.get('title', '')[:100]}...
-                </div>
-                <div class="news-date">
-                    {item.get('source', '')} | التأثير: {impact_level} ({impact:+.0f}) | {item.get('date', '')}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+    st.info(f"📊 {news_analysis['summary']}")
 
 def display_economic_events(events):
     if not events:
@@ -1191,7 +1014,7 @@ def display_economic_events(events):
         """, unsafe_allow_html=True)
 
 # ==========================================
-# دوال جلب البيانات الأساسية
+# دوال جلب البيانات الأساسية (yfinance)
 # ==========================================
 
 @st.cache_data(ttl=5)
@@ -1206,7 +1029,7 @@ def get_spot_price(symbol="GC=F"):
                 price = float(data.get('price', 0))
                 change = float(data.get('change_percent', 0))
                 return price, change
-        except Exception as e:
+        except:
             pass
     
     if symbol == "SI=F" and GOLD_API_KEY:
@@ -1260,7 +1083,7 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=5):
                 if not df.empty and len(df) > 10:
                     df.columns = [col.lower() for col in df.columns]
                     return df
-            except Exception as e:
+            except:
                 continue
         if attempt < max_retries - 1:
             time.sleep(3)
@@ -1321,7 +1144,7 @@ def get_currency_strength():
                         changes.append(change)
                     else:
                         changes.append(-change)
-            except Exception as e:
+            except:
                 continue
         if changes:
             strength[currency] = round(sum(changes) / len(changes), 2)
@@ -1339,7 +1162,6 @@ def get_correlation_matrix(pairs):
                 correlation_data[pair] = df['close']
         except:
             continue
-    
     if correlation_data:
         df_corr = pd.DataFrame(correlation_data)
         return df_corr.corr()
@@ -1358,114 +1180,10 @@ def get_pair_correlation(symbol1, symbol2):
     return None
 
 # ==========================================
-# نظام القرار الهرمي الجديد (Black Pyramid Hierarchy)
+# نظام القرار الهرمي (Black Pyramid Hierarchy)
 # ==========================================
 
-def get_asset_type_from_symbol(symbol_name):
-    """تحديد نوع الأصل لتصفية الأخبار"""
-    if "Gold" in symbol_name or "XAU" in symbol_name:
-        return "gold"
-    elif "Silver" in symbol_name or "XAG" in symbol_name:
-        return "silver"
-    elif "BTC" in symbol_name or "Bitcoin" in symbol_name:
-        return "bitcoin"
-    elif "ETH" in symbol_name or "Ethereum" in symbol_name:
-        return "ethereum"
-    elif any(x in symbol_name for x in ["EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"]):
-        return "forex"
-    else:
-        return "crypto"
-
-def get_asset_specific_news(news_list, asset_type):
-    """
-    تصفية الأخبار حسب نوع الأصل
-    """
-    if not news_list:
-        return []
-    
-    filtered_news = []
-    
-    # كلمات مفتاحية خاصة بكل أصل
-    asset_keywords = {
-        "gold": ["gold", "federal reserve", "fed", "interest rate", "cpi", "nfp", "inflation", "dollar", "treasury", "geopolitical", "xau"],
-        "silver": ["silver", "xag", "federal reserve", "fed", "interest rate", "inflation", "dollar"],
-        "bitcoin": ["bitcoin", "btc", "etf", "regulation", "sec", "crypto", "fed", "institutional", "exchange"],
-        "ethereum": ["ethereum", "eth", "etf", "regulation", "sec", "crypto", "fed"],
-        "forex": ["ecb", "eurozone", "cpi", "nfp", "pce", "fed", "employment", "dollar", "euro", "pound", "yen", "swiss", "aud", "nzd", "cad"],
-        "crypto": ["bitcoin", "ethereum", "crypto", "etf", "regulation", "sec", "exchange", "fed"]
-    }
-    
-    keywords = asset_keywords.get(asset_type, [])
-    
-    for item in news_list:
-        title = item.get('title', '').lower()
-        content = item.get('content', '').lower()
-        combined = title + " " + content
-        
-        # التحقق من وجود كلمة مفتاحية
-        if any(kw in combined for kw in keywords):
-            filtered_news.append(item)
-        # إذا كان الخبر عاماً لكنه عالي التأثير، نضيفه
-        elif any(kw in combined for kw in ["fed", "federal reserve", "rate", "cpi", "nfp"]):
-            filtered_news.append(item)
-    
-    return filtered_news
-
-def analyze_asset_news(news_list, asset_type):
-    """
-    تحليل الأخبار الخاصة بالأصل
-    """
-    if not news_list:
-        return {
-            'impact_score': 0,
-            'high_impact': False,
-            'summary': "لا توجد أخبار خاصة بالأصل"
-        }
-    
-    # كلمات مفتاحية عالية التأثير
-    high_impact_keywords = {
-        "gold": ["fed", "federal reserve", "rate decision", "interest rate", "cpi", "nfp", "geopolitical"],
-        "forex": ["rate decision", "ecb", "fed", "cpi", "employment", "nfp"],
-        "bitcoin": ["sec", "etf", "regulation", "fed", "rate"],
-        "ethereum": ["sec", "etf", "regulation", "fed"],
-        "crypto": ["sec", "regulation", "fed"]
-    }
-    
-    high_keywords = high_impact_keywords.get(asset_type, ["fed", "rate", "cpi"])
-    
-    impact_score = 0
-    high_impact = False
-    
-    for item in news_list:
-        title = item.get('title', '').lower()
-        content = item.get('content', '').lower()
-        combined = title + " " + content
-        
-        # تحليل التأثير
-        if any(kw in combined for kw in high_keywords):
-            impact_score += 3
-            high_impact = True
-        elif any(kw in combined for kw in ["forecast", "expect", "inflation", "growth", "employment"]):
-            impact_score += 1
-    
-    # تحديد مستوى الخطر
-    risk_level = "منخفض"
-    if impact_score >= 5:
-        risk_level = "عالٍ"
-    elif impact_score >= 3:
-        risk_level = "متوسط"
-    
-    return {
-        'impact_score': impact_score,
-        'high_impact': high_impact,
-        'risk_level': risk_level,
-        'summary': f"تأثير الأخبار: {risk_level} (نقاط: {impact_score})"
-    }
-
 def analyze_market_regime(df_4h, df_1h, df_15m, symbol_name=""):
-    """
-    تحليل حالة السوق (الطبقة الأولى)
-    """
     if df_4h is None or len(df_4h) < 50:
         return {
             'regime': 'UNKNOWN',
@@ -1475,60 +1193,61 @@ def analyze_market_regime(df_4h, df_1h, df_15m, symbol_name=""):
             'summary': 'بيانات غير كافية'
         }
     
-    # حساب المؤشرات
-    adx_4h = calc_adx(df_4h)[0].iloc[-1]
-    rsi_4h = calc_rsi(df_4h['close']).iloc[-1]
-    bb_4h = calc_bollinger_bands(df_4h['close'])
-    bb_width = (bb_4h[0].iloc[-1] - bb_4h[2].iloc[-1]) / bb_4h[1].iloc[-1]
-    atr_4h = calc_atr(df_4h).iloc[-1]
-    atr_avg = calc_atr(df_4h).iloc[-50:].mean()
-    
-    # تحديد الاتجاه
-    ema50 = df_4h['close'].ewm(span=50).mean().iloc[-1]
-    ema200 = df_4h['close'].ewm(span=200).mean().iloc[-1]
-    price = df_4h['close'].iloc[-1]
-    
-    if price > ema50 and price > ema200 and rsi_4h > 50:
-        trend = "BULLISH"
-    elif price < ema50 and price < ema200 and rsi_4h < 50:
-        trend = "BEARISH"
-    else:
-        trend = "NEUTRAL"
-    
-    # تحديد حالة التقلب
-    volatility = "MEDIUM"
-    if atr_4h > atr_avg * 1.5:
-        volatility = "HIGH"
-    elif atr_4h < atr_avg * 0.7:
-        volatility = "LOW"
-    
-    # تحديد الانكماش
-    compression = False
-    if bb_width < 0.05:  # نطاق ضيق
-        compression = True
-    
-    # تحديد نوع السوق
-    if adx_4h > 25 and trend != "NEUTRAL":
-        regime = "TRENDING"
-    elif adx_4h < 25:
-        regime = "RANGING"
-    else:
-        regime = "MIXED"
-    
-    return {
-        'regime': regime,
-        'trend': trend,
-        'volatility': volatility,
-        'compression': compression,
-        'adx': adx_4h,
-        'rsi': rsi_4h,
-        'summary': f"السوق {regime}، اتجاه {trend}، تقلب {volatility}"
-    }
+    try:
+        adx_4h = calc_adx(df_4h)[0].iloc[-1]
+        rsi_4h = calc_rsi(df_4h['close']).iloc[-1]
+        bb_4h = calc_bollinger_bands(df_4h['close'])
+        bb_width = (bb_4h[0].iloc[-1] - bb_4h[2].iloc[-1]) / bb_4h[1].iloc[-1] if bb_4h[1].iloc[-1] != 0 else 0
+        atr_4h = calc_atr(df_4h).iloc[-1]
+        atr_avg = calc_atr(df_4h).iloc[-50:].mean()
+        
+        ema50 = df_4h['close'].ewm(span=50).mean().iloc[-1]
+        ema200 = df_4h['close'].ewm(span=200).mean().iloc[-1]
+        price = df_4h['close'].iloc[-1]
+        
+        if price > ema50 and price > ema200 and rsi_4h > 50:
+            trend = "BULLISH"
+        elif price < ema50 and price < ema200 and rsi_4h < 50:
+            trend = "BEARISH"
+        else:
+            trend = "NEUTRAL"
+        
+        volatility = "MEDIUM"
+        if atr_4h > atr_avg * 1.5:
+            volatility = "HIGH"
+        elif atr_4h < atr_avg * 0.7:
+            volatility = "LOW"
+        
+        compression = False
+        if bb_width < 0.05:
+            compression = True
+        
+        if adx_4h > 25 and trend != "NEUTRAL":
+            regime = "TRENDING"
+        elif adx_4h < 25:
+            regime = "RANGING"
+        else:
+            regime = "MIXED"
+        
+        return {
+            'regime': regime,
+            'trend': trend,
+            'volatility': volatility,
+            'compression': compression,
+            'adx': adx_4h,
+            'rsi': rsi_4h,
+            'summary': f"السوق {regime}، اتجاه {trend}، تقلب {volatility}"
+        }
+    except Exception as e:
+        return {
+            'regime': 'UNKNOWN',
+            'trend': 'NEUTRAL',
+            'volatility': 'LOW',
+            'compression': False,
+            'summary': f'خطأ في التحليل: {str(e)}'
+        }
 
 def analyze_trend_4h(df_4h, symbol_name=""):
-    """
-    تحليل الطبقة الثانية: الاتجاه الرئيسي 4H
-    """
     if df_4h is None or len(df_4h) < 50:
         return {
             'bias': 'NEUTRAL',
@@ -1536,188 +1255,191 @@ def analyze_trend_4h(df_4h, symbol_name=""):
             'summary': 'بيانات غير كافية'
         }
     
-    # المؤشرات الأساسية
-    ema50 = df_4h['close'].ewm(span=50).mean().iloc[-1]
-    ema200 = df_4h['close'].ewm(span=200).mean().iloc[-1]
-    price = df_4h['close'].iloc[-1]
-    rsi = calc_rsi(df_4h['close']).iloc[-1]
-    
-    # تحديد الاتجاه
-    if price > ema50 and price > ema200 and rsi > 50:
-        bias = "BULLISH"
-        strength = min(100, 50 + (rsi - 50) * 2)
-    elif price < ema50 and price < ema200 and rsi < 50:
-        bias = "BEARISH"
-        strength = min(100, 50 + (50 - rsi) * 2)
-    else:
-        bias = "NEUTRAL"
-        strength = 50
-    
-    return {
-        'bias': bias,
-        'strength': strength,
-        'price': price,
-        'ema50': ema50,
-        'ema200': ema200,
-        'rsi': rsi,
-        'summary': f"4H: {bias} (القوة: {strength:.0f}%)"
-    }
+    try:
+        ema50 = df_4h['close'].ewm(span=50).mean().iloc[-1]
+        ema200 = df_4h['close'].ewm(span=200).mean().iloc[-1]
+        price = df_4h['close'].iloc[-1]
+        rsi = calc_rsi(df_4h['close']).iloc[-1]
+        
+        if price > ema50 and price > ema200 and rsi > 50:
+            bias = "BULLISH"
+            strength = min(100, 50 + (rsi - 50) * 2)
+        elif price < ema50 and price < ema200 and rsi < 50:
+            bias = "BEARISH"
+            strength = min(100, 50 + (50 - rsi) * 2)
+        else:
+            bias = "NEUTRAL"
+            strength = 50
+        
+        return {
+            'bias': bias,
+            'strength': strength,
+            'price': price,
+            'ema50': ema50,
+            'ema200': ema200,
+            'rsi': rsi,
+            'summary': f"4H: {bias} (القوة: {strength:.0f}%)"
+        }
+    except:
+        return {'bias': 'NEUTRAL', 'strength': 0, 'summary': 'خطأ في التحليل'}
 
 def analyze_confirmation_1h(df_1h, symbol_name=""):
-    """
-    تحليل الطبقة الثالثة: تأكيد 1H
-    """
     if df_1h is None or len(df_1h) < 50:
         return {
             'confirmed': False,
             'bias': 'NEUTRAL',
             'score': 0,
+            'details': ['بيانات غير كافية'],
             'summary': 'بيانات غير كافية'
         }
     
     score = 0
     details = []
     
-    # EMA
-    ema50 = df_1h['close'].ewm(span=50).mean().iloc[-1]
-    ema200 = df_1h['close'].ewm(span=200).mean().iloc[-1]
-    price = df_1h['close'].iloc[-1]
-    
-    if price > ema50 and price > ema200:
-        score += 2
-        details.append("EMA: صاعد")
-    elif price < ema50 and price < ema200:
-        score -= 2
-        details.append("EMA: هابط")
-    else:
-        details.append("EMA: محايد")
-    
-    # MACD
-    macd, signal, hist = calc_macd(df_1h['close'])
-    if macd.iloc[-1] > signal.iloc[-1] and macd.iloc[-1] > 0:
-        score += 2
-        details.append("MACD: إيجابي")
-    elif macd.iloc[-1] < signal.iloc[-1] and macd.iloc[-1] < 0:
-        score -= 2
-        details.append("MACD: سلبي")
-    else:
-        details.append("MACD: محايد")
-    
-    # ADX + DI
-    adx, plus_di, minus_di = calc_adx(df_1h)
-    adx_val = adx.iloc[-1]
-    plus = plus_di.iloc[-1]
-    minus = minus_di.iloc[-1]
-    
-    if adx_val > 25:
-        if plus > minus:
+    try:
+        ema50 = df_1h['close'].ewm(span=50).mean().iloc[-1]
+        ema200 = df_1h['close'].ewm(span=200).mean().iloc[-1]
+        price = df_1h['close'].iloc[-1]
+        
+        if price > ema50 and price > ema200:
             score += 2
-            details.append(f"ADX: قوي صاعد ({adx_val:.0f})")
-        else:
+            details.append("EMA: صاعد")
+        elif price < ema50 and price < ema200:
             score -= 2
-            details.append(f"ADX: قوي هابط ({adx_val:.0f})")
-    else:
-        details.append(f"ADX: ضعيف ({adx_val:.0f})")
-    
-    # SMC Analysis
-    df_smc = analyze_smc_ict(df_1h)
-    if df_smc['bos_bullish'].iloc[-1] or df_smc['mss_bullish'].iloc[-1]:
-        score += 1
-        details.append("SMC: BOS/MSS صاعد")
-    elif df_smc['bos_bearish'].iloc[-1] or df_smc['mss_bearish'].iloc[-1]:
-        score -= 1
-        details.append("SMC: BOS/MSS هابط")
-    
-    # تحديد النتيجة
-    if score >= 4:
-        bias = "BULLISH"
-        confirmed = True
-    elif score <= -4:
-        bias = "BEARISH"
-        confirmed = True
-    else:
-        bias = "NEUTRAL"
-        confirmed = False
-    
-    return {
-        'confirmed': confirmed,
-        'bias': bias,
-        'score': score,
-        'details': details,
-        'summary': f"1H: {bias} (نقاط: {score})"
-    }
+            details.append("EMA: هابط")
+        else:
+            details.append("EMA: محايد")
+        
+        macd, signal, hist = calc_macd(df_1h['close'])
+        if macd.iloc[-1] > signal.iloc[-1] and macd.iloc[-1] > 0:
+            score += 2
+            details.append("MACD: إيجابي")
+        elif macd.iloc[-1] < signal.iloc[-1] and macd.iloc[-1] < 0:
+            score -= 2
+            details.append("MACD: سلبي")
+        else:
+            details.append("MACD: محايد")
+        
+        adx, plus_di, minus_di = calc_adx(df_1h)
+        adx_val = adx.iloc[-1]
+        plus = plus_di.iloc[-1]
+        minus = minus_di.iloc[-1]
+        
+        if adx_val > 25:
+            if plus > minus:
+                score += 2
+                details.append(f"ADX: قوي صاعد ({adx_val:.0f})")
+            else:
+                score -= 2
+                details.append(f"ADX: قوي هابط ({adx_val:.0f})")
+        else:
+            details.append(f"ADX: ضعيف ({adx_val:.0f})")
+        
+        try:
+            df_smc = analyze_smc_ict(df_1h)
+            if df_smc['bos_bullish'].iloc[-1] or df_smc['mss_bullish'].iloc[-1]:
+                score += 1
+                details.append("SMC: BOS/MSS صاعد")
+            elif df_smc['bos_bearish'].iloc[-1] or df_smc['mss_bearish'].iloc[-1]:
+                score -= 1
+                details.append("SMC: BOS/MSS هابط")
+        except:
+            details.append("SMC: غير متاح")
+        
+        if score >= 4:
+            bias = "BULLISH"
+            confirmed = True
+        elif score <= -4:
+            bias = "BEARISH"
+            confirmed = True
+        else:
+            bias = "NEUTRAL"
+            confirmed = False
+        
+        return {
+            'confirmed': confirmed,
+            'bias': bias,
+            'score': score,
+            'details': details,
+            'summary': f"1H: {bias} (نقاط: {score})"
+        }
+    except Exception as e:
+        return {
+            'confirmed': False,
+            'bias': 'NEUTRAL',
+            'score': 0,
+            'details': [f'خطأ: {str(e)}'],
+            'summary': f'خطأ في التحليل'
+        }
 
 def analyze_trigger_15m(df_15m, symbol_name=""):
-    """
-    تحليل الطبقة الرابعة: توقيت الدخول 15M
-    """
     if df_15m is None or len(df_15m) < 30:
         return {
             'trigger': 'NEUTRAL',
             'has_trigger': False,
-            'details': [],
+            'score': 0,
+            'details': ['بيانات غير كافية'],
             'summary': 'بيانات غير كافية'
         }
     
     trigger_details = []
     trigger_score = 0
     
-    # SMC Analysis
-    df_smc = analyze_smc_ict(df_15m)
-    last_smc = df_smc.iloc[-1]
-    
-    # Liquidity Sweep
-    if last_smc.get('liquidity_sweep_bullish', False):
-        trigger_score += 2
-        trigger_details.append("Liquidity Sweep صاعد")
-    elif last_smc.get('liquidity_sweep_bearish', False):
-        trigger_score -= 2
-        trigger_details.append("Liquidity Sweep هابط")
-    
-    # BOS
-    if last_smc.get('bos_bullish', False):
-        trigger_score += 2
-        trigger_details.append("BOS صاعد")
-    elif last_smc.get('bos_bearish', False):
-        trigger_score -= 2
-        trigger_details.append("BOS هابط")
-    
-    # MSS
-    if last_smc.get('mss_bullish', False):
-        trigger_score += 2
-        trigger_details.append("MSS صاعد")
-    elif last_smc.get('mss_bearish', False):
-        trigger_score -= 2
-        trigger_details.append("MSS هابط")
-    
-    # FVG
-    if last_smc.get('fvg_bullish', False):
-        trigger_score += 1
-        trigger_details.append("FVG صاعد")
-    elif last_smc.get('fvg_bearish', False):
-        trigger_score -= 1
-        trigger_details.append("FVG هابط")
-    
-    # Order Block
-    if last_smc.get('order_block_bullish', False):
-        trigger_score += 1
-        trigger_details.append("Order Block شراء")
-    elif last_smc.get('order_block_bearish', False):
-        trigger_score -= 1
-        trigger_details.append("Order Block بيع")
-    
-    # Candlestick Confirmation
-    candle_patterns = detect_candlestick_patterns(df_15m)
-    if candle_patterns:
-        for cp in candle_patterns:
-            if cp['direction'] == 'BULLISH' and cp['score'] >= 3:
+    try:
+        df_smc = analyze_smc_ict(df_15m)
+        if len(df_smc) > 0:
+            last_smc = df_smc.iloc[-1]
+            
+            if last_smc.get('liquidity_sweep_bullish', False):
+                trigger_score += 2
+                trigger_details.append("Liquidity Sweep صاعد")
+            elif last_smc.get('liquidity_sweep_bearish', False):
+                trigger_score -= 2
+                trigger_details.append("Liquidity Sweep هابط")
+            
+            if last_smc.get('bos_bullish', False):
+                trigger_score += 2
+                trigger_details.append("BOS صاعد")
+            elif last_smc.get('bos_bearish', False):
+                trigger_score -= 2
+                trigger_details.append("BOS هابط")
+            
+            if last_smc.get('mss_bullish', False):
+                trigger_score += 2
+                trigger_details.append("MSS صاعد")
+            elif last_smc.get('mss_bearish', False):
+                trigger_score -= 2
+                trigger_details.append("MSS هابط")
+            
+            if last_smc.get('fvg_bullish', False):
                 trigger_score += 1
-                trigger_details.append(f"شمعة: {cp['pattern']}")
-            elif cp['direction'] == 'BEARISH' and cp['score'] >= 3:
+                trigger_details.append("FVG صاعد")
+            elif last_smc.get('fvg_bearish', False):
                 trigger_score -= 1
-                trigger_details.append(f"شمعة: {cp['pattern']}")
+                trigger_details.append("FVG هابط")
+            
+            if last_smc.get('order_block_bullish', False):
+                trigger_score += 1
+                trigger_details.append("Order Block شراء")
+            elif last_smc.get('order_block_bearish', False):
+                trigger_score -= 1
+                trigger_details.append("Order Block بيع")
+    except Exception as e:
+        trigger_details.append(f"SMC: خطأ - {str(e)}")
     
-    # تحديد الـ Trigger
+    try:
+        candle_patterns = detect_candlestick_patterns(df_15m)
+        if candle_patterns:
+            for cp in candle_patterns:
+                if cp['direction'] == 'BULLISH' and cp['score'] >= 3:
+                    trigger_score += 1
+                    trigger_details.append(f"شمعة: {cp['pattern']}")
+                elif cp['direction'] == 'BEARISH' and cp['score'] >= 3:
+                    trigger_score -= 1
+                    trigger_details.append(f"شمعة: {cp['pattern']}")
+    except:
+        pass
+    
     if trigger_score >= 3:
         trigger = "BULLISH"
         has_trigger = True
@@ -1737,69 +1459,64 @@ def analyze_trigger_15m(df_15m, symbol_name=""):
     }
 
 def analyze_price_location(df, current_price, symbol_name=""):
-    """
-    تحليل الطبقة الخامسة: موقع السعر
-    """
     if df is None or len(df) < 100:
         return {
             'location': 'NEUTRAL',
             'score': 0,
-            'details': [],
+            'details': ['بيانات غير كافية'],
             'summary': 'بيانات غير كافية'
         }
     
     score = 0
     details = []
     
-    # تحديد أعلى وأدنى سعر (Swing High/Low)
-    recent_high = df['high'].iloc[-50:].max()
-    recent_low = df['low'].iloc[-50:].min()
-    price_range = recent_high - recent_low
-    
-    # تحديد منطقة السعر
-    if price_range > 0:
-        price_percent = (current_price - recent_low) / price_range
+    try:
+        recent_high = df['high'].iloc[-50:].max()
+        recent_low = df['low'].iloc[-50:].min()
+        price_range = recent_high - recent_low
         
-        # Premium / Discount
-        if price_percent >= 0.618:
-            score -= 1
-            details.append("منطقة Premium (ذروة)")
-            location = "PREMIUM"
-        elif price_percent <= 0.382:
-            score += 1
-            details.append("منطقة Discount (قاع)")
-            location = "DISCOUNT"
-        else:
-            location = "MIDDLE"
-            details.append("منتصف النطاق")
-        
-        # Fibonacci
-        fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
-        if fib_levels:
-            if current_price <= fib_levels.get('fib_382', current_price):
-                score += 1
-                details.append("فيبوناتشي: تحت 0.382 (دعم)")
-            elif current_price >= fib_levels.get('fib_618', current_price):
+        if price_range > 0:
+            price_percent = (current_price - recent_low) / price_range
+            
+            if price_percent >= 0.618:
                 score -= 1
-                details.append("فيبوناتشي: فوق 0.618 (مقاومة)")
-    
-    # Bollinger Bands
-    bb_upper, bb_middle, bb_lower = calc_bollinger_bands(df['close'])
-    if not pd.isna(bb_upper.iloc[-1]) and not pd.isna(bb_lower.iloc[-1]):
-        if current_price <= bb_lower.iloc[-1]:
+                details.append("منطقة Premium (ذروة)")
+                location = "PREMIUM"
+            elif price_percent <= 0.382:
+                score += 1
+                details.append("منطقة Discount (قاع)")
+                location = "DISCOUNT"
+            else:
+                location = "MIDDLE"
+                details.append("منتصف النطاق")
+            
+            fib_levels = calc_fibonacci_levels(recent_high, recent_low, current_price)
+            if fib_levels:
+                if current_price <= fib_levels.get('fib_382', current_price):
+                    score += 1
+                    details.append("فيبوناتشي: تحت 0.382 (دعم)")
+                elif current_price >= fib_levels.get('fib_618', current_price):
+                    score -= 1
+                    details.append("فيبوناتشي: فوق 0.618 (مقاومة)")
+        
+        bb_upper, bb_middle, bb_lower = calc_bollinger_bands(df['close'])
+        if not pd.isna(bb_upper.iloc[-1]) and not pd.isna(bb_lower.iloc[-1]):
+            if current_price <= bb_lower.iloc[-1]:
+                score += 1
+                details.append("Bollinger: قرب الحد السفلي")
+            elif current_price >= bb_upper.iloc[-1]:
+                score -= 1
+                details.append("Bollinger: قرب الحد الأعلى")
+        
+        if current_price <= recent_low * 1.01:
             score += 1
-            details.append("Bollinger: قرب الحد السفلي")
-        elif current_price >= bb_upper.iloc[-1]:
+            details.append("قرب مستوى دعم")
+        elif current_price >= recent_high * 0.99:
             score -= 1
-            details.append("Bollinger: قرب الحد الأعلى")
-    
-    # Support/Resistance
-    if current_price <= recent_low * 1.01:
-        score += 1
-        details.append("قرب مستوى دعم")
-    elif current_price >= recent_high * 0.99:
-        score -= 1
-        details.append("قرب مستوى مقاومة")
+            details.append("قرب مستوى مقاومة")
+    except:
+        location = 'NEUTRAL'
+        details.append("خطأ في تحليل الموقع")
     
     return {
         'location': location if 'location' in locals() else 'NEUTRAL',
@@ -1808,64 +1525,7 @@ def analyze_price_location(df, current_price, symbol_name=""):
         'summary': f"موقع السعر: {location if 'location' in locals() else 'NEUTRAL'} (نقاط: {score})"
     }
 
-def calculate_risk_management(entry_price, stop_loss, account_balance=100000, risk_percent=1.5, asset_type="forex"):
-    """
-    حساب إدارة المخاطر
-    """
-    if stop_loss is None or entry_price is None:
-        return None
-    
-    risk_amount = abs(entry_price - stop_loss)
-    risk_per_trade = account_balance * (risk_percent / 100)
-    
-    # حساب حجم الصفقة حسب نوع الأصل
-    if asset_type == "forex":
-        # الفوركس - النقطة تساوي 0.0001
-        pip_value = 0.0001
-        pip_distance = risk_amount / pip_value if pip_value > 0 else 0
-        contract_size = risk_per_trade / (pip_distance * 10) if pip_distance > 0 else 0.01
-        lot_size = round(contract_size, 2)
-    elif asset_type in ["gold", "silver"]:
-        # الذهب - النقطة تساوي 0.1
-        pip_value = 0.1
-        pip_distance = risk_amount / pip_value if pip_value > 0 else 0
-        contract_size = risk_per_trade / (pip_distance * 10) if pip_distance > 0 else 0.01
-        lot_size = round(contract_size, 2)
-    else:
-        # الكريبتو
-        lot_size = risk_per_trade / risk_amount if risk_amount > 0 else 0.01
-        lot_size = round(lot_size, 4)
-    
-    # تحديد الحد الأدنى
-    min_lot = 0.01 if asset_type in ["forex", "gold", "silver"] else 0.0001
-    lot_size = max(lot_size, min_lot)
-    
-    # حساب الأهداف
-    risk = abs(entry_price - stop_loss)
-    targets = {
-        'tp1': entry_price + (risk * 1.5) if entry_price > stop_loss else entry_price - (risk * 1.5),
-        'tp2': entry_price + (risk * 2.5) if entry_price > stop_loss else entry_price - (risk * 2.5),
-        'tp3': entry_price + (risk * 4.0) if entry_price > stop_loss else entry_price - (risk * 4.0)
-    }
-    
-    return {
-        'lot_size': lot_size,
-        'risk_per_trade': risk_per_trade,
-        'risk_amount': risk_amount,
-        'risk_percent': risk_percent,
-        'targets': targets,
-        'r_multiple': 1.5,
-        'summary': f"اللوت: {lot_size}, المخاطرة: ${risk_per_trade:.2f} ({risk_percent}%)"
-    }
-
-# ==========================================
-# نظام القرار النهائي (Hierarchical Decision System)
-# ==========================================
-
 def generate_hierarchical_signal(df_4h, df_1h, df_15m, current_price, symbol_name="", symbol=""):
-    """
-    توليد الإشارة بناءً على النظام الهرمي
-    """
     # ===== التحقق من البيانات =====
     if df_4h is None or df_1h is None or df_15m is None:
         return "WAIT", 0, {"reason": "بيانات غير كافية"}, None, None, None, None
@@ -1875,20 +1535,16 @@ def generate_hierarchical_signal(df_4h, df_1h, df_15m, current_price, symbol_nam
     
     # ===== الطبقة الأولى: حالة السوق =====
     regime = analyze_market_regime(df_4h, df_1h, df_15m, symbol_name)
-    
-    # إذا كان السوق مضغوطاً، انتظار
     if regime['compression']:
         return "WAIT", 0, {"reason": f"انكماش سعري - {regime['summary']}"}, None, None, None, None
     
     # ===== الطبقة الثانية: اتجاه 4H =====
     trend_4h = analyze_trend_4h(df_4h, symbol_name)
-    
     if trend_4h['bias'] == 'NEUTRAL':
         return "WAIT", 0, {"reason": f"اتجاه 4H محايد - {trend_4h['summary']}"}, None, None, None, None
     
     # ===== الطبقة الثالثة: تأكيد 1H =====
     confirm_1h = analyze_confirmation_1h(df_1h, symbol_name)
-    
     if not confirm_1h['confirmed']:
         return "WAIT", 0, {"reason": f"1H غير مؤكد - {confirm_1h['summary']}"}, None, None, None, None
     
@@ -1897,7 +1553,6 @@ def generate_hierarchical_signal(df_4h, df_1h, df_15m, current_price, symbol_nam
     
     # ===== الطبقة الرابعة: Trigger 15M =====
     trigger_15m = analyze_trigger_15m(df_15m, symbol_name)
-    
     if not trigger_15m['has_trigger']:
         return "WAIT", 0, {"reason": f"لا يوجد Trigger على 15M - {trigger_15m['summary']}"}, None, None, None, None
     
@@ -1906,11 +1561,9 @@ def generate_hierarchical_signal(df_4h, df_1h, df_15m, current_price, symbol_nam
     
     # ===== الطبقة الخامسة: موقع السعر =====
     price_location = analyze_price_location(df_1h, current_price, symbol_name)
-    
-    # التحقق من موقع السعر
-    if price_location['location'] == 'PREMIUM' and trend_4h['bias'] == 'BUY':
+    if price_location['location'] == 'PREMIUM' and trend_4h['bias'] == 'BULLISH':
         return "WAIT", 0, {"reason": f"السعر في Premium مع اتجاه شراء - {price_location['summary']}"}, None, None, None, None
-    elif price_location['location'] == 'DISCOUNT' and trend_4h['bias'] == 'SELL':
+    elif price_location['location'] == 'DISCOUNT' and trend_4h['bias'] == 'BEARISH':
         return "WAIT", 0, {"reason": f"السعر في Discount مع اتجاه بيع - {price_location['summary']}"}, None, None, None, None
     
     # ===== الطبقة السادسة: الأخبار =====
@@ -1919,66 +1572,59 @@ def generate_hierarchical_signal(df_4h, df_1h, df_15m, current_price, symbol_nam
     if news:
         asset_news = get_asset_specific_news(news, asset_type)
         news_analysis = analyze_asset_news(asset_news, asset_type)
-        
         if news_analysis['risk_level'] == 'عالٍ':
             return "WAIT", 0, {"reason": f"أخبار عالية التأثير - {news_analysis['summary']}"}, None, None, None, None
     
     # ===== حساب نقاط الثقة =====
     confidence_score = 0
     confidence_details = []
-    
-    # قوة الاتجاه 4H
     confidence_score += trend_4h['strength'] * 0.3
     confidence_details.append(f"4H: {trend_4h['strength']:.0f}%")
-    
-    # تأكيد 1H
     confidence_score += min(100, abs(confirm_1h['score']) * 10) * 0.3
     confidence_details.append(f"1H: {confirm_1h['score']:+d}")
-    
-    # Trigger 15M
     confidence_score += min(100, abs(trigger_15m['score']) * 15) * 0.3
     confidence_details.append(f"15M: {trigger_15m['score']:+d}")
-    
-    # موقع السعر
     confidence_score += max(0, price_location['score']) * 5
     confidence_details.append(f"Price: {price_location['score']:+d}")
-    
-    # الحد الأقصى 100
     confidence = min(100, confidence_score)
     
     # ===== تحديد الإشارة النهائية =====
     signal = trend_4h['bias']
     
     # ===== حساب وقف الخسارة =====
-    # بناءً على هيكل 1H
-    recent_low = df_1h['low'].iloc[-20:].min() if signal == 'BUY' else None
-    recent_high = df_1h['high'].iloc[-20:].max() if signal == 'SELL' else None
-    
-    atr = calc_atr(df_1h).iloc[-1]
-    
-    if signal == 'BUY':
+    if signal == 'BULLISH':
+        recent_low = df_1h['low'].iloc[-20:].min()
+        atr = calc_atr(df_1h).iloc[-1]
         stop_loss = min(recent_low, current_price - atr * 1.5) if recent_low else current_price - atr * 2
     else:
+        recent_high = df_1h['high'].iloc[-20:].max()
+        atr = calc_atr(df_1h).iloc[-1]
         stop_loss = max(recent_high, current_price + atr * 1.5) if recent_high else current_price + atr * 2
     
     entry_price = current_price
     
     # ===== حساب الأهداف =====
-    risk = abs(entry_price - stop_loss)
-    if signal == 'BUY':
-        targets = {
-            'tp1': entry_price + risk * 1.5,
-            'tp2': entry_price + risk * 2.5,
-            'tp3': entry_price + risk * 4.0
-        }
-    else:
-        targets = {
-            'tp1': entry_price - risk * 1.5,
-            'tp2': entry_price - risk * 2.5,
-            'tp3': entry_price - risk * 4.0
-        }
+    targets = {}
+    try:
+        risk = abs(entry_price - stop_loss)
+        if risk > 0:
+            if signal == 'BULLISH':
+                targets = {
+                    'tp1': entry_price + risk * 1.5,
+                    'tp2': entry_price + risk * 2.5,
+                    'tp3': entry_price + risk * 4.0
+                }
+            else:
+                targets = {
+                    'tp1': entry_price - risk * 1.5,
+                    'tp2': entry_price - risk * 2.5,
+                    'tp3': entry_price - risk * 4.0
+                }
+        else:
+            targets = {'tp1': entry_price, 'tp2': entry_price, 'tp3': entry_price}
+    except:
+        targets = {'tp1': current_price, 'tp2': current_price, 'tp3': current_price}
     
-    # ===== معلومات إضافية =====
     extra_info = {
         'regime': regime,
         'trend_4h': trend_4h,
@@ -1995,71 +1641,63 @@ def generate_hierarchical_signal(df_4h, df_1h, df_15m, current_price, symbol_nam
 # ==========================================
 
 def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
-    """
-    الإشارة المتكاملة باستخدام النظام الهرمي
-    """
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
-
-    # ===== الحصول على البيانات للأطر الزمنية المختلفة =====
-    # 4H
-    df_4h = get_historical_data(symbol, period="3mo", interval="4h")
-    # 1H (المستخدمة بالفعل)
-    df_1h = df
-    # 15M
-    df_15m = get_historical_data(symbol, period="5d", interval="15m")
     
-    # ===== نظام القرار الهرمي =====
-    signal, confidence, extra_info, stop_loss, entry_price, targets, _ = generate_hierarchical_signal(
-        df_4h, df_1h, df_15m, current_price, symbol_name, symbol
-    )
+    try:
+        df_4h = get_historical_data(symbol, period="3mo", interval="4h")
+        df_1h = df
+        df_15m = get_historical_data(symbol, period="5d", interval="15m")
+        signal, confidence, extra_info, stop_loss, entry_price, targets, _ = generate_hierarchical_signal(
+            df_4h, df_1h, df_15m, current_price, symbol_name, symbol
+        )
+    except Exception as e:
+        return "WAIT", 0, 0, {'Error': f'خطأ في التحليل الهرمي: {str(e)}'}, [], None, None, None, None
     
-    # ===== الحفاظ على التوافق مع الواجهة الحالية =====
-    if signal == "WAIT":
-        reason = extra_info.get('reason', 'لا توجد إشارة') if extra_info else 'لا توجد إشارة'
-        details = {'Wait_Reason': reason}
-        if extra_info:
-            if 'regime' in extra_info:
-                details['Market_Regime'] = extra_info['regime']['summary']
-            if 'trend_4h' in extra_info:
-                details['4H_Trend'] = extra_info['trend_4h']['summary']
-            if 'confirm_1h' in extra_info:
-                details['1H_Confirm'] = extra_info['confirm_1h']['summary']
-            if 'trigger_15m' in extra_info:
-                details['15M_Trigger'] = extra_info['trigger_15m']['summary']
-            if 'price_location' in extra_info:
-                details['Price_Location'] = extra_info['price_location']['summary']
-        return signal, confidence, 0, details, [], None, None, None, None
+    if signal == "BUY":
+        net_score = min(10, int(confidence // 10) + 2)
+    elif signal == "SELL":
+        net_score = -min(10, int(confidence // 10) + 2)
+    else:
+        net_score = 0
     
-    # ===== بناء التفاصيل =====
     details = {}
-    net_score = confidence // 10
-    
-    if extra_info:
-        if 'regime' in extra_info:
-            details['Market_Regime'] = extra_info['regime']['summary']
-        if 'trend_4h' in extra_info:
-            details['4H_Trend'] = extra_info['trend_4h']['summary']
-        if 'confirm_1h' in extra_info:
-            details['1H_Confirm'] = extra_info['confirm_1h']['summary']
-        if 'trigger_15m' in extra_info:
-            details['15M_Trigger'] = extra_info['trigger_15m']['summary']
-        if 'price_location' in extra_info:
-            details['Price_Location'] = extra_info['price_location']['summary']
-        if 'confidence_details' in extra_info:
+    if extra_info and isinstance(extra_info, dict):
+        if 'regime' in extra_info and extra_info['regime']:
+            details['Market_Regime'] = extra_info['regime'].get('summary', 'غير معروف')
+        if 'trend_4h' in extra_info and extra_info['trend_4h']:
+            details['4H_Trend'] = extra_info['trend_4h'].get('summary', 'غير معروف')
+        if 'confirm_1h' in extra_info and extra_info['confirm_1h']:
+            details['1H_Confirm'] = extra_info['confirm_1h'].get('summary', 'غير معروف')
+        if 'trigger_15m' in extra_info and extra_info['trigger_15m']:
+            details['15M_Trigger'] = extra_info['trigger_15m'].get('summary', 'غير معروف')
+        if 'price_location' in extra_info and extra_info['price_location']:
+            details['Price_Location'] = extra_info['price_location'].get('summary', 'غير معروف')
+        if 'confidence_details' in extra_info and extra_info['confidence_details']:
             details['Confidence_Components'] = " | ".join(extra_info['confidence_details'])
     
-    # ===== الأنماط الهيكلية =====
-    patterns, _ = analyze_chart_patterns(df_1h)
+    if signal == "WAIT":
+        if extra_info and 'reason' in extra_info:
+            details['Wait_Reason'] = extra_info['reason']
+        else:
+            details['Wait_Reason'] = 'لا توجد إشارة'
+        return signal, confidence, 0, details, [], None, None, None, None
     
-    # ===== TBS =====
-    tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df_1h)
-    tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
+    try:
+        patterns, _ = analyze_chart_patterns(df)
+    except:
+        patterns = []
+    
+    try:
+        tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
+        tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
+    except:
+        tbs_info = (None, None, None, None)
     
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# تحليل متعدد الأطر الزمنية (MTF)
+# تحليل متعدد الأطر الزمنية (MTF) - للتوافق
 # ==========================================
 def get_mtf_signal(symbol, current_price):
     timeframes = ['15m', '1h', '4h']
@@ -2148,7 +1786,7 @@ def get_all_signals_with_trades():
     return pd.DataFrame(results)
 
 # ==========================================
-# إدارة الصفقات
+# إدارة الصفقات (TradeManager) - نفس الكود السابق
 # ==========================================
 class TradeManager:
     def __init__(self):
@@ -2227,7 +1865,7 @@ class TradeManager:
         return None
 
 # ==========================================
-# كشف الانعكاس (Reversal)
+# كشف الانعكاس (Reversal) - نفس الكود السابق
 # ==========================================
 def detect_reversal(df, trade):
     if df is None or len(df) < 20:
@@ -2379,7 +2017,6 @@ with st.sidebar:
     
     # ===== مؤشرات العملات =====
     st.markdown("### 💰 قوة العملات")
-    
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔄 تحديث القوة", key="refresh_currency_strength", width='stretch'):
@@ -2394,7 +2031,6 @@ with st.sidebar:
     if st.session_state.currency_strength:
         strength = st.session_state.currency_strength
         sorted_currencies = sorted(strength.items(), key=lambda x: x[1], reverse=True)
-        
         cols = st.columns(4)
         for i, (currency, value) in enumerate(sorted_currencies):
             if i >= 4:
@@ -2545,25 +2181,48 @@ with col_refresh2:
 
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# مؤشرات السوق
-col_btn, col_title = st.columns([1, 5])
-with col_btn:
-    btn_label = "📊 إخفاء" if st.session_state.show_indicators else "📊 إظهار"
-    if st.button(btn_label, key="toggle_indicators", width='stretch'):
-        st.session_state.show_indicators = not st.session_state.show_indicators
-        st.rerun()
-with col_title:
-    st.markdown("### مؤشرات السوق")
-
+# ===== مؤشرات السوق (مع التحقق من وجود الأعمدة) =====
 if st.session_state.show_indicators:
-    cols = st.columns(6)
-    last = df.iloc[-1]
-    cols[0].metric("RSI", f"{last['rsi']:.1f}")
-    cols[1].metric("ATR", f"${last['atr']:.2f}" if "Gold" in selected_pair_name else f"{last['atr']:.4f}")
-    cols[2].metric("ADX", f"{last['adx']:.1f}")
-    cols[3].metric("VWAP", f"${last['vwap']:.2f}" if "Gold" in selected_pair_name else f"{last['vwap']:.4f}")
-    cols[4].metric("MFI", f"{last['mfi']:.1f}")
-    cols[5].metric("MACD Hist", f"{last['macd_histogram']:.4f}")
+    if df is not None and len(df) > 0:
+        required_cols = ['rsi', 'atr', 'adx', 'vwap', 'mfi', 'macd_histogram']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            try:
+                settings = get_indicator_settings(selected_pair_name)
+                if 'rsi' not in df.columns:
+                    df['rsi'] = calc_rsi(df['close'], period=settings['rsi']['period'])
+                if 'atr' not in df.columns:
+                    df['atr'] = calc_atr(df, period=settings['atr_period'])
+                if 'adx' not in df.columns:
+                    adx, _, _ = calc_adx(df, period=settings['adx_period'])
+                    df['adx'] = adx
+                if 'vwap' not in df.columns:
+                    df['vwap'] = calc_vwap(df)
+                if 'mfi' not in df.columns:
+                    df['mfi'] = calc_mfi(df, period=settings['mfi']['period'])
+                if 'macd_histogram' not in df.columns:
+                    _, _, hist = calc_macd(df['close'], 
+                                           fast=settings['macd']['fast'],
+                                           slow=settings['macd']['slow'],
+                                           signal=settings['macd']['signal'])
+                    df['macd_histogram'] = hist
+            except Exception as e:
+                st.warning(f"⚠️ تعذر حساب بعض المؤشرات: {str(e)}")
+        
+        try:
+            cols = st.columns(6)
+            last = df.iloc[-1]
+            cols[0].metric("RSI", f"{last.get('rsi', 0):.1f}")
+            cols[1].metric("ATR", f"${last.get('atr', 0):.2f}" if "Gold" in selected_pair_name else f"{last.get('atr', 0):.4f}")
+            cols[2].metric("ADX", f"{last.get('adx', 0):.1f}")
+            cols[3].metric("VWAP", f"${last.get('vwap', 0):.2f}" if "Gold" in selected_pair_name else f"{last.get('vwap', 0):.4f}")
+            cols[4].metric("MFI", f"{last.get('mfi', 0):.1f}")
+            cols[5].metric("MACD Hist", f"{last.get('macd_histogram', 0):.4f}")
+        except Exception as e:
+            st.warning(f"⚠️ تعذر عرض المؤشرات: {str(e)}")
+    else:
+        st.info("لا توجد بيانات كافية لعرض المؤشرات")
 else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
 
@@ -2592,8 +2251,6 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         risk_per_trade_pct = 1.5
         risk_per_trade = account_balance * (risk_per_trade_pct / 100)
         risk_amount = abs(entry_price - stop_loss)
-        
-        # حساب حجم الصفقة حسب نوع الأصل
         asset_type = get_asset_type_from_symbol(selected_pair_name)
         if asset_type in ["forex"]:
             lot_size = risk_per_trade / (risk_amount * 100) if risk_amount > 0 else 0.01
@@ -2602,7 +2259,6 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         else:
             lot_size = risk_per_trade / risk_amount if risk_amount > 0 else 0.01
         lot_size = round(max(lot_size, 0.01), 2)
-        
         trailing_dist = last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else (3 if "Gold" in selected_pair_name else 0.0003)
         
         trade_data = {
@@ -2696,8 +2352,7 @@ if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_anal
             st.session_state.news_analysis = None
 
 if st.session_state.news_analysis:
-    news_data = st.session_state.news_analysis
-    st.info(f"📊 {news_data['summary']}")
+    display_news_analysis(st.session_state.news_analysis)
 else:
     st.info("اضغط 'تحديث تحليل الأخبار' لعرض التحليل")
 
@@ -2918,7 +2573,6 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=d
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
 
-# BSL/SSL
 if not df_smc['bsl'].isna().all():
     fig.add_hline(y=df_smc['bsl'].iloc[-1], line_dash="dash", line_color="rgba(0,255,0,0.5)", row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=df_smc['bsl'].iloc[-1], text="BSL", showarrow=True, arrowhead=1, row=1, col=1)
@@ -2926,13 +2580,11 @@ if not df_smc['ssl'].isna().all():
     fig.add_hline(y=df_smc['ssl'].iloc[-1], line_dash="dash", line_color="rgba(255,0,0,0.5)", row=1, col=1)
     fig.add_annotation(x=df.index[-1], y=df_smc['ssl'].iloc[-1], text="SSL", showarrow=True, arrowhead=1, row=1, col=1)
 
-# SMC signals
 if df_smc['order_block_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB+", showarrow=True, arrowhead=1, row=1, col=1)
 if df_smc['order_block_bearish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1], text="OB-", showarrow=True, arrowhead=1, row=1, col=1)
 
-# SMR signals
 if df_smc['smr_bullish'].iloc[-1]:
     fig.add_annotation(x=df.index[-1], y=df['close'].iloc[-1] + (5 if "Gold" in selected_pair_name else 0.001), text="SMR ▲", showarrow=True, arrowhead=1, row=1, col=1, font_color="green")
 if df_smc['smr_bearish'].iloc[-1]:
