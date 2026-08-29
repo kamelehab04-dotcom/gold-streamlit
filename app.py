@@ -14,6 +14,8 @@
 # - إدارة TP/Trailing المتقدمة
 # - Reversal متعدد الأدلة
 # - 7 طبقات لاتخاذ القرار
+# - إصلاح NameError: إضافة POSITIVE_KEYWORDS و NEGATIVE_KEYWORDS
+# - تحديث use_container_width → width='stretch'
 # ==========================================
 
 import streamlit as st
@@ -39,6 +41,22 @@ NEWS_API_KEY = "b45e3a2b60d74c1bb1e8ddcdfa513bea"
 ALPHA_VANTAGE_KEY = "017FGHT0JLG80XTG"
 
 # ==========================================
+# كلمات مفتاحية لتحليل المشاعر (مضافة)
+# ==========================================
+POSITIVE_KEYWORDS = [
+    "higher", "increase", "growth", "positive", "strong", "beat", "surplus",
+    "rally", "bullish", "up", "gain", "profit", "support", "stimulus",
+    "cut", "reduce", "lower", "drop", "pullback", "correction", "recovery"
+]
+
+NEGATIVE_KEYWORDS = [
+    "lower", "decrease", "decline", "negative", "weak", "miss", "deficit",
+    "crash", "bearish", "down", "loss", "concern", "fear", "uncertainty",
+    "hike", "raise", "higher rates", "inflation", "recession", "crisis",
+    "war", "conflict", "sanctions", "default"
+]
+
+# ==========================================
 # إعداد الصفحة
 # ==========================================
 st.set_page_config(
@@ -49,7 +67,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🖤 الهوية البصرية (نفسها)
+# 🖤 الهوية البصرية
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -779,7 +797,7 @@ def analyze_news_impact(articles: List, symbol: str) -> Tuple[str, float]:
         high_impact = sum(1 for word in high_impact_words if word in content)
         high_impact_count += high_impact
         
-        # المشاعر
+        # المشاعر (باستخدام POSITIVE_KEYWORDS و NEGATIVE_KEYWORDS المعرفة)
         pos = sum(1 for word in POSITIVE_KEYWORDS if word in content)
         neg = sum(1 for word in NEGATIVE_KEYWORDS if word in content)
         
@@ -915,8 +933,12 @@ def analyze_timeframe(symbol: str, interval: str, settings: Dict) -> Dict:
             trend_details.append("Tenkan < Kijun")
     
     # 2. الزخم (MACD + VRSI)
-    if 'macd' in df.columns and 'macd_signal' in df.columns:
-        if last['macd'] > last['macd_signal']:
+    macd, signal, hist = calc_macd(df['close'])
+    df['macd'] = macd
+    df['macd_signal'] = signal
+    df['macd_histogram'] = hist
+    if not pd.isna(df['macd'].iloc[-1]) and not pd.isna(df['macd_signal'].iloc[-1]):
+        if df['macd'].iloc[-1] > df['macd_signal'].iloc[-1]:
             momentum = 1
         else:
             momentum = -1
@@ -1211,11 +1233,7 @@ def analyze_asset_hierarchical(df: pd.DataFrame, symbol: str, settings: Dict) ->
     if news_impact == "HIGH":
         wait_conditions.append("أخبار عالية التأثير → WAIT")
     
-    # 5. السعر داخل السحابة (Ichimoku)
-    tenkan = tf_4h.get('tenkan', None)
-    kijun = tf_4h.get('kijun', None)
-    # نحتاج لتجاوز هذه المعلومات من تحليل 4H
-    # سنستخدم بيانات 4H من df
+    # 5. السعر داخل السحابة (Ichimoku) على 4H
     df_4h = get_historical_data(symbol, interval='4h')
     if df_4h is not None and len(df_4h) > 50:
         _, _, senkou_a, senkou_b = calc_ichimoku(df_4h)
@@ -1227,8 +1245,6 @@ def analyze_asset_hierarchical(df: pd.DataFrame, symbol: str, settings: Dict) ->
     # 6. 15M لا يعطي Trigger
     if tf_15m_bias == "NEUTRAL":
         wait_conditions.append("15M محايد (لا يوجد Trigger)")
-    
-    # 7. R:R غير كافٍ (سيتم حسابه لاحقاً)
     
     # إذا كان هناك شرط WAIT، نخرج مباشرة
     if wait_conditions:
