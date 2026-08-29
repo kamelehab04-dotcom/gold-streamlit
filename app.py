@@ -1,7 +1,7 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
 # تاريخ التحديث: 2026-08-29
-# المصدر: GoldAPI + yfinance + تحليلات متقدمة + مؤشرات العملات
+# المصدر: GoldAPI + yfinance + تحليلات متقدمة + مؤشرات العملات + التقويم الاقتصادي
 # ==========================================
 
 import streamlit as st
@@ -82,6 +82,9 @@ st.markdown("""
     .currency-card .strong { color: #00ff88; }
     .currency-card .weak { color: #ff4444; }
     .currency-card .neutral { color: #ffaa00; }
+    .event-high { border-left: 4px solid #ff4444 !important; }
+    .event-medium { border-left: 4px solid #ffaa00 !important; }
+    .event-low { border-left: 4px solid #00ff88 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -96,7 +99,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -106,6 +109,7 @@ st.markdown("""
 # ==========================================
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
+ECONOMIC_CALENDAR_API_KEY = "EBdaCkJXtIphxCdiZpW3EWCAb4IKpz8N"
 
 # ==========================================
 # قائمة الأزواج
@@ -187,6 +191,8 @@ if "show_indicators" not in st.session_state:
     st.session_state.show_indicators = True
 if "currency_strength" not in st.session_state:
     st.session_state.currency_strength = None
+if "economic_events" not in st.session_state:
+    st.session_state.economic_events = None
 
 # ==========================================
 # دوال جلب البيانات
@@ -233,6 +239,37 @@ def time_remaining(dt):
     hours = int(diff.total_seconds() // 3600)
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
+
+@st.cache_data(ttl=300)
+def get_economic_calendar():
+    """
+    جلب التقويم الاقتصادي من API
+    """
+    try:
+        url = "https://economic-calendar-api.p.rapidapi.com/calendar"
+        headers = {
+            "x-rapidapi-key": ECONOMIC_CALENDAR_API_KEY,
+            "x-rapidapi-host": "economic-calendar-api.p.rapidapi.com"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            events = []
+            for item in data.get('data', []):
+                events.append({
+                    'country': item.get('country', ''),
+                    'event': item.get('event', ''),
+                    'date': item.get('date', ''),
+                    'time': item.get('time', ''),
+                    'impact': item.get('impact', ''),
+                    'actual': item.get('actual', ''),
+                    'forecast': item.get('forecast', ''),
+                    'previous': item.get('previous', '')
+                })
+            return events
+    except Exception as e:
+        pass
+    return []
 
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
@@ -1170,14 +1207,19 @@ def generate_advanced_signal(df, current_price, symbol=""):
             scores['SELL'] += weights['divergence']
             details['Divergence'] = f"{div_type} (+{weights['divergence']})"
 
-    # تكامل الأنماط الهيكلية مع الشموع
+    # تكامل الأنماط الهيكلية مع الشموع (مصحح)
     if patterns and candle_patterns:
-        last_struct = next((p for p in reversed(patterns) if p['direction'] != 'NEUTRAL'), None)
-        last_candle = next((c for c in reversed(candle_patterns) if c['direction'] != 'NEUTRAL'), None)
-        if last_struct and last_candle and last_struct['direction'] == last_candle['direction']:
-            bonus = weights['patterns'] // 2
-            scores[last_struct['direction']] += bonus
-            details['Confluence'] = f"تطابق {last_struct['pattern']} مع {last_candle['pattern']} (تأكيد مضاعف +{bonus})"
+        try:
+            last_struct = next((p for p in reversed(patterns) if p.get('direction') != 'NEUTRAL'), None)
+            last_candle = next((c for c in reversed(candle_patterns) if c.get('direction') != 'NEUTRAL'), None)
+            if last_struct is not None and last_candle is not None and last_struct.get('direction') == last_candle.get('direction'):
+                bonus = weights['patterns'] // 2
+                direction = last_struct.get('direction')
+                if direction in scores:
+                    scores[direction] += bonus
+                    details['Confluence'] = f"تطابق {last_struct.get('pattern', '')} مع {last_candle.get('pattern', '')} (تأكيد مضاعف +{bonus})"
+        except Exception as e:
+            pass
 
     # كتل الأوامر الطازجة
     is_fresh, fresh_dir = check_fresh_order_block(df_smc)
@@ -1982,6 +2024,57 @@ with st.expander("📝 شرح القرار", expanded=True):
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
+# التقويم الاقتصادي
+# ==========================================
+st.markdown("---")
+st.markdown("### 📅 التقويم الاقتصادي")
+
+if st.button("🔄 تحديث التقويم الاقتصادي", key="refresh_economic_calendar", use_container_width=True):
+    with st.spinner("جارٍ جلب بيانات التقويم..."):
+        st.session_state.economic_events = get_economic_calendar()
+
+if st.session_state.economic_events:
+    events = st.session_state.economic_events
+    df_events = pd.DataFrame(events)
+    
+    # تصفية الأحداث الهامة
+    if not df_events.empty:
+        st.markdown("#### 📊 الأحداث الاقتصادية القادمة")
+        
+        # عرض الأحداث بتنسيق جميل
+        for _, event in df_events.iterrows():
+            impact = event.get('impact', '')
+            if impact == 'High':
+                impact_icon = "🔴"
+                impact_class = "event-high"
+            elif impact == 'Medium':
+                impact_icon = "🟡"
+                impact_class = "event-medium"
+            else:
+                impact_icon = "🟢"
+                impact_class = "event-low"
+            
+            st.markdown(f"""
+            <div class="news-card {impact_class}">
+                <div class="news-title">
+                    {impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}
+                </div>
+                <div class="news-date">
+                    🕐 {event.get('date', '')} {event.get('time', '')} | 
+                    التوقع: {event.get('forecast', 'N/A')} | 
+                    السابق: {event.get('previous', 'N/A')} | 
+                    الفعلي: {event.get('actual', 'N/A')}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.caption(f"📌 إجمالي الأحداث: {len(df_events)} | 🔴 عالية التأثير | 🟡 متوسطة | 🟢 منخفضة")
+    else:
+        st.info("لا توجد أحداث اقتصادية حالياً")
+else:
+    st.info("اضغط 'تحديث التقويم الاقتصادي' لعرض الأحداث")
+
+# ==========================================
 # تحليل الارتباط بين العملات
 # ==========================================
 st.markdown("---")
@@ -2353,6 +2446,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Integrated Signals & Trade Management
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • Integrated Signals & Trade Management
 </div>
 """, unsafe_allow_html=True)
