@@ -1,6 +1,6 @@
 # ============================================================
 # BLACK PYRAMID v2003 – HIERARCHICAL PRECISION ENGINE
-# Full Integration: 7 Layers + Smart Filters + 1-3 Trades/Day
+# Full Integration: 7 Layers + All Pairs + 1-3 Trades/Day
 # ============================================================
 
 import streamlit as st
@@ -248,7 +248,7 @@ st.markdown("""
         <div class="main-title">
             <span class="pyramid-icon">▲</span> BLACK PYRAMID v2003 <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">7 Layers • Regime • 4H Bias • 1H Confirmation • 15M Trigger • Price • News • Risk</div>
+        <div class="main-subtitle">7 Layers • All Pairs • Precision • 1-3 Trades/Day</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -268,6 +268,10 @@ MAX_TRADES_PER_DAY = 3
 MAX_OPEN_RISK = 0.05
 RISK_PER_TRADE = 0.02
 
+# ============================================================
+# ALL PAIRS – FULL LIST (استرداد جميع الأزواج)
+# ============================================================
+
 PAIRS = {
     "XAU/USD (Gold)": "GC=F",
     "XAG/USD (Silver)": "SI=F",
@@ -275,8 +279,30 @@ PAIRS = {
     "EUR/USD": "EURUSD=X",
     "GBP/USD": "GBPUSD=X",
     "USD/JPY": "USDJPY=X",
+    "USD/CHF": "USDCHF=X",
     "AUD/USD": "AUDUSD=X",
     "NZD/USD": "NZDUSD=X",
+    "USD/CAD": "USDCAD=X",
+    "EUR/GBP": "EURGBP=X",
+    "EUR/JPY": "EURJPY=X",
+    "EUR/CHF": "EURCHF=X",
+    "EUR/AUD": "EURAUD=X",
+    "EUR/NZD": "EURNZD=X",
+    "EUR/CAD": "EURCAD=X",
+    "GBP/JPY": "GBPJPY=X",
+    "GBP/CHF": "GBPCHF=X",
+    "GBP/AUD": "GBPAUD=X",
+    "GBP/NZD": "GBPNZD=X",
+    "GBP/CAD": "GBPCAD=X",
+    "AUD/JPY": "AUDJPY=X",
+    "AUD/CHF": "AUDCHF=X",
+    "AUD/NZD": "AUDNZD=X",
+    "AUD/CAD": "AUDCAD=X",
+    "NZD/JPY": "NZDJPY=X",
+    "NZD/CHF": "NZDCHF=X",
+    "NZD/CAD": "NZDCAD=X",
+    "CAD/JPY": "CADJPY=X",
+    "CAD/CHF": "CADCHF=X",
     "BTC/USD (Bitcoin)": "BTC-USD",
     "ETH/USD (Ethereum)": "ETH-USD"
 }
@@ -613,7 +639,7 @@ def apply_dxy_filter(signal, net_score, dxy_signal, correlation):
     return net_score + adjustment, status, adjustment
 
 # ============================================================
-# ORIGINAL SIGNAL ENGINE (v2003) – لم يتغير
+# ORIGINAL SIGNAL ENGINE (v2003)
 # ============================================================
 
 def detect_regime(df):
@@ -847,7 +873,7 @@ def calculate_fib_levels(swing_high, swing_low):
 
 def get_news_impact(symbol):
     """محاكاة الأخبار – استبدلها بـ API حقيقي"""
-    return None  # لا توجد أخبار مؤثرة
+    return None
 
 # ---- Layer 1: Market Regime ----
 def layer_regime(df_4h):
@@ -1117,7 +1143,7 @@ def calculate_advanced_targets(entry, stop_loss, bias):
     return targets
 
 # ---- MAIN DECISION ENGINE مع الطبقات ----
-def generate_signal_with_layers(df_4h, df_1h, df_15m, symbol, dxy_signal=None, dxy_correlation=0.0):
+def generate_signal_with_layers(df_4h, df_1h, df_15m, symbol, dxy_signal=None, dxy_correlation=0.0, flexibility="Moderate"):
     original_signal, original_conf, score, details, factors, regime, mtf_cons, mtf_count, sl, entry, targets, tbs_info = generate_signal_v2003(
         df_1h, symbol, dxy_signal, dxy_correlation
     )
@@ -1125,40 +1151,59 @@ def generate_signal_with_layers(df_4h, df_1h, df_15m, symbol, dxy_signal=None, d
     if original_signal == "WAIT":
         return "WAIT", original_conf, "الإشارة الأصلية WAIT", details, targets, sl, entry
 
-    # Layer 1: Regime
+    # ---- تحليل الطبقات ----
     regime_status, regime_reason = layer_regime(df_4h)
-    if regime_status in ["RANGING", "LOW_VOL"]:
-        if original_conf < 70:
+    bias, bias_reason = layer_4h_bias_advanced(df_4h)
+    confirmed, conf_reason = layer_1h_confirmation_advanced(df_1h, bias)
+    triggered, trigger_reason, trigger_price = layer_15m_trigger_advanced(df_15m, bias)
+    price_ok, price_reason, optimal_entry = layer_price_location_advanced(df_15m, symbol, bias)
+    news_ok, news_reason = layer_news_advanced(symbol, bias)
+
+    # ---- نقاط الطبقات الداعمة ----
+    support_points = 0
+    if regime_status not in ["RANGING", "LOW_VOL"]:
+        support_points += 1
+    if price_ok:
+        support_points += 1
+    if news_ok:
+        support_points += 1
+
+    # ====== منطق القرار حسب المرونة ======
+    if flexibility == "Strict":
+        if bias == "NEUTRAL":
+            return "WAIT", original_conf * 0.5, f"WAIT — {bias_reason}", details, targets, sl, entry
+        if not confirmed:
+            return "WAIT", original_conf * 0.6, f"WAIT — {conf_reason}", details, targets, sl, entry
+        if not triggered:
+            return "WAIT", original_conf * 0.6, f"WAIT — {trigger_reason}", details, targets, sl, entry
+        if not price_ok:
+            return "WAIT", original_conf * 0.6, f"WAIT — {price_reason}", details, targets, sl, entry
+        if not news_ok:
+            return "WAIT", original_conf * 0.6, f"WAIT — {news_reason}", details, targets, sl, entry
+        if regime_status in ["RANGING", "LOW_VOL"]:
             return "WAIT", original_conf * 0.5, f"WAIT — {regime_reason}", details, targets, sl, entry
 
-    # Layer 2: 4H Bias
-    bias, bias_reason = layer_4h_bias_advanced(df_4h)
-    if bias == "NEUTRAL":
-        return "WAIT", original_conf * 0.6, f"WAIT — {bias_reason}", details, targets, sl, entry
-    if (original_signal == "BUY" and bias != "BULLISH") or (original_signal == "SELL" and bias != "BEARISH"):
-        return "WAIT", original_conf * 0.5, f"WAIT — 4H Bias ({bias}) يخالف الإشارة", details, targets, sl, entry
+    elif flexibility == "Moderate":
+        if bias == "NEUTRAL":
+            return "WAIT", original_conf * 0.6, f"WAIT — {bias_reason}", details, targets, sl, entry
+        if not confirmed:
+            return "WAIT", original_conf * 0.6, f"WAIT — {conf_reason}", details, targets, sl, entry
+        if not triggered:
+            return "WAIT", original_conf * 0.6, f"WAIT — {trigger_reason}", details, targets, sl, entry
+        if original_conf >= 75 and support_points >= 2:
+            pass
+        elif support_points < 2:
+            return "WAIT", original_conf * 0.6, f"WAIT — نقاط الدعم منخفضة ({support_points}/3)", details, targets, sl, entry
 
-    # Layer 3: 1H Confirmation
-    confirmed, conf_reason = layer_1h_confirmation_advanced(df_1h, bias)
-    if not confirmed:
-        return "WAIT", original_conf * 0.6, f"WAIT — {conf_reason}", details, targets, sl, entry
-
-    # Layer 4: 15M Trigger
-    triggered, trigger_reason, trigger_price = layer_15m_trigger_advanced(df_15m, bias)
-    if not triggered:
-        return "WAIT", original_conf * 0.6, f"WAIT — {trigger_reason}", details, targets, sl, entry
-
-    # Layer 5: Price Location
-    price_ok, price_reason, optimal_entry = layer_price_location_advanced(df_15m, symbol, bias)
-    if not price_ok:
-        return "WAIT", original_conf * 0.6, f"WAIT — {price_reason}", details, targets, sl, entry
-
-    # Layer 6: News
-    news_ok, news_reason = layer_news_advanced(symbol, bias)
-    if not news_ok:
-        confidence_penalty = 10
-    else:
-        confidence_penalty = 0
+    else:  # "Loose"
+        if bias == "NEUTRAL":
+            return "WAIT", original_conf * 0.5, f"WAIT — {bias_reason}", details, targets, sl, entry
+        if not confirmed:
+            return "WAIT", original_conf * 0.5, f"WAIT — {conf_reason}", details, targets, sl, entry
+        if not triggered and original_conf < 70:
+            return "WAIT", original_conf * 0.5, f"WAIT — {trigger_reason}", details, targets, sl, entry
+        if support_points < 1:
+            return "WAIT", original_conf * 0.5, f"WAIT — نقاط الدعم منخفضة ({support_points}/3)", details, targets, sl, entry
 
     # ---- حساب الإشارة النهائية ----
     if trigger_price is not None:
@@ -1171,7 +1216,7 @@ def generate_signal_with_layers(df_4h, df_1h, df_15m, symbol, dxy_signal=None, d
     stop_loss, sl_reason = calculate_advanced_stop_loss(df_15m, entry_price, bias)
     targets = calculate_advanced_targets(entry_price, stop_loss, bias)
 
-    confidence = min(95, original_conf + 10 - confidence_penalty)
+    confidence = min(95, original_conf + (support_points * 3))
 
     details['Regime'] = regime_reason
     details['4H_Bias'] = bias_reason
@@ -1179,14 +1224,13 @@ def generate_signal_with_layers(df_4h, df_1h, df_15m, symbol, dxy_signal=None, d
     details['15M_Trigger'] = trigger_reason
     details['Price_Location'] = price_reason
     details['News'] = news_reason
-    details['Entry_Price'] = entry_price
-    details['Stop_Loss'] = stop_loss
-    details['SL_Reason'] = sl_reason
+    details['Support_Points'] = f"{support_points}/3"
+    details['Flexibility'] = flexibility
 
-    return original_signal, confidence, f"{original_signal} — جميع الطبقات متوافقة", details, targets, stop_loss, entry_price
+    return original_signal, confidence, f"{original_signal} — مؤكد ({flexibility})", details, targets, stop_loss, entry_price
 
 # ============================================================
-# BACKTEST (الأصلي)
+# BACKTEST
 # ============================================================
 
 def _bar_exit(direction, bar, stop, tp):
@@ -1274,7 +1318,7 @@ def run_backtest(df, symbol, lookback=BACKTEST_LOOKBACK):
 # ============================================================
 
 @st.cache_data(ttl=120)
-def get_all_signals_with_layers():
+def get_all_signals_with_layers(flexibility="Moderate"):
     results = []
     df_dxy = get_historical_data("DX-Y.NYB", period="1mo", interval="1h")
     dxy_signal = None
@@ -1320,7 +1364,7 @@ def get_all_signals_with_layers():
             corr = get_dxy_correlation(df_1h, df_dxy, lookback=50)
 
             signal, conf, reason, details, targets, sl, entry = generate_signal_with_layers(
-                df_4h, df_1h, df_15m, symbol, dxy_signal, corr
+                df_4h, df_1h, df_15m, symbol, dxy_signal, corr, flexibility
             )
 
             if signal != "WAIT":
@@ -1426,12 +1470,22 @@ with st.sidebar:
         st.markdown(f"⏳ **Opens in:** {time_remaining(next_event)}")
 
     st.markdown("---")
+    st.markdown("### ⚙️ Signal Flexibility")
+    flexibility = st.selectbox(
+        "Filter Level",
+        ["Moderate (1-3/day)", "Loose (3-5/day)", "Strict (0-1/day)"],
+        index=0,
+        help="Moderate: أساسي فقط. Loose: نظام نقاط. Strict: كل الطبقات."
+    )
+    flex_value = flexibility.split(" ")[0]  # "Moderate", "Loose", "Strict"
+
+    st.markdown("---")
     st.markdown("### 📋 All Signals")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔄 Refresh All", use_container_width=True):
             with st.spinner("Analyzing..."):
-                st.session_state.all_signals = get_all_signals_with_layers()
+                st.session_state.all_signals = get_all_signals_with_layers(flex_value)
                 st.session_state.last_update = datetime.now()
             st.rerun()
     with col2:
@@ -1522,7 +1576,7 @@ if df_dxy is not None and len(df_dxy) > 100:
     corr = get_dxy_correlation(df_1h, df_dxy, lookback=50)
 
 signal, confidence, reason, details, targets, sl, entry = generate_signal_with_layers(
-    df_4h, df_1h, df_15m, selected_symbol, dxy_signal, corr
+    df_4h, df_1h, df_15m, selected_symbol, dxy_signal, corr, flex_value
 )
 
 # ============================================================
@@ -1627,13 +1681,11 @@ if sl and entry:
     fig.add_hline(y=entry, line_dash="dash", line_color="green", opacity=0.7, row=1, col=1)
     fig.add_annotation(x=df_15m.index[-1], y=entry, text="Entry", showarrow=True, arrowhead=1, row=1, col=1)
 
-# RSI
 if 'rsi' in df_15m.columns:
     fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
     fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
     fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
-# MACD
 if 'macd' in df_15m.columns and 'macd_signal' in df_15m.columns:
     fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
     fig.add_trace(go.Scatter(x=df_15m.index, y=df_15m['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
@@ -1673,7 +1725,7 @@ if st.session_state.closed_trades:
 
 st.markdown(f"""
 <div class="footer">
-    <span class="brand">▲ BLACK PYRAMID v2003</span> • 7 Layers • Precision Engine • 1-3 Trades/Day<br>
+    <span class="brand">▲ BLACK PYRAMID v2003</span> • 7 Layers • All Pairs • Precision Engine • 1-3 Trades/Day<br>
     {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
