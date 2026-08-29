@@ -1,5 +1,5 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002 (الإعدادات الديناميكية المحسنة)
+# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
 # تاريخ التحديث: 2026-08-29
 # المصدر: GoldAPI + yfinance + FMP API + تحليلات متقدمة
 # ==========================================
@@ -294,7 +294,7 @@ def get_indicator_settings(symbol_name):
     return settings
 
 # ==========================================
-# المؤشرات الأساسية (معدلة للإعدادات الديناميكية)
+# المؤشرات الأساسية
 # ==========================================
 
 def calc_rsi(data, period=14):
@@ -351,11 +351,15 @@ def calc_vwap(df):
     return (df['volume'] * df['close']).cumsum() / df['volume'].cumsum()
 
 def calc_mfi(df, period=14):
+    """
+    حساب مؤشر التدفق النقدي (Money Flow Index)
+    """
     typical_price = (df['high'] + df['low'] + df['close']) / 3
     money_flow = typical_price * df['volume']
     positive_flow = money_flow.where(typical_price > typical_price.shift(), 0).rolling(window=period).sum()
     negative_flow = money_flow.where(typical_price < typical_price.shift(), 0).rolling(window=period).sum()
-    return 100 - (100 / (1 + positive_flow / negative_flow))
+    mfi = 100 - (100 / (1 + positive_flow / negative_flow))
+    return mfi
 
 def calc_fibonacci_levels(high, low, current_price):
     diff = high - low
@@ -1395,7 +1399,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     df['senkou_a'] = senkou_a
     df['senkou_b'] = senkou_b
     df['chikou'] = chikou
-    df['mfi'] = calc_mfi(df['close'], period=mfi_settings['period'])
+    df['mfi'] = calc_mfi(df, period=mfi_settings['period'])
 
     df_smc = analyze_smc_ict(df)
     last_smc = df_smc.iloc[-1]
@@ -1591,7 +1595,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
             scores['SELL'] += weights['divergence']
             details['Divergence'] = f"{div_type} (+{weights['divergence']})"
 
-    # ===== تكامل الأنماط =====
+    # ===== تكامل الأنماط الهيكلية مع الشموع (مصحح) =====
     if patterns and candle_patterns:
         try:
             last_struct = next((p for p in reversed(patterns) if p.get('direction') != 'NEUTRAL'), None)
@@ -1601,7 +1605,9 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
                 direction = last_struct.get('direction')
                 if direction in scores:
                     scores[direction] += bonus
-                    details['Confluence'] = f"تطابق {last_struct.get('pattern', '')} مع {last_candle.get('pattern', '')} (تأكيد مضاعف +{bonus})"
+                else:
+                    scores[direction] = bonus
+                details['Confluence'] = f"تطابق {last_struct.get('pattern', '')} مع {last_candle.get('pattern', '')} (تأكيد مضاعف +{bonus})"
         except Exception as e:
             pass
 
@@ -2155,12 +2161,12 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 تحديث القوة", key="refresh_currency_strength", use_container_width=True):
+        if st.button("🔄 تحديث القوة", key="refresh_currency_strength", width='stretch'):
             with st.spinner("جارٍ حساب القوة..."):
                 st.session_state.currency_strength = get_currency_strength()
                 st.rerun()
     with col2:
-        if st.button("🗑️ مسح", key="clear_currency_strength", use_container_width=True):
+        if st.button("🗑️ مسح", key="clear_currency_strength", width='stretch'):
             st.session_state.currency_strength = None
             st.rerun()
     
@@ -2213,13 +2219,13 @@ with st.sidebar:
     st.markdown("### 📋 جميع الإشارات المتاحة")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 تحديث الكل", key="refresh_all_signals", use_container_width=True):
+        if st.button("🔄 تحديث الكل", key="refresh_all_signals", width='stretch'):
             with st.spinner("جارٍ التحليل..."):
                 st.session_state.all_signals = get_all_signals_with_trades()
                 st.session_state.last_update = datetime.now()
                 st.rerun()
     with col2:
-        if st.button("🗑️ مسح", key="clear_all_signals", use_container_width=True):
+        if st.button("🗑️ مسح", key="clear_all_signals", width='stretch'):
             st.session_state.all_signals = None
             st.rerun()
     
@@ -2260,7 +2266,7 @@ with st.sidebar:
     selected_symbol = PAIRS[selected_pair_name]
     st.markdown("---")
     st.markdown("### 📋 إدارة الصفقات اليدوية")
-    if st.button("➕ صفقة جديدة", key="new_trade_button", use_container_width=True):
+    if st.button("➕ صفقة جديدة", key="new_trade_button", width='stretch'):
         st.session_state.show_form = not st.session_state.show_form
         st.rerun()
 
@@ -2275,7 +2281,7 @@ df = get_historical_data(selected_symbol, period="1mo", interval="1h")
 
 if df is None:
     st.error("⚠️ تعذر تحميل البيانات بعد عدة محاولات. يرجى التحقق من اتصال الإنترنت أو اختيار زوج آخر.")
-    if st.button("🔄 إعادة محاولة تحميل البيانات", key="retry_load_data", use_container_width=True):
+    if st.button("🔄 إعادة محاولة تحميل البيانات", key="retry_load_data", width='stretch'):
         st.cache_data.clear()
         st.rerun()
     st.stop()
@@ -2309,7 +2315,7 @@ st.markdown(f"""
 # زر تحديث
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
-    if st.button("🔄 تحديث البيانات", key="refresh_data_button", use_container_width=True):
+    if st.button("🔄 تحديث البيانات", key="refresh_data_button", width='stretch'):
         st.session_state.refresh_trigger = not st.session_state.refresh_trigger
         st.session_state.last_update = datetime.now()
         st.cache_data.clear()
@@ -2322,7 +2328,7 @@ st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
     btn_label = "📊 إخفاء" if st.session_state.show_indicators else "📊 إظهار"
-    if st.button(btn_label, key="toggle_indicators", use_container_width=True):
+    if st.button(btn_label, key="toggle_indicators", width='stretch'):
         st.session_state.show_indicators = not st.session_state.show_indicators
         st.rerun()
 with col_title:
@@ -2359,7 +2365,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
     </div>
     """, unsafe_allow_html=True)
     
-    if st.button("➕ إضافة هذه الصفقة", key="add_suggested_trade", use_container_width=True):
+    if st.button("➕ إضافة هذه الصفقة", key="add_suggested_trade", width='stretch'):
         trade_manager = TradeManager()
         account_balance = 100000
         risk_per_trade_pct = 2
@@ -2435,7 +2441,7 @@ with st.expander("📝 شرح القرار", expanded=True):
 st.markdown("---")
 st.markdown("### 📅 التقويم الاقتصادي")
 
-if st.button("🔄 تحديث التقويم الاقتصادي", key="refresh_economic_calendar", use_container_width=True):
+if st.button("🔄 تحديث التقويم الاقتصادي", key="refresh_economic_calendar", width='stretch'):
     with st.spinner("جارٍ جلب بيانات التقويم..."):
         st.session_state.economic_events = get_fmp_economic_calendar()
 
@@ -2450,7 +2456,7 @@ else:
 st.markdown("---")
 st.markdown("### 📰 تحليل الأخبار")
 
-if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_analysis", use_container_width=True):
+if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_analysis", width='stretch'):
     with st.spinner("جارٍ تحليل الأخبار..."):
         news = get_fmp_news()
         if news:
@@ -2486,7 +2492,7 @@ corr_pairs = st.multiselect(
     key="correlation_pairs"
 )
 
-if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="show_correlation_matrix", use_container_width=True):
+if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="show_correlation_matrix", width='stretch'):
     with st.spinner("جارٍ حساب الارتباطات..."):
         symbols = [PAIRS[pair] for pair in corr_pairs]
         corr_matrix = get_correlation_matrix(symbols)
@@ -2542,7 +2548,7 @@ if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="sh
 st.markdown("---")
 st.markdown("### 📊 ارتباط الأزواج بالذهب")
 
-if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="analyze_gold_correlation", use_container_width=True):
+if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="analyze_gold_correlation", width='stretch'):
     with st.spinner("جارٍ التحليل..."):
         gold_symbol = "GC=F"
         correlation_results = []
@@ -2688,19 +2694,19 @@ if trade_manager.open_trades:
         </div>
         """, unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
-        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_stop_{trade['id']}", use_container_width=True):
+        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_stop_{trade['id']}", width='stretch'):
             if trade_manager.update_trailing_stop(trade["id"], current_price):
                 st.success("تم تحديث الوقف المتحرك!")
                 st.rerun()
             else:
                 st.info("الوقف في أفضل وضعية حالياً")
-        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"check_reversal_{trade['id']}", use_container_width=True):
+        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"check_reversal_{trade['id']}", width='stretch'):
             is_reversal, msg = detect_reversal(df, trade)
             if is_reversal:
                 st.warning(f"⚠️ انعكاس مكتشف: {msg}")
             else:
                 st.success("✅ لا توجد إشارة انعكاس حالياً")
-        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_trade_{trade['id']}", use_container_width=True):
+        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_trade_{trade['id']}", width='stretch'):
             profit = trade_manager.close_trade(trade['id'], current_price)
             st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
             st.rerun()
