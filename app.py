@@ -1,7 +1,7 @@
 # ==========================================
 # BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
 # تاريخ التحديث: 2026-08-29
-# المصدر: GoldAPI + yfinance + تحليلات متقدمة + مؤشرات العملات + التقويم الاقتصادي
+# المصدر: GoldAPI + yfinance + FMP API + تحليلات متقدمة
 # ==========================================
 
 import streamlit as st
@@ -99,7 +99,7 @@ st.markdown("""
             BLACK PYRAMID
             <span class="pyramid-icon">▲</span>
         </div>
-        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar • News Analysis</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -109,7 +109,7 @@ st.markdown("""
 # ==========================================
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 NEWS_API_KEY = "YOUR_NEWS_API_KEY"
-ECONOMIC_CALENDAR_API_KEY = "EBdaCkJXtIphxCdiZpW3EWCAb4IKpz8N"
+FMP_API_KEY = "EBdaCkJXtIphxCdiZpW3EWCAb4IKpz8N"
 
 # ==========================================
 # قائمة الأزواج
@@ -193,6 +193,8 @@ if "currency_strength" not in st.session_state:
     st.session_state.currency_strength = None
 if "economic_events" not in st.session_state:
     st.session_state.economic_events = None
+if "news_analysis" not in st.session_state:
+    st.session_state.news_analysis = None
 
 # ==========================================
 # دوال جلب البيانات
@@ -240,22 +242,22 @@ def time_remaining(dt):
     minutes = int((diff.total_seconds() % 3600) // 60)
     return f"{hours}h {minutes}m"
 
+# ==========================================
+# دوال FMP API
+# ==========================================
+
 @st.cache_data(ttl=300)
-def get_economic_calendar():
+def get_fmp_economic_calendar():
     """
-    جلب التقويم الاقتصادي من API
+    جلب التقويم الاقتصادي من FMP API
     """
     try:
-        url = "https://economic-calendar-api.p.rapidapi.com/calendar"
-        headers = {
-            "x-rapidapi-key": ECONOMIC_CALENDAR_API_KEY,
-            "x-rapidapi-host": "economic-calendar-api.p.rapidapi.com"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
+        url = f"https://financialmodelingprep.com/api/v3/economic_calendar?apikey={FMP_API_KEY}"
+        response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             events = []
-            for item in data.get('data', []):
+            for item in data[:20]:  # آخر 20 حدث
                 events.append({
                     'country': item.get('country', ''),
                     'event': item.get('event', ''),
@@ -270,6 +272,311 @@ def get_economic_calendar():
     except Exception as e:
         pass
     return []
+
+@st.cache_data(ttl=300)
+def get_fmp_news():
+    """
+    جلب الأخبار من FMP API
+    """
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/fmp-news?apikey={FMP_API_KEY}&limit=10"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            news_list = []
+            for item in data[:10]:
+                news_list.append({
+                    'title': item.get('title', ''),
+                    'source': 'FMP',
+                    'publishedAt': item.get('publishedDate', ''),
+                    'url': item.get('url', ''),
+                    'content': item.get('text', '')
+                })
+            return news_list
+    except Exception as e:
+        pass
+    return []
+
+@st.cache_data(ttl=300)
+def get_fmp_market_sentiment():
+    """
+    جلب مؤشرات السوق من FMP API
+    """
+    try:
+        url = f"https://financialmodelingprep.com/api/v4/market_risk_premium?apikey={FMP_API_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return data
+    except Exception as e:
+        pass
+    return None
+
+@st.cache_data(ttl=300)
+def get_fmp_commodity_price(commodity="gold"):
+    """
+    جلب أسعار السلع من FMP API
+    """
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/quote/{commodity}?apikey={FMP_API_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return data[0]
+    except Exception as e:
+        pass
+    return None
+
+# ==========================================
+# تحليل الأخبار المتقدم
+# ==========================================
+
+# كلمات مفتاحية للتصنيف
+NEWS_KEYWORDS = {
+    'positive': {
+        'gold': ['gold rally', 'gold surge', 'gold bullish', 'gold gains', 'gold positive', 'gold up', 'gold rises', 'gold strong', 'gold support', 'gold buying', 'gold rebound'],
+        'forex': ['dollar weak', 'dollar down', 'dollar falls', 'euro strong', 'pound strong', 'currency rally', 'forex positive', 'dollar negative', 'yen weak'],
+        'economy': ['fed cut', 'rate cut', 'stimulus', 'economic growth', 'gdp up', 'jobs strong', 'inflation down', 'recovery', 'boom']
+    },
+    'negative': {
+        'gold': ['gold drop', 'gold falls', 'gold bearish', 'gold decline', 'gold down', 'gold selling', 'gold crash', 'gold weak', 'gold resistance', 'gold plunge'],
+        'forex': ['dollar strong', 'dollar up', 'dollar rises', 'euro weak', 'pound weak', 'currency drop', 'forex negative', 'dollar positive', 'yen strong'],
+        'economy': ['fed hike', 'rate hike', 'inflation up', 'economic slowdown', 'gdp down', 'jobs weak', 'recession', 'crisis', 'crash']
+    }
+}
+
+def analyze_news_impact(news_list):
+    """
+    تحليل الأخبار وتصنيفها وتقييم تأثيرها
+    """
+    if not news_list:
+        return {
+            'gold_sentiment': 0,
+            'forex_sentiment': 0,
+            'overall_sentiment': 0,
+            'high_impact_news': [],
+            'news_analysis': [],
+            'summary': "لا توجد أخبار للتحليل",
+            'count': 0
+        }
+    
+    gold_score = 0
+    forex_score = 0
+    high_impact = []
+    news_analysis = []
+    
+    for item in news_list:
+        title = item.get('title', '').lower()
+        content = item.get('content', '').lower()
+        combined_text = title + " " + content
+        source = item.get('source', '')
+        impact = 0
+        category = 'neutral'
+        
+        # تحليل الذهب
+        gold_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['gold'])
+        gold_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['gold'])
+        
+        if gold_positive:
+            gold_score += 2
+            impact += 2
+            category = 'positive_gold'
+        elif gold_negative:
+            gold_score -= 2
+            impact -= 2
+            category = 'negative_gold'
+        
+        # تحليل الفوركس
+        forex_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['forex'])
+        forex_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['forex'])
+        
+        if forex_positive:
+            forex_score += 2
+            impact += 1
+            if category == 'neutral':
+                category = 'positive_forex'
+        elif forex_negative:
+            forex_score -= 2
+            impact -= 1
+            if category == 'neutral':
+                category = 'negative_forex'
+        
+        # تحليل الاقتصاد العام
+        eco_positive = any(kw in combined_text for kw in NEWS_KEYWORDS['positive']['economy'])
+        eco_negative = any(kw in combined_text for kw in NEWS_KEYWORDS['negative']['economy'])
+        
+        if eco_positive:
+            gold_score += 1
+            forex_score += 1
+            impact += 1
+        elif eco_negative:
+            gold_score -= 1
+            forex_score -= 1
+            impact -= 1
+        
+        # تحديد مستوى التأثير
+        impact_level = "منخفض"
+        if abs(impact) >= 3:
+            impact_level = "عالٍ"
+            high_impact.append({
+                'title': item.get('title', ''),
+                'source': source,
+                'impact': impact,
+                'category': category
+            })
+        elif abs(impact) >= 1:
+            impact_level = "متوسط"
+        
+        news_analysis.append({
+            'title': item.get('title', ''),
+            'source': source,
+            'category': category,
+            'impact': impact,
+            'impact_level': impact_level,
+            'date': item.get('publishedAt', '')
+        })
+    
+    # حساب المؤشرات النهائية
+    gold_sentiment = min(100, max(-100, gold_score * 10))
+    forex_sentiment = min(100, max(-100, forex_score * 10))
+    overall_sentiment = (gold_sentiment + forex_sentiment) / 2
+    
+    # توليد الملخص
+    if overall_sentiment > 30:
+        summary = "📈 الأخبار إيجابية بشكل عام، تدعم الشراء"
+    elif overall_sentiment < -30:
+        summary = "📉 الأخبار سلبية بشكل عام، تدعم البيع"
+    elif high_impact:
+        summary = f"⚠️ أخبار عالية التأثير: {len(high_impact)} خبر"
+    else:
+        summary = "➡️ الأخبار محايدة، لا تأثير كبير"
+    
+    return {
+        'gold_sentiment': gold_sentiment,
+        'forex_sentiment': forex_sentiment,
+        'overall_sentiment': overall_sentiment,
+        'high_impact_news': high_impact,
+        'news_analysis': news_analysis,
+        'summary': summary,
+        'count': len(news_list)
+    }
+
+def get_news_impact_score(news_analysis, symbol=""):
+    """
+    حساب درجة تأثير الأخبار على الإشارة
+    """
+    if not news_analysis or news_analysis.get('count', 0) == 0:
+        return 0, "لا توجد أخبار"
+    
+    impact_score = 0
+    impact_details = []
+    
+    if "Gold" in symbol or "XAU" in symbol:
+        impact_score = news_analysis.get('gold_sentiment', 0)
+        impact_details.append(f"الذهب: {impact_score:+.0f}")
+    elif any(x in symbol for x in ["EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"]):
+        impact_score = news_analysis.get('forex_sentiment', 0)
+        impact_details.append(f"الفوركس: {impact_score:+.0f}")
+    else:
+        impact_score = news_analysis.get('overall_sentiment', 0)
+        impact_details.append(f"عام: {impact_score:+.0f}")
+    
+    high_impact = news_analysis.get('high_impact_news', [])
+    if high_impact:
+        impact_score -= len(high_impact) * 5
+        impact_details.append(f"أخبار عالية التأثير: -{len(high_impact) * 5}")
+    
+    return impact_score, " | ".join(impact_details)
+
+def display_news_analysis(news_analysis):
+    """
+    عرض تحليل الأخبار بشكل جميل
+    """
+    if not news_analysis or news_analysis.get('count', 0) == 0:
+        st.info("لا توجد أخبار للتحليل")
+        return
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        gold_sent = news_analysis.get('gold_sentiment', 0)
+        color = "🟢" if gold_sent > 0 else ("🔴" if gold_sent < 0 else "🟡")
+        st.metric(f"{color} الذهب", f"{gold_sent:+.0f}")
+    
+    with col2:
+        forex_sent = news_analysis.get('forex_sentiment', 0)
+        color = "🟢" if forex_sent > 0 else ("🔴" if forex_sent < 0 else "🟡")
+        st.metric(f"{color} الفوركس", f"{forex_sent:+.0f}")
+    
+    with col3:
+        overall = news_analysis.get('overall_sentiment', 0)
+        color = "🟢" if overall > 0 else ("🔴" if overall < 0 else "🟡")
+        st.metric(f"{color} الإجمالي", f"{overall:+.0f}")
+    
+    st.info(news_analysis.get('summary', ''))
+    
+    if news_analysis.get('news_analysis'):
+        st.markdown("#### 📰 تحليل الأخبار:")
+        for item in news_analysis['news_analysis'][:5]:
+            impact = item.get('impact', 0)
+            impact_level = item.get('impact_level', '')
+            if impact_level == "عالٍ":
+                icon = "🔴"
+            elif impact_level == "متوسط":
+                icon = "🟡"
+            else:
+                icon = "🟢"
+            
+            st.markdown(f"""
+            <div class="news-card">
+                <div class="news-title">
+                    {icon} {item.get('title', '')[:100]}...
+                </div>
+                <div class="news-date">
+                    {item.get('source', '')} | التأثير: {impact_level} ({impact:+.0f}) | {item.get('date', '')}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+def display_economic_events(events):
+    """
+    عرض الأحداث الاقتصادية بشكل جميل
+    """
+    if not events:
+        st.info("لا توجد أحداث اقتصادية")
+        return
+    
+    # عرض الأحداث بتنسيق جميل
+    for event in events[:15]:
+        impact = event.get('impact', '')
+        if impact == 'High' or impact == 'عالٍ':
+            impact_icon = "🔴"
+            impact_class = "event-high"
+        elif impact == 'Medium' or impact == 'متوسط':
+            impact_icon = "🟡"
+            impact_class = "event-medium"
+        else:
+            impact_icon = "🟢"
+            impact_class = "event-low"
+        
+        st.markdown(f"""
+        <div class="news-card {impact_class}">
+            <div class="news-title">
+                {impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}
+            </div>
+            <div class="news-date">
+                🕐 {event.get('date', '')} {event.get('time', '')} | 
+                التوقع: {event.get('forecast', 'N/A')} | 
+                السابق: {event.get('previous', 'N/A')} | 
+                الفعلي: {event.get('actual', 'N/A')}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ==========================================
+# دوال جلب البيانات الأساسية (مستمرة)
+# ==========================================
 
 @st.cache_data(ttl=5)
 def get_spot_price(symbol="GC=F"):
@@ -380,32 +687,6 @@ def get_all_forex():
         except:
             results[name] = {'price': 0, 'change': 0}
     return results
-
-@st.cache_data(ttl=600)
-def get_economic_news():
-    try:
-        url = f"https://newsapi.org/v2/everything?q=gold OR forex OR economy&language=en&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize=5"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            articles = data.get('articles', [])
-            news_list = []
-            for art in articles[:5]:
-                if art.get('title'):
-                    news_list.append({
-                        'title': art.get('title', ''),
-                        'source': art.get('source', {}).get('name', ''),
-                        'publishedAt': art.get('publishedAt', ''),
-                        'url': art.get('url', '')
-                    })
-            return news_list
-    except requests.exceptions.Timeout:
-        pass
-    except requests.exceptions.RequestException:
-        pass
-    except:
-        pass
-    return []
 
 @st.cache_data(ttl=60)
 def get_currency_strength():
@@ -1293,6 +1574,28 @@ def generate_advanced_signal(df, current_price, symbol=""):
             confidence = min(100, confidence * 1.1)
             details['MTF_Filter'] = f"✅ متوافق مع MTF ({mtf_signal}) +10% ثقة"
 
+    # ===== News Impact =====
+    news_impact_score = 0
+    news_details = ""
+    try:
+        news = get_fmp_news()
+        if news:
+            news_analysis = analyze_news_impact(news)
+            st.session_state.news_analysis = news_analysis
+            news_impact_score, news_details = get_news_impact_score(news_analysis, symbol)
+            
+            if signal != "WAIT" and abs(news_impact_score) > 10:
+                if (signal == "BUY" and news_impact_score > 0) or (signal == "SELL" and news_impact_score < 0):
+                    confidence = min(100, confidence * 1.1)
+                    details['News_Impact'] = f"✅ الأخبار تدعم الإشارة ({news_impact_score:+.0f}) +10% ثقة"
+                elif (signal == "BUY" and news_impact_score < 0) or (signal == "SELL" and news_impact_score > 0):
+                    confidence = confidence * 0.8
+                    details['News_Impact'] = f"⚠️ الأخبار تعارض الإشارة ({news_impact_score:+.0f}) ×0.8 ثقة"
+            elif news_impact_score != 0:
+                details['News_Impact'] = f"📰 تأثير الأخبار: {news_impact_score:+.0f}"
+    except:
+        pass
+
     # مرشح الاتجاه الرئيسي
     major_trend = get_major_trend(df)
     if signal != "WAIT":
@@ -1708,6 +2011,10 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
             if tbs_stop:
                 explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
 
+    # إضافة تأثير الأخبار
+    if 'News_Impact' in details:
+        explanation += f"\n\n📰 **تأثير الأخبار:** {details['News_Impact']}"
+
     return explanation
 
 # ==========================================
@@ -2031,48 +2338,42 @@ st.markdown("### 📅 التقويم الاقتصادي")
 
 if st.button("🔄 تحديث التقويم الاقتصادي", key="refresh_economic_calendar", use_container_width=True):
     with st.spinner("جارٍ جلب بيانات التقويم..."):
-        st.session_state.economic_events = get_economic_calendar()
+        st.session_state.economic_events = get_fmp_economic_calendar()
 
 if st.session_state.economic_events:
-    events = st.session_state.economic_events
-    df_events = pd.DataFrame(events)
-    
-    # تصفية الأحداث الهامة
-    if not df_events.empty:
-        st.markdown("#### 📊 الأحداث الاقتصادية القادمة")
-        
-        # عرض الأحداث بتنسيق جميل
-        for _, event in df_events.iterrows():
-            impact = event.get('impact', '')
-            if impact == 'High':
-                impact_icon = "🔴"
-                impact_class = "event-high"
-            elif impact == 'Medium':
-                impact_icon = "🟡"
-                impact_class = "event-medium"
-            else:
-                impact_icon = "🟢"
-                impact_class = "event-low"
-            
-            st.markdown(f"""
-            <div class="news-card {impact_class}">
-                <div class="news-title">
-                    {impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}
-                </div>
-                <div class="news-date">
-                    🕐 {event.get('date', '')} {event.get('time', '')} | 
-                    التوقع: {event.get('forecast', 'N/A')} | 
-                    السابق: {event.get('previous', 'N/A')} | 
-                    الفعلي: {event.get('actual', 'N/A')}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.caption(f"📌 إجمالي الأحداث: {len(df_events)} | 🔴 عالية التأثير | 🟡 متوسطة | 🟢 منخفضة")
-    else:
-        st.info("لا توجد أحداث اقتصادية حالياً")
+    display_economic_events(st.session_state.economic_events)
 else:
     st.info("اضغط 'تحديث التقويم الاقتصادي' لعرض الأحداث")
+
+# ==========================================
+# تحليل الأخبار
+# ==========================================
+st.markdown("---")
+st.markdown("### 📰 تحليل الأخبار")
+
+if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_analysis", use_container_width=True):
+    with st.spinner("جارٍ تحليل الأخبار..."):
+        news = get_fmp_news()
+        if news:
+            st.session_state.news_analysis = analyze_news_impact(news)
+        else:
+            st.session_state.news_analysis = None
+
+if st.session_state.news_analysis:
+    display_news_analysis(st.session_state.news_analysis)
+    
+    # عرض التأثير على الإشارة الحالية
+    if signal != "WAIT":
+        news_impact, _ = get_news_impact_score(st.session_state.news_analysis, selected_symbol)
+        if abs(news_impact) > 10:
+            if (signal == "BUY" and news_impact > 0) or (signal == "SELL" and news_impact < 0):
+                st.success(f"✅ الأخبار تدعم قرار {signal} (تأثير: {news_impact:+.0f})")
+            else:
+                st.warning(f"⚠️ الأخبار تعارض قرار {signal} (تأثير: {news_impact:+.0f})")
+        else:
+            st.info(f"📰 تأثير الأخبار محايد ({news_impact:+.0f})")
+else:
+    st.info("اضغط 'تحديث تحليل الأخبار' لعرض التحليل")
 
 # ==========================================
 # تحليل الارتباط بين العملات
@@ -2344,26 +2645,6 @@ if st.session_state.show_form:
             st.session_state.show_form = False
             st.rerun()
 
-# الأخبار
-st.markdown("---")
-st.markdown("### 📰 الأخبار الاقتصادية والتقويم")
-news = get_economic_news()
-if news:
-    for item in news:
-        st.markdown(f"""
-        <div class="news-card">
-            <div class="news-title"><a href="{item['url']}" target="_blank">{item['title']}</a></div>
-            <div class="news-date">{item['source']} - {item['publishedAt'][:10]}</div>
-        </div>
-        """, unsafe_allow_html=True)
-else:
-    st.info("لا توجد أخبار حالياً")
-st.write("**📅 التقويم الاقتصادي:**")
-st.markdown("""
-- [Investing.com Economic Calendar](https://www.investing.com/economic-calendar/)
-- [ForexFactory Economic Calendar](https://www.forexfactory.com/calendar)
-""")
-
 # الرسم البياني
 st.markdown("---")
 st.markdown("### 📈 Price Chart")
@@ -2446,6 +2727,6 @@ if selected_symbol == "GC=F":
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • Integrated Signals & Trade Management
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns (HS, Double, Triple, Wedge, Flag) • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • News Analysis • Integrated Signals & Trade Management
 </div>
 """, unsafe_allow_html=True)
