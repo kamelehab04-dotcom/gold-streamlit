@@ -1,11 +1,10 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2005 (Stable Signals)
+# BLACK PYRAMID – الإصدار 2006 (Extended Lookback)
 # تاريخ التحديث: 2026-08-29
 # التحديثات:
-# - إشارات ثابتة تعتمد على الاتجاه العام (EMA50/100 + ADX)
-# - تأكيد الدخول من كسر دعم/مقاومة أو SMC
-# - لا تتغير الإشارة مع كل شمعة جديدة
-# - الحفاظ على VRSI، فيبوناتشي المتقدم، مؤشرات العملات، إلخ.
+# - إضافة عدد الشموع للمستويات (قابل للتعديل من 50 إلى 500)
+# - استخدام EMA200 للاتجاه طويل المدى
+# - تحسين دقة تحديد الدعم/المقاومة
 # ==========================================
 
 import streamlit as st
@@ -102,8 +101,8 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div style="text-align: right;">
-        <div class="main-title">▲ BLACK PYRAMID PRO v2005 ▲</div>
-        <div class="main-subtitle">Stable Signals • Trend-Based • SMC Confirmation • Auto-Risk • VRSI • Fibonacci Pro</div>
+        <div class="main-title">▲ BLACK PYRAMID PRO v2006 ▲</div>
+        <div class="main-subtitle">Extended Lookback • Stable Signals • VRSI • Fibonacci Pro • Auto-Risk</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -179,7 +178,7 @@ if "currency_indices" not in st.session_state:
 if "account_balance" not in st.session_state:
     st.session_state.account_balance = 100000
 if "signal_lock" not in st.session_state:
-    st.session_state.signal_lock = {}  # لتخزين الإشارات الثابتة لكل زوج
+    st.session_state.signal_lock = {}
 
 # ==========================================
 # دوال جلب البيانات (نفس السابق)
@@ -664,53 +663,52 @@ def get_economic_calendar():
             {"time": "16:30", "event": "محضر اجتماع FOMC", "impact": "HIGH", "previous": "-", "forecast": "-"}]
 
 # ==========================================
-# الإشارة الثابتة (المعدلة)
+# الإشارة الثابتة مع Lookback قابل للتعديل
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, currency_indices=None, params=None):
     """
-    إشارة ثابتة تعتمد على الاتجاه العام ومناطق الدعم/المقاومة.
-    لا تتغير مع تقلب الشموع الصغيرة.
+    إشارة ثابتة تعتمد على الاتجاه العام ومناطق الدعم/المقاومة المستخرجة من عدد شموع قابل للتعديل.
     """
     if df is None or len(df) < 100:
         return "WAIT", 50, 0, {}, [], None, None, None, None
 
     p = params or {}
     confidence_threshold = p.get('confidence_threshold', 60)
+    lookback_levels = p.get('lookback_levels', 100)  # عدد الشموع للمستويات
     
-    # 1. حساب الاتجاه العام باستخدام متوسطات متحركة كبيرة
+    # 1. حساب الاتجاه العام باستخدام متوسطات متحركة (EMA50, EMA100, EMA200)
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
+    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
     
     # 2. مؤشر ADX لتأكيد قوة الاتجاه
     adx, _, _ = calc_adx(df, period=14)
     current_adx = adx.iloc[-1] if not adx.isna().all() else 0
     
-    # 3. تحديد مناطق الدعم والمقاومة القوية (آخر 50 شمعة)
-    recent_high = df['high'].iloc[-50:].max()
-    recent_low = df['low'].iloc[-50:].min()
-    range_zone = (recent_high + recent_low) / 2  # منتصف النطاق (للعلم)
+    # 3. تحديد مناطق الدعم والمقاومة القوية باستخدام lookback_levels
+    recent_high = df['high'].iloc[-lookback_levels:].max()
+    recent_low = df['low'].iloc[-lookback_levels:].min()
     
     # 4. تحديد الاتجاه العام
     last_close = df['close'].iloc[-1]
     last_ema50 = df['ema50'].iloc[-1]
     last_ema100 = df['ema100'].iloc[-1]
+    last_ema200 = df['ema200'].iloc[-1]
     
-    # اتجاه صاعد: السعر فوق EMA50 و EMA100 و ADX > 25
-    uptrend = (last_close > last_ema50) and (last_close > last_ema100) and (current_adx > 25)
-    # اتجاه هابط: السعر تحت EMA50 و EMA100 و ADX > 25
-    downtrend = (last_close < last_ema50) and (last_close < last_ema100) and (current_adx > 25)
+    # اتجاه صاعد: السعر فوق EMA50 و EMA100 و EMA200 و ADX > 25
+    uptrend = (last_close > last_ema50) and (last_close > last_ema100) and (last_close > last_ema200) and (current_adx > 25)
+    # اتجاه هابط: السعر تحت EMA50 و EMA100 و EMA200 و ADX > 25
+    downtrend = (last_close < last_ema50) and (last_close < last_ema100) and (last_close < last_ema200) and (current_adx > 25)
     
-    # 5. تحديد الإشارة بناءً على الاتجاه العام + المناطق
     details = {}
     scores = {'BUY': 0, 'SELL': 0}
     
-    # قوة الاتجاه
     if uptrend:
         scores['BUY'] += 5
-        details['Trend'] = "اتجاه صاعد قوي (EMA50/100 + ADX)"
+        details['Trend'] = f"اتجاه صاعد قوي (EMA50/100/200 + ADX) - lookback: {lookback_levels}"
     elif downtrend:
         scores['SELL'] += 5
-        details['Trend'] = "اتجاه هابط قوي (EMA50/100 + ADX)"
+        details['Trend'] = f"اتجاه هابط قوي (EMA50/100/200 + ADX) - lookback: {lookback_levels}"
     else:
         details['Trend'] = "اتجاه جانبي أو ضعيف - انتظار"
         return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
@@ -720,30 +718,26 @@ def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, 
     last_smc = df_smc.iloc[-1]
     
     if uptrend:
-        # في الاتجاه الصاعد، نبحث عن كسر مقاومة أو Order Block شراء
         if last_smc.get('order_block_bullish', False) or last_smc.get('fvg_bullish', False):
             scores['BUY'] += 3
             details['SMC'] = "تأكيد شراء من SMC"
-        elif last_close > recent_high * 0.995:  # كسر مقاومة
+        elif last_close > recent_high * 0.995:
             scores['BUY'] += 2
-            details['Breakout'] = "كسر مقاومة قوية"
+            details['Breakout'] = f"كسر مقاومة قوية (منذ {lookback_levels} شمعة)"
         else:
-            # انتظر كسر مؤكد
             return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
     else:
-        # في الاتجاه الهابط، نبحث عن كسر دعم أو Order Block بيع
         if last_smc.get('order_block_bearish', False) or last_smc.get('fvg_bearish', False):
             scores['SELL'] += 3
             details['SMC'] = "تأكيد بيع من SMC"
-        elif last_close < recent_low * 1.005:  # كسر دعم
+        elif last_close < recent_low * 1.005:
             scores['SELL'] += 2
-            details['Breakout'] = "كسر دعم قوي"
+            details['Breakout'] = f"كسر دعم قوي (منذ {lookback_levels} شمعة)"
         else:
             return "WAIT", 50, 0, details, [], (None,None,None,None), None, None, {}
     
-    # 7. حساب الثقة
     net_score = scores['BUY'] - scores['SELL']
-    total_weight = 8  # 5 (اتجاه) + 3 (تأكيد)
+    total_weight = 8
     if net_score >= 5:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
@@ -756,12 +750,11 @@ def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, 
     if confidence < confidence_threshold:
         return "WAIT", confidence, net_score, details, [], (None,None,None,None), None, None, {}
     
-    # 8. تحديد وقف الخسارة والأهداف (ثابتة)
     atr_value = calc_atr(df).iloc[-1] if 'atr' in df.columns else 10
     entry_price = current_price
     
     if signal == "BUY":
-        stop_loss = max(recent_low, last_ema50)  # دعم قوي أو EMA50
+        stop_loss = max(recent_low, last_ema50)
         targets = {
             'target1': entry_price + atr_value * 1.5,
             'target2': entry_price + atr_value * 2.5,
@@ -772,7 +765,7 @@ def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, 
             'risk': abs(entry_price - stop_loss)
         }
     else:
-        stop_loss = min(recent_high, last_ema50)  # مقاومة قوية أو EMA50
+        stop_loss = min(recent_high, last_ema50)
         targets = {
             'target1': entry_price - atr_value * 1.5,
             'target2': entry_price - atr_value * 2.5,
@@ -789,7 +782,7 @@ def generate_advanced_signal(df, current_price, symbol="", news_sentiment=None, 
     return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
 
 # ==========================================
-# دوال مساعدة أخرى (MTF, Reversal, Explanation) – محدثة لاستخدام VRSI
+# دوال مساعدة أخرى (MTF, Reversal, Explanation) – محدثة
 # ==========================================
 def get_mtf_signal(symbol, current_price, interval='1h'):
     timeframes = ['15m', '1h', '4h'] if interval == '1h' else ['5m', '15m', '1h']
@@ -800,7 +793,7 @@ def get_mtf_signal(symbol, current_price, interval='1h'):
             if 'volume' in df.columns:
                 vrsi = calc_vrsi(df['close'], df['volume'], period=14).iloc[-1]
             else:
-                vrsi = calc_rsi(df['close'], period=14).iloc[-1]  # fallback
+                vrsi = calc_rsi(df['close'], period=14).iloc[-1]
             if vrsi < 20: signals.append(('BUY', tf))
             elif vrsi > 80: signals.append(('SELL', tf))
             else: signals.append(('NEUTRAL', tf))
@@ -852,13 +845,13 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
     if signal == "BUY":
         explanation = "🔹 **قرار الشراء** بناءً على:\n"
         for k, v in details.items():
-            if "+" in v or any(w in v for w in ["شراء", "صاعد", "فوق", "قرب الحد السفلي", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "أخبار إيجابية", "أقوى"]):
+            if "+" in v or any(w in v for w in ["شراء", "صاعد", "فوق", "مفرط البيع", "قوي", "كتلة", "FVG", "اجتياح", "تحول", "خصم", "TBS", "MFI", "فيبوناتشي", "انعكاس Smart Money صاعد", "أخبار إيجابية", "أقوى", "كسر مقاومة"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≥5 للشراء)\n📈 **الثقة**: {confidence:.0f}%"
     elif signal == "SELL":
         explanation = "🔻 **قرار البيع** بناءً على:\n"
         for k, v in details.items():
-            if "-" in v or any(w in v for w in ["بيع", "هابط", "تحت", "قرب الحد الأعلى", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط", "أخبار سلبية", "أقوى"]):
+            if "-" in v or any(w in v for w in ["بيع", "هابط", "تحت", "مفرط الشراء", "قمة", "كتلة بيع", "تحول هابط", "TBS", "انعكاس Smart Money هابط", "أخبار سلبية", "أقوى", "كسر دعم"]):
                 explanation += f"- {k}: {v}\n"
         explanation += f"✅ **النتيجة الصافية**: {net_score} (≤-5 للبيع)\n📉 **الثقة**: {confidence:.0f}%"
     else:
@@ -896,7 +889,6 @@ def get_all_signals_with_trades(interval='1h', params=None, weights=None):
         except:
             continue
     
-    # حساب مؤشرات العملات
     if data_dict:
         indices = calculate_currency_indices(data_dict, weights=weights)
         if indices:
@@ -908,10 +900,10 @@ def get_all_signals_with_trades(interval='1h', params=None, weights=None):
         df = data_dict[symbol]
         current_price = df['close'].iloc[-1]
         
-        # حساب المؤشرات الأساسية
         df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
         df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
         df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
+        df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
         df['atr'] = calc_atr(df)
         df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
         df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'], period=params.get('bb_period', 20), std_dev=params.get('bb_std', 2))
@@ -920,7 +912,6 @@ def get_all_signals_with_trades(interval='1h', params=None, weights=None):
         tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(df)
         df['tenkan'] = tenkan; df['kijun'] = kijun; df['senkou_a'] = senkou_a; df['senkou_b'] = senkou_b; df['chikou'] = chikou
         df['mfi'] = calc_mfi(df)
-        # VRSI
         if 'volume' in df.columns and not df['volume'].isna().all():
             df['vrsi'] = calc_vrsi(df['close'], df['volume'], period=params.get('vrsi_period', 14))
         else:
@@ -997,17 +988,21 @@ class TradeManager:
 # الشريط الجانبي (لوحة التحكم)
 # ==========================================
 with st.sidebar:
-    st.markdown("### ⚙️ لوحة التحكم Pro (Stable)")
+    st.markdown("### ⚙️ لوحة التحكم Pro (Extended)")
     st.session_state.account_balance = st.number_input("💰 رصيد الحساب", value=st.session_state.account_balance, step=1000, format="%d")
     risk_pct = st.slider("⚠️ نسبة المخاطرة (%)", 0.5, 5.0, 2.0, 0.1)
     st.session_state.risk_per_trade = risk_pct / 100
     
     st.markdown("#### 📊 مؤشرات احترافية")
-    vrsi_period = st.slider("فترة VRSI", 5, 30, 14, help="مؤشر القوة النسبية الموزون بالحجم (مستويات 80/20)")
+    vrsi_period = st.slider("فترة VRSI", 5, 30, 14)
     adx_threshold = st.slider("عتبة ADX", 15, 40, 25)
     bb_period = st.slider("فترة بولينجر", 10, 30, 20)
     bb_std = st.slider("انحراف بولينجر", 1.5, 3.0, 2.0, 0.1)
     confidence_threshold = st.slider("عتبة الثقة (%)", 40, 80, 60)
+    
+    # 👇 إضافة منزلق جديد لتحديد عدد الشموع للمستويات
+    lookback_levels = st.slider("📏 عدد الشموع للمستويات (الدعم/المقاومة)", 50, 500, 100, step=10,
+                                help="زيادة العدد يعطي مستويات أقوى وأكثر دقة، لكن قد تكون بعيدة عن السعر الحالي.")
     
     st.markdown("#### 🕒 الإطار الزمني")
     interval_map = {'5 دقائق': '5m', '15 دقيقة': '15m', 'ساعة': '1h', '4 ساعات': '4h', 'يوم': '1d'}
@@ -1019,7 +1014,8 @@ with st.sidebar:
         'adx_threshold': adx_threshold,
         'bb_period': bb_period,
         'bb_std': bb_std,
-        'confidence_threshold': confidence_threshold
+        'confidence_threshold': confidence_threshold,
+        'lookback_levels': lookback_levels  # تمرير القيمة الجديدة
     }
     
     st.markdown("#### ⚖️ أوزان العملات")
@@ -1098,6 +1094,7 @@ if current_price is None: current_price = df['close'].iloc[-1]; change = 0
 df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
+df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
 df['atr'] = calc_atr(df)
 df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(df['close'])
 df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(df['close'], period=bb_period, std_dev=bb_std)
@@ -1212,7 +1209,6 @@ if st.session_state.currency_indices is not None and not st.session_state.curren
     fig_idx.update_layout(height=350, template='plotly_dark', title="تطور المؤشرات")
     st.plotly_chart(fig_idx, use_container_width=True)
     
-    # مصفوفة الارتباط
     if selected_symbol in ["GC=F", "EURUSD=X", "GBPUSD=X"]:
         st.markdown("#### 🔥 مصفوفة الارتباط")
         corr_data = {}
@@ -1238,7 +1234,7 @@ else:
     st.info("قم بتحديث الإشارات لحساب المؤشرات.")
 
 # ==========================================
-# الرسم البياني الرئيسي (مع VRSI و EMA50/100)
+# الرسم البياني الرئيسي (مع VRSI و EMA50/100/200)
 # ==========================================
 st.markdown("---")
 st.markdown("### 📈 Price Chart with VRSI & Trend Lines")
@@ -1248,6 +1244,7 @@ fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(colo
 fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='cyan', dash='dash')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['ema100'], name='EMA100', line=dict(color='magenta', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema200'], name='EMA200', line=dict(color='white', dash='dash')), row=1, col=1)
 if not df_smc['bsl'].isna().all():
     fig.add_hline(y=df_smc['bsl'].iloc[-1], line_dash="dash", line_color="rgba(0,255,0,0.5)", row=1, col=1)
 if not df_smc['ssl'].isna().all():
@@ -1315,6 +1312,6 @@ if st.session_state.show_form:
 # ==========================================
 st.markdown(f"""
 <div class="footer">
-    <span class="brand">▲ BLACK PYRAMID PRO v2005</span> • Stable Signals • Trend-Based • VRSI • Fibonacci 78.6% & 88.6% • Auto-Risk • Heatmap
+    <span class="brand">▲ BLACK PYRAMID PRO v2006</span> • Extended Lookback • VRSI • Fibonacci Pro • Auto-Risk • Heatmap
 </div>
 """, unsafe_allow_html=True)
