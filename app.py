@@ -1,5 +1,5 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المتكاملة بالكامل)
+# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية مع طبقات التحقق)
 # تاريخ التحديث: 2026-08-31
 # المصدر: Twelve Data (رئيسي) + GoldAPI + yfinance (احتياطي)
 # ==========================================
@@ -16,6 +16,7 @@ import requests
 import json
 import os
 import time
+import logging
 
 # ==========================================
 # إعداد الصفحة
@@ -36,7 +37,7 @@ FMP_API_KEY = "EBdaCkJXtIphxCdiZpW3EWCAb4IKpz8N"
 TWELVE_API_KEY = "aeb08b1667274914bfa707940d1be324"  # مفتاح Twelve Data
 
 # ==========================================
-# الهوية البصرية
+# الهوية البصرية (نفس الكود السابق – تم اختصاره)
 # ==========================================
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -111,6 +112,44 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ==========================================
+# تهيئة حالة الجلسة (Session State)
+# ==========================================
+if "df" not in st.session_state:
+    st.session_state.df = None
+if "current_trade" not in st.session_state:
+    st.session_state.current_trade = None
+if "trades" not in st.session_state:
+    st.session_state.trades = []
+if "price_data" not in st.session_state:
+    st.session_state.price_data = None
+if "show_form" not in st.session_state:
+    st.session_state.show_form = False
+if "daily_pnl" not in st.session_state:
+    st.session_state.daily_pnl = 0
+if "daily_trades" not in st.session_state:
+    st.session_state.daily_trades = 0
+if "last_update" not in st.session_state:
+    st.session_state.last_update = datetime.now()
+if "refresh_trigger" not in st.session_state:
+    st.session_state.refresh_trigger = False
+if "all_signals" not in st.session_state:
+    st.session_state.all_signals = None
+if "show_indicators" not in st.session_state:
+    st.session_state.show_indicators = True
+if "currency_strength" not in st.session_state:
+    st.session_state.currency_strength = None
+if "economic_events" not in st.session_state:
+    st.session_state.economic_events = None
+if "news_analysis" not in st.session_state:
+    st.session_state.news_analysis = None
+if "data_errors" not in st.session_state:
+    st.session_state.data_errors = []
+if "failed_indicators" not in st.session_state:
+    st.session_state.failed_indicators = []
+if "indicator_status" not in st.session_state:
+    st.session_state.indicator_status = {}
 
 # ==========================================
 # قائمة الأزواج
@@ -203,7 +242,7 @@ CURRENCY_INDICES = {
 }
 
 # ==========================================
-# دوال Twelve Data المتقدمة
+# دوال Twelve Data المتقدمة (مع طبقات التحقق)
 # ==========================================
 
 def get_twelvedata_price(symbol_key):
@@ -223,16 +262,12 @@ def get_twelvedata_price(symbol_key):
 def get_twelvedata_historical(symbol_key, interval="1h", outputsize=500):
     """جلب البيانات التاريخية من Twelve Data وإرجاع DataFrame"""
     td_symbol = TWELVE_SYMBOL_MAP.get(symbol_key, symbol_key)
-    
-    # تحويل الفاصل الزمني إلى صيغة Twelve Data
     interval_map = {
         "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
         "1h": "1h", "4h": "4h", "1d": "1day", "1mo": "1day"
     }
     td_interval = interval_map.get(interval, "1h")
-    
     url = f"https://api.twelvedata.com/time_series?symbol={td_symbol}&interval={td_interval}&outputsize={outputsize}&apikey={TWELVE_API_KEY}"
-    
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
@@ -243,7 +278,6 @@ def get_twelvedata_historical(symbol_key, interval="1h", outputsize=500):
                 df = df.set_index('datetime')
                 df = df.astype(float)
                 df.columns = ['open', 'high', 'low', 'close', 'volume']
-                # ترتيب تصاعدي (الأقدم أولاً)
                 df = df.sort_index()
                 return df
     except Exception as e:
@@ -251,21 +285,25 @@ def get_twelvedata_historical(symbol_key, interval="1h", outputsize=500):
     return None
 
 # ==========================================
-# دوال البيانات الرئيسية (مع Fallback)
+# دوال البيانات الرئيسية (مع Fallbacks متعددة)
 # ==========================================
 
 @st.cache_data(ttl=30)
 def get_spot_price(symbol="GC=F"):
     """
-    جلب السعر الحالي مع نظام احتياطي:
-    1. Twelve Data (الأساسي)
-    2. GoldAPI (للذهب والفضة فقط)
-    3. yfinance (الاحتياطي النهائي)
+    طبقة جلب السعر الفوري:
+    - Twelve Data (أساسي)
+    - GoldAPI (للذهب والفضة)
+    - yfinance (احتياطي)
     """
+    errors = []
     # 1. Twelve Data
-    price = get_twelvedata_price(symbol)
-    if price is not None:
-        return price, 0.0
+    try:
+        price = get_twelvedata_price(symbol)
+        if price is not None:
+            return price, 0.0
+    except Exception as e:
+        errors.append(f"TwelveData: {e}")
     
     # 2. GoldAPI (للذهب والفضة)
     if symbol == "GC=F" and GOLD_API_KEY:
@@ -278,9 +316,8 @@ def get_spot_price(symbol="GC=F"):
                 price = float(data.get('price', 0))
                 change = float(data.get('change_percent', 0))
                 return price, change
-        except:
-            pass
-    
+        except Exception as e:
+            errors.append(f"GoldAPI XAU: {e}")
     if symbol == "SI=F" and GOLD_API_KEY:
         try:
             url = "https://www.goldapi.io/api/XAG/USD"
@@ -291,8 +328,8 @@ def get_spot_price(symbol="GC=F"):
                 price = float(data.get('price', 0))
                 change = float(data.get('change_percent', 0))
                 return price, change
-        except:
-            pass
+        except Exception as e:
+            errors.append(f"GoldAPI XAG: {e}")
     
     # 3. yfinance (الاحتياطي النهائي)
     try:
@@ -303,19 +340,16 @@ def get_spot_price(symbol="GC=F"):
             first = data.iloc[0]
             change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
             return float(last['Close']), float(change)
-    except:
-        pass
+    except Exception as e:
+        errors.append(f"yfinance: {e}")
     
+    # تسجيل الأخطاء في session_state
+    st.session_state.data_errors = errors
     return None, None
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
-    """
-    جلب البيانات التاريخية:
-    1. Twelve Data (الأساسي)
-    2. yfinance (الاحتياطي)
-    """
-    # تحديد عدد النقاط المطلوبة بناءً على الفترة
+    """جلب البيانات التاريخية مع fallbacks"""
     output_size = 500
     if period == "5d":
         output_size = 200
@@ -327,9 +361,12 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
         output_size = 1500
     
     # 1. Twelve Data
-    df = get_twelvedata_historical(symbol, interval, output_size)
-    if df is not None and len(df) > 20:
-        return df
+    try:
+        df = get_twelvedata_historical(symbol, interval, output_size)
+        if df is not None and len(df) > 20:
+            return df
+    except Exception as e:
+        pass
     
     # 2. yfinance (الاحتياطي)
     alternative_symbols = {
@@ -340,7 +377,6 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
         "ETH-USD": ["ETHUSD=X"]
     }
     symbols_to_try = [symbol] + alternative_symbols.get(symbol, [])
-    
     for attempt in range(max_retries):
         for sym in symbols_to_try:
             try:
@@ -353,12 +389,11 @@ def get_historical_data(symbol, period="1mo", interval="1h", max_retries=3):
                 continue
         if attempt < max_retries - 1:
             time.sleep(2)
-    
     return None
 
 @st.cache_data(ttl=30)
 def get_all_forex():
-    """جلب أسعار جميع العملات الرئيسية من Twelve Data"""
+    """جلب أسعار جميع العملات الرئيسية من Twelve Data مع fallback"""
     main_symbols = {
         "DXY": "DX-Y.NYB",
         "EURUSD": "EURUSD=X",
@@ -370,12 +405,9 @@ def get_all_forex():
         "USDCAD": "USDCAD=X"
     }
     results = {}
-    
-    # استخدام Twelve Data لجميع الأزواج دفعة واحدة
     symbols_list = [TWELVE_SYMBOL_MAP.get(sym, sym) for sym in main_symbols.values()]
     symbols_str = ",".join(symbols_list)
     url = f"https://api.twelvedata.com/price?symbol={symbols_str}&apikey={TWELVE_API_KEY}"
-    
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
@@ -389,8 +421,7 @@ def get_all_forex():
                                 break
     except:
         pass
-    
-    # الاحتياطي: yfinance للباقي
+    # yfinance للباقي
     for name, symbol in main_symbols.items():
         if name not in results:
             try:
@@ -405,25 +436,19 @@ def get_all_forex():
                     results[name] = {'price': 0, 'change': 0}
             except:
                 results[name] = {'price': 0, 'change': 0}
-    
     return results
 
 @st.cache_data(ttl=60)
 def get_currency_strength():
     """حساب قوة العملات باستخدام Twelve Data"""
     strength = {}
-    
-    # جلب جميع الأزواج دفعة واحدة من Twelve Data
     all_pairs = []
     for pairs in CURRENCY_INDICES.values():
         all_pairs.extend(pairs)
     all_pairs = list(set(all_pairs))
-    
     symbols_list = [TWELVE_SYMBOL_MAP.get(pair, pair) for pair in all_pairs if pair in TWELVE_SYMBOL_MAP]
     if not symbols_list:
         return {}
-    
-    # تقسيم الطلب إلى مجموعات صغيرة (Twelve Data يدعم حتى 8 رموز في الطلب الواحد)
     prices = {}
     for i in range(0, len(symbols_list), 8):
         chunk = symbols_list[i:i+8]
@@ -439,8 +464,6 @@ def get_currency_strength():
                             prices[item['symbol']] = float(item['price'])
         except:
             pass
-    
-    # حساب القوة لكل عملة
     for currency, pairs in CURRENCY_INDICES.items():
         changes = []
         for pair in pairs:
@@ -452,7 +475,6 @@ def get_currency_strength():
                         last = df['close'].iloc[-1]
                         first = df['close'].iloc[0]
                         change = ((last - first) / first) * 100 if first != 0 else 0
-                        # تصحيح الاتجاه حسب الزوج
                         if pair.split('=')[0].startswith(currency):
                             changes.append(change)
                         else:
@@ -463,12 +485,10 @@ def get_currency_strength():
             strength[currency] = round(sum(changes) / len(changes), 2)
         else:
             strength[currency] = 0.0
-    
     return strength
 
 @st.cache_data(ttl=120)
 def get_correlation_matrix(pairs):
-    """حساب مصفوفة الارتباط بين الأزواج"""
     correlation_data = {}
     for pair in pairs:
         try:
@@ -477,7 +497,6 @@ def get_correlation_matrix(pairs):
                 correlation_data[pair] = df['close']
         except:
             continue
-    
     if correlation_data:
         df_corr = pd.DataFrame(correlation_data)
         return df_corr.corr()
@@ -485,7 +504,6 @@ def get_correlation_matrix(pairs):
 
 @st.cache_data(ttl=120)
 def get_pair_correlation(symbol1, symbol2):
-    """حساب الارتباط بين زوجين"""
     try:
         df1 = get_twelvedata_historical(symbol1, interval="1h", outputsize=100)
         df2 = get_twelvedata_historical(symbol2, interval="1h", outputsize=100)
@@ -494,8 +512,6 @@ def get_pair_correlation(symbol1, symbol2):
             return round(df1_aligned.corr(df2['close']), 3)
     except:
         pass
-    
-    # الاحتياطي باستخدام yfinance
     try:
         df1 = get_historical_data(symbol1, period="5d", interval="1h")
         df2 = get_historical_data(symbol2, period="5d", interval="1h")
@@ -507,7 +523,7 @@ def get_pair_correlation(symbol1, symbol2):
     return None
 
 # ==========================================
-# المؤشرات الأساسية
+# المؤشرات الأساسية (مع تحسينات)
 # ==========================================
 
 def calc_rsi(data, period=14):
@@ -895,11 +911,10 @@ def analyze_chart_patterns(df):
     return patterns, total_score
 
 # ==========================================
-# دوال متقدمة
+# دوال متقدمة (كشف الشموع، التباعد، إلخ)
 # ==========================================
 
 def detect_candlestick_patterns(df):
-    """كشف أنماط الشموع اليابانية الانعكاسية"""
     patterns = []
     if len(df) < 3:
         return patterns
@@ -949,7 +964,6 @@ def detect_candlestick_patterns(df):
     return patterns
 
 def detect_rsi_divergence(df, rsi_column='rsi', lookback=20):
-    """كشف التباعد (Divergence) بين السعر و RSI"""
     if len(df) < lookback or rsi_column not in df.columns:
         return None, 0
     
@@ -978,7 +992,6 @@ def detect_rsi_divergence(df, rsi_column='rsi', lookback=20):
     return None, 0
 
 def check_fresh_order_block(df_smc):
-    """التحقق من وجود كتلة أوامر طازجة (لم يتم لمسها)"""
     if len(df_smc) < 10:
         return False, None
     
@@ -997,7 +1010,6 @@ def check_fresh_order_block(df_smc):
     return False, None
 
 def is_ict_killzone():
-    """تحديد منطقة القتل الزمنية ICT (لندن/نيويورك)"""
     eastern = pytz.timezone('US/Eastern')
     now = datetime.now(eastern)
     hour = now.hour
@@ -1013,7 +1025,6 @@ def is_ict_killzone():
     return None, 0
 
 def get_major_trend(df):
-    """تحديد الاتجاه الرئيسي بناءً على EMA200"""
     if len(df) < 200:
         return "NEUTRAL"
     ema200 = df['close'].ewm(span=200, adjust=False).mean().iloc[-1]
@@ -1025,14 +1036,10 @@ def get_major_trend(df):
     return "NEUTRAL"
 
 # ==========================================
-# إعدادات المؤشرات الديناميكية لكل نوع أصل
+# إعدادات المؤشرات الديناميكية
 # ==========================================
 
 def get_indicator_settings(symbol_name):
-    """
-    إرجاع إعدادات المؤشرات المناسبة حسب نوع الأصل
-    """
-    # تحديد نوع الأصل
     if "Gold" in symbol_name or "XAU" in symbol_name or "Silver" in symbol_name or "XAG" in symbol_name:
         asset_type = "gold"
     elif "BTC" in symbol_name or "ETH" in symbol_name or "Bitcoin" in symbol_name or "Ethereum" in symbol_name:
@@ -1050,101 +1057,27 @@ def get_indicator_settings(symbol_name):
     }
     
     if asset_type == "gold":
-        settings['macd'] = {
-            'fast': 5,
-            'slow': 13,
-            'signal': 4,
-            'description': 'سريع للمضاربة'
-        }
-        settings['rsi'] = {
-            'period': 14,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'مستويات موسعة للترند القوي'
-        }
-        settings['mfi'] = {
-            'period': 9,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'فترة قصيرة للسيولة'
-        }
-        settings['bb'] = {
-            'period': 20,
-            'std_dev': 2.5,
-            'description': 'نطاق موسع للتقلبات الحادة'
-        }
-        settings['ichimoku'] = {
-            'tenkan': 10,
-            'kijun': 30,
-            'senkou': 60,
-            'description': 'معدل لنظام 5 أيام'
-        }
+        settings['macd'] = {'fast': 5, 'slow': 13, 'signal': 4}
+        settings['rsi'] = {'period': 14, 'overbought': 80, 'oversold': 20}
+        settings['mfi'] = {'period': 9, 'overbought': 80, 'oversold': 20}
+        settings['bb'] = {'period': 20, 'std_dev': 2.5}
+        settings['ichimoku'] = {'tenkan': 10, 'kijun': 30, 'senkou': 60}
         settings['atr_period'] = 14
         settings['adx_period'] = 14
-        
     elif asset_type == "crypto":
-        settings['macd'] = {
-            'fast': 6,
-            'slow': 13,
-            'signal': 5,
-            'description': 'سريع للمضاربة'
-        }
-        settings['rsi'] = {
-            'period': 14,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'مستويات موسعة للترندات العنيفة'
-        }
-        settings['mfi'] = {
-            'period': 10,
-            'overbought': 85,
-            'oversold': 15,
-            'description': 'مستويات واسعة جداً'
-        }
-        settings['bb'] = {
-            'period': 50,
-            'std_dev': 2.3,
-            'description': 'فترة طويلة لتخفيف الضوضاء'
-        }
-        settings['ichimoku'] = {
-            'tenkan': 10,
-            'kijun': 30,
-            'senkou': 60,
-            'description': 'معدل لسوق 24/7'
-        }
+        settings['macd'] = {'fast': 6, 'slow': 13, 'signal': 5}
+        settings['rsi'] = {'period': 14, 'overbought': 80, 'oversold': 20}
+        settings['mfi'] = {'period': 10, 'overbought': 85, 'oversold': 15}
+        settings['bb'] = {'period': 50, 'std_dev': 2.3}
+        settings['ichimoku'] = {'tenkan': 10, 'kijun': 30, 'senkou': 60}
         settings['atr_period'] = 14
         settings['adx_period'] = 14
-        
     else:  # forex
-        settings['macd'] = {
-            'fast': 12,
-            'slow': 26,
-            'signal': 9,
-            'description': 'قياسي'
-        }
-        settings['rsi'] = {
-            'period': 14,
-            'overbought': 70,
-            'oversold': 30,
-            'description': 'قياسي'
-        }
-        settings['mfi'] = {
-            'period': 14,
-            'overbought': 80,
-            'oversold': 20,
-            'description': 'قياسي'
-        }
-        settings['bb'] = {
-            'period': 20,
-            'std_dev': 2,
-            'description': 'قياسي'
-        }
-        settings['ichimoku'] = {
-            'tenkan': 9,
-            'kijun': 26,
-            'senkou': 52,
-            'description': 'كلاسيكي'
-        }
+        settings['macd'] = {'fast': 12, 'slow': 26, 'signal': 9}
+        settings['rsi'] = {'period': 14, 'overbought': 70, 'oversold': 30}
+        settings['mfi'] = {'period': 14, 'overbought': 80, 'oversold': 20}
+        settings['bb'] = {'period': 20, 'std_dev': 2}
+        settings['ichimoku'] = {'tenkan': 9, 'kijun': 26, 'senkou': 52}
         settings['atr_period'] = 14
         settings['adx_period'] = 14
     
@@ -1155,9 +1088,6 @@ def get_indicator_settings(symbol_name):
 # ==========================================
 
 def get_dynamic_weights(df, asset_type="forex"):
-    """
-    تعديل أوزان المؤشرات حسب حالة السوق ونوع الأصل
-    """
     adx_val = 20
     if 'adx' in df.columns and not df['adx'].empty:
         try:
@@ -1181,7 +1111,7 @@ def get_dynamic_weights(df, asset_type="forex"):
             'mfi': 3, 'smr': 4, 'candle': 4, 'divergence': 5,
             'fresh_ob': 4, 'fibonacci': 3, 'macd_hist': 3
         }
-    else:  # forex
+    else:
         weights = {
             'rsi': 3, 'macd': 3, 'bb': 3, 'vwap': 2, 'adx': 2,
             'ichimoku': 3, 'smc': 4, 'patterns': 5, 'tbs': 5,
@@ -1209,7 +1139,6 @@ def get_dynamic_weights(df, asset_type="forex"):
 # ==========================================
 
 def get_mtf_signal(symbol, current_price):
-    """تحليل متعدد الأطر الزمنية باستخدام Twelve Data"""
     timeframes = ['15min', '1h', '4h']
     signals = []
     for tf in timeframes:
@@ -1224,7 +1153,6 @@ def get_mtf_signal(symbol, current_price):
                 else:
                     signals.append(('NEUTRAL', tf))
         except:
-            # الاحتياطي باستخدام yfinance
             try:
                 interval_map = {"15min": "15m", "1h": "1h", "4h": "4h"}
                 df = get_historical_data(symbol, period="5d", interval=interval_map.get(tf, "1h"))
@@ -1451,44 +1379,29 @@ def display_news_analysis(news_analysis):
         return
     
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         gold_sent = news_analysis.get('gold_sentiment', 0)
         color = "🟢" if gold_sent > 0 else ("🔴" if gold_sent < 0 else "🟡")
         st.metric(f"{color} الذهب", f"{gold_sent:+.0f}")
-    
     with col2:
         forex_sent = news_analysis.get('forex_sentiment', 0)
         color = "🟢" if forex_sent > 0 else ("🔴" if forex_sent < 0 else "🟡")
         st.metric(f"{color} الفوركس", f"{forex_sent:+.0f}")
-    
     with col3:
         overall = news_analysis.get('overall_sentiment', 0)
         color = "🟢" if overall > 0 else ("🔴" if overall < 0 else "🟡")
         st.metric(f"{color} الإجمالي", f"{overall:+.0f}")
-    
     st.info(news_analysis.get('summary', ''))
-    
     if news_analysis.get('news_analysis'):
         st.markdown("#### 📰 تحليل الأخبار:")
         for item in news_analysis['news_analysis'][:5]:
             impact = item.get('impact', 0)
             impact_level = item.get('impact_level', '')
-            if impact_level == "عالٍ":
-                icon = "🔴"
-            elif impact_level == "متوسط":
-                icon = "🟡"
-            else:
-                icon = "🟢"
-            
+            icon = "🔴" if impact_level == "عالٍ" else ("🟡" if impact_level == "متوسط" else "🟢")
             st.markdown(f"""
             <div class="news-card">
-                <div class="news-title">
-                    {icon} {item.get('title', '')[:100]}...
-                </div>
-                <div class="news-date">
-                    {item.get('source', '')} | التأثير: {impact_level} ({impact:+.0f}) | {item.get('date', '')}
-                </div>
+                <div class="news-title">{icon} {item.get('title', '')[:100]}...</div>
+                <div class="news-date">{item.get('source', '')} | التأثير: {impact_level} ({impact:+.0f}) | {item.get('date', '')}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1496,84 +1409,161 @@ def display_economic_events(events):
     if not events:
         st.info("لا توجد أحداث اقتصادية")
         return
-    
     for event in events[:15]:
         impact = event.get('impact', '')
-        if impact == 'High' or impact == 'عالٍ':
-            impact_icon = "🔴"
-            impact_class = "event-high"
-        elif impact == 'Medium' or impact == 'متوسط':
-            impact_icon = "🟡"
-            impact_class = "event-medium"
-        else:
-            impact_icon = "🟢"
-            impact_class = "event-low"
-        
+        impact_icon = "🔴" if impact in ['High', 'عالٍ'] else ("🟡" if impact in ['Medium', 'متوسط'] else "🟢")
+        impact_class = "event-high" if impact in ['High', 'عالٍ'] else ("event-medium" if impact in ['Medium', 'متوسط'] else "event-low")
         st.markdown(f"""
         <div class="news-card {impact_class}">
-            <div class="news-title">
-                {impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}
-            </div>
-            <div class="news-date">
-                🕐 {event.get('date', '')} {event.get('time', '')} | 
-                التوقع: {event.get('forecast', 'N/A')} | 
-                السابق: {event.get('previous', 'N/A')} | 
-                الفعلي: {event.get('actual', 'N/A')}
-            </div>
+            <div class="news-title">{impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}</div>
+            <div class="news-date">🕐 {event.get('date', '')} {event.get('time', '')} | التوقع: {event.get('forecast', 'N/A')} | السابق: {event.get('previous', 'N/A')} | الفعلي: {event.get('actual', 'N/A')}</div>
         </div>
         """, unsafe_allow_html=True)
 
 # ==========================================
-# الإشارة المتكاملة
+# الإشارة المتكاملة (مع طبقات التحقق)
 # ==========================================
 
 def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     if df is None or len(df) < 100:
-        return "WAIT", 50, 0, {}, [], None, None, None, None
+        return "WAIT", 50, 0, {}, [], None, None, None, None, {}
 
+    indicator_status = {}  # لتتبع حالة كل مؤشر
+
+    # إعدادات المؤشرات
     settings = get_indicator_settings(symbol_name)
     asset_type = settings['asset_type']
-    
     macd_settings = settings['macd']
     rsi_settings = settings['rsi']
     mfi_settings = settings['mfi']
     bb_settings = settings['bb']
     ichimoku_settings = settings['ichimoku']
-    
-    df['rsi'] = calc_rsi(df['close'], period=rsi_settings['period'])
-    df['atr'] = calc_atr(df, period=settings['atr_period'])
-    df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(
-        df['close'], 
-        fast=macd_settings['fast'],
-        slow=macd_settings['slow'],
-        signal=macd_settings['signal']
-    )
-    df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(
-        df['close'],
-        period=bb_settings['period'],
-        std_dev=bb_settings['std_dev']
-    )
-    df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df, period=settings['adx_period'])
-    df['vwap'] = calc_vwap(df)
-    tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(
-        df,
-        tenkan=ichimoku_settings['tenkan'],
-        kijun=ichimoku_settings['kijun'],
-        senkou=ichimoku_settings['senkou']
-    )
-    df['tenkan'] = tenkan
-    df['kijun'] = kijun
-    df['senkou_a'] = senkou_a
-    df['senkou_b'] = senkou_b
-    df['chikou'] = chikou
-    df['mfi'] = calc_mfi(df, period=mfi_settings['period'])
 
-    df_smc = analyze_smc_ict(df)
-    last_smc = df_smc.iloc[-1]
-    patterns, _ = analyze_chart_patterns(df)
-    tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
+    # حساب المؤشرات مع try/except
+    # RSI
+    try:
+        df['rsi'] = calc_rsi(df['close'], period=rsi_settings['period'])
+        if df['rsi'].isna().all():
+            raise ValueError("جميع قيم RSI فارغة")
+        indicator_status['RSI'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['RSI'] = f'❌ فشل: {str(e)}'
+        df['rsi'] = pd.Series([np.nan] * len(df))
+
+    # ATR
+    try:
+        df['atr'] = calc_atr(df, period=settings['atr_period'])
+        indicator_status['ATR'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['ATR'] = f'❌ فشل: {str(e)}'
+        df['atr'] = pd.Series([np.nan] * len(df))
+
+    # MACD
+    try:
+        df['macd'], df['macd_signal'], df['macd_histogram'] = calc_macd(
+            df['close'],
+            fast=macd_settings['fast'],
+            slow=macd_settings['slow'],
+            signal=macd_settings['signal']
+        )
+        indicator_status['MACD'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['MACD'] = f'❌ فشل: {str(e)}'
+        df['macd'] = pd.Series([np.nan] * len(df))
+        df['macd_signal'] = pd.Series([np.nan] * len(df))
+        df['macd_histogram'] = pd.Series([np.nan] * len(df))
+
+    # Bollinger Bands
+    try:
+        df['bb_upper'], df['bb_middle'], df['bb_lower'] = calc_bollinger_bands(
+            df['close'],
+            period=bb_settings['period'],
+            std_dev=bb_settings['std_dev']
+        )
+        indicator_status['Bollinger'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['Bollinger'] = f'❌ فشل: {str(e)}'
+        df['bb_upper'] = pd.Series([np.nan] * len(df))
+        df['bb_middle'] = pd.Series([np.nan] * len(df))
+        df['bb_lower'] = pd.Series([np.nan] * len(df))
+
+    # ADX
+    try:
+        df['adx'], df['plus_di'], df['minus_di'] = calc_adx(df, period=settings['adx_period'])
+        indicator_status['ADX'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['ADX'] = f'❌ فشل: {str(e)}'
+        df['adx'] = pd.Series([np.nan] * len(df))
+
+    # VWAP
+    try:
+        df['vwap'] = calc_vwap(df)
+        indicator_status['VWAP'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['VWAP'] = f'❌ فشل: {str(e)}'
+        df['vwap'] = pd.Series([np.nan] * len(df))
+
+    # Ichimoku
+    try:
+        tenkan, kijun, senkou_a, senkou_b, chikou = calc_ichimoku(
+            df,
+            tenkan=ichimoku_settings['tenkan'],
+            kijun=ichimoku_settings['kijun'],
+            senkou=ichimoku_settings['senkou']
+        )
+        df['tenkan'] = tenkan
+        df['kijun'] = kijun
+        df['senkou_a'] = senkou_a
+        df['senkou_b'] = senkou_b
+        df['chikou'] = chikou
+        indicator_status['Ichimoku'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['Ichimoku'] = f'❌ فشل: {str(e)}'
+        df['tenkan'] = pd.Series([np.nan] * len(df))
+        df['kijun'] = pd.Series([np.nan] * len(df))
+        df['senkou_a'] = pd.Series([np.nan] * len(df))
+        df['senkou_b'] = pd.Series([np.nan] * len(df))
+        df['chikou'] = pd.Series([np.nan] * len(df))
+
+    # MFI
+    try:
+        df['mfi'] = calc_mfi(df, period=mfi_settings['period'])
+        indicator_status['MFI'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['MFI'] = f'❌ فشل: {str(e)}'
+        df['mfi'] = pd.Series([np.nan] * len(df))
+
+    # SMC/ICT
+    try:
+        df_smc = analyze_smc_ict(df)
+        indicator_status['SMC'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['SMC'] = f'❌ فشل: {str(e)}'
+        df_smc = df.copy()
+        for col in ['order_block_bullish', 'order_block_bearish', 'fvg_bullish', 'fvg_bearish',
+                    'liquidity_sweep_bullish', 'liquidity_sweep_bearish', 'bos_bullish', 'bos_bearish',
+                    'mss_bullish', 'mss_bearish', 'in_discount', 'in_premium', 'tbs_bullish', 'tbs_bearish',
+                    'bsl', 'ssl', 'smr_bullish', 'smr_bearish']:
+            if col not in df_smc.columns:
+                df_smc[col] = False if col not in ['bsl', 'ssl'] else np.nan
+
+    # الأنماط الهيكلية
+    try:
+        patterns, _ = analyze_chart_patterns(df)
+        indicator_status['Patterns'] = '✅ ناجح'
+    except Exception as e:
+        indicator_status['Patterns'] = f'❌ فشل: {str(e)}'
+        patterns = []
+
+    # TBS
+    try:
+        tbs_type, tbs_entry, tbs_stop, tbs_level = detect_tbs(df)
+        indicator_status['TBS'] = '✅ ناجح' if tbs_type else '⚪ لم يُكتشف'
+    except Exception as e:
+        indicator_status['TBS'] = f'❌ فشل: {str(e)}'
+        tbs_type, tbs_entry, tbs_stop, tbs_level = None, None, None, None
+
     last = df.iloc[-1]
-
     weights = get_dynamic_weights(df, asset_type)
     scores = {'BUY': 0, 'SELL': 0}
     details = {}
@@ -1595,14 +1585,12 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         if not pd.isna(last['macd']) and not pd.isna(last['macd_signal']):
             if last['macd'] > last['macd_signal'] and last['macd'] > 0:
                 scores['BUY'] += weights['macd']
-                details['MACD'] = f"إيجابي ({macd_settings['fast']},{macd_settings['slow']},{macd_settings['signal']}) +{weights['macd']}"
+                details['MACD'] = f"إيجابي +{weights['macd']}"
             elif last['macd'] < last['macd_signal'] and last['macd'] < 0:
                 scores['SELL'] += weights['macd']
-                details['MACD'] = f"سلبي ({macd_settings['fast']},{macd_settings['slow']},{macd_settings['signal']}) +{weights['macd']}"
+                details['MACD'] = f"سلبي +{weights['macd']}"
             else:
                 details['MACD'] = "محايد"
-        else:
-            details['MACD'] = "بيانات غير كافية"
 
     # MACD Histogram
     if 'macd_histogram' in df.columns and not pd.isna(last['macd_histogram']):
@@ -1613,21 +1601,19 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
             scores['SELL'] += weights['macd_hist']
             details['MACD_Hist'] = f"هيستوجرام هابط +{weights['macd_hist']}"
         else:
-            details['MACD_Hist'] = "هيستوجرام محايد"
+            details['MACD_Hist'] = "محايد"
 
     # Bollinger Bands
     if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
         if not pd.isna(last['bb_upper']) and not pd.isna(last['bb_lower']):
             if current_price <= last['bb_lower'] * 1.005:
                 scores['BUY'] += weights['bb']
-                details['BB'] = f"قرب الحد السفلي ({bb_settings['period']},{bb_settings['std_dev']}) +{weights['bb']}"
+                details['BB'] = f"قرب الحد السفلي +{weights['bb']}"
             elif current_price >= last['bb_upper'] * 0.995:
                 scores['SELL'] += weights['bb']
-                details['BB'] = f"قرب الحد الأعلى ({bb_settings['period']},{bb_settings['std_dev']}) +{weights['bb']}"
+                details['BB'] = f"قرب الحد الأعلى +{weights['bb']}"
             else:
                 details['BB'] = "وسط النطاق"
-        else:
-            details['BB'] = "بيانات غير كافية"
 
     # VWAP
     if 'vwap' in df.columns and not pd.isna(last['vwap']):
@@ -1655,10 +1641,10 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         if not pd.isna(last['senkou_a']) and not pd.isna(last['senkou_b']):
             if current_price > last['senkou_a'] and current_price > last['senkou_b']:
                 scores['BUY'] += weights['ichimoku']
-                details['Ichimoku'] = f"فوق السحابة ({ichimoku_settings['tenkan']},{ichimoku_settings['kijun']},{ichimoku_settings['senkou']}) +{weights['ichimoku']}"
+                details['Ichimoku'] = f"فوق السحابة +{weights['ichimoku']}"
             elif current_price < last['senkou_a'] and current_price < last['senkou_b']:
                 scores['SELL'] += weights['ichimoku']
-                details['Ichimoku'] = f"تحت السحابة ({ichimoku_settings['tenkan']},{ichimoku_settings['kijun']},{ichimoku_settings['senkou']}) +{weights['ichimoku']}"
+                details['Ichimoku'] = f"تحت السحابة +{weights['ichimoku']}"
             else:
                 details['Ichimoku'] = "داخل السحابة"
 
@@ -1667,10 +1653,10 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         mfi = last['mfi']
         if mfi < mfi_settings['oversold']:
             scores['BUY'] += weights['mfi']
-            details['MFI'] = f"مفرط البيع ({mfi:.1f}) - المستوى {mfi_settings['oversold']} +{weights['mfi']}"
+            details['MFI'] = f"مفرط البيع ({mfi:.1f}) +{weights['mfi']}"
         elif mfi > mfi_settings['overbought']:
             scores['SELL'] += weights['mfi']
-            details['MFI'] = f"مفرط الشراء ({mfi:.1f}) - المستوى {mfi_settings['overbought']} +{weights['mfi']}"
+            details['MFI'] = f"مفرط الشراء ({mfi:.1f}) +{weights['mfi']}"
         else:
             details['MFI'] = f"محايد ({mfi:.1f})"
 
@@ -1681,45 +1667,46 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     if fib_levels:
         if current_price > fib_levels.get('fib_618', current_price):
             scores['BUY'] += weights['fibonacci']
-            details['Fibonacci'] = f"فوق 0.618 +{weights['fibonacci']} BUY"
+            details['Fibonacci'] = f"فوق 0.618 +{weights['fibonacci']}"
         elif current_price < fib_levels.get('fib_382', current_price):
             scores['SELL'] += weights['fibonacci']
-            details['Fibonacci'] = f"تحت 0.382 +{weights['fibonacci']} SELL"
+            details['Fibonacci'] = f"تحت 0.382 +{weights['fibonacci']}"
         else:
             details['Fibonacci'] = "منطقة وسط"
 
     # SMC/SMR
-    if last_smc.get('order_block_bullish', False):
-        scores['BUY'] += weights['smc']
-        details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
-    elif last_smc.get('order_block_bearish', False):
-        scores['SELL'] += weights['smc']
-        details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
-    elif last_smc.get('fvg_bullish', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"FVG شراء +{weights['smc']//2}"
-    elif last_smc.get('fvg_bearish', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"FVG بيع +{weights['smc']//2}"
-    elif last_smc.get('mss_bullish', False):
-        scores['BUY'] += weights['smc']
-        details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
-    elif last_smc.get('mss_bearish', False):
-        scores['SELL'] += weights['smc']
-        details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
-    elif last_smc.get('in_discount', False):
-        scores['BUY'] += weights['smc']//2
-        details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
-    elif last_smc.get('in_premium', False):
-        scores['SELL'] += weights['smc']//2
-        details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
-
-    if last_smc.get('smr_bullish', False):
-        scores['BUY'] += weights['smr']
-        details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
-    elif last_smc.get('smr_bearish', False):
-        scores['SELL'] += weights['smr']
-        details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
+    if not df_smc.empty:
+        last_smc = df_smc.iloc[-1]
+        if last_smc.get('order_block_bullish', False):
+            scores['BUY'] += weights['smc']
+            details['SMC'] = f"كتلة أوامر شراء +{weights['smc']}"
+        elif last_smc.get('order_block_bearish', False):
+            scores['SELL'] += weights['smc']
+            details['SMC'] = f"كتلة أوامر بيع +{weights['smc']}"
+        elif last_smc.get('fvg_bullish', False):
+            scores['BUY'] += weights['smc']//2
+            details['SMC'] = f"FVG شراء +{weights['smc']//2}"
+        elif last_smc.get('fvg_bearish', False):
+            scores['SELL'] += weights['smc']//2
+            details['SMC'] = f"FVG بيع +{weights['smc']//2}"
+        elif last_smc.get('mss_bullish', False):
+            scores['BUY'] += weights['smc']
+            details['SMC'] = f"تحول هيكل صاعد +{weights['smc']}"
+        elif last_smc.get('mss_bearish', False):
+            scores['SELL'] += weights['smc']
+            details['SMC'] = f"تحول هيكل هابط +{weights['smc']}"
+        elif last_smc.get('in_discount', False):
+            scores['BUY'] += weights['smc']//2
+            details['SMC'] = f"منطقة خصم +{weights['smc']//2}"
+        elif last_smc.get('in_premium', False):
+            scores['SELL'] += weights['smc']//2
+            details['SMC'] = f"منطقة قمة +{weights['smc']//2}"
+        if last_smc.get('smr_bullish', False):
+            scores['BUY'] += weights['smr']
+            details['SMR'] = f"انعكاس Smart Money صاعد +{weights['smr']}"
+        elif last_smc.get('smr_bearish', False):
+            scores['SELL'] += weights['smr']
+            details['SMR'] = f"انعكاس Smart Money هابط +{weights['smr']}"
 
     # الأنماط الهيكلية
     if patterns:
@@ -1748,8 +1735,6 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         elif cp['direction'] == 'BEARISH':
             scores['SELL'] += weights['candle']
             details[f"Candle_{cp['pattern']}"] = f"{cp['pattern']} (+{weights['candle']})"
-        else:
-            details[f"Candle_{cp['pattern']}"] = f"{cp['pattern']} (محايد)"
 
     # تباعد RSI
     div_type, div_score = detect_rsi_divergence(df)
@@ -1760,22 +1745,6 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         elif "BEARISH" in div_type:
             scores['SELL'] += weights['divergence']
             details['Divergence'] = f"{div_type} (+{weights['divergence']})"
-
-    # تكامل الأنماط الهيكلية مع الشموع
-    if patterns and candle_patterns:
-        try:
-            last_struct = next((p for p in reversed(patterns) if p.get('direction') != 'NEUTRAL'), None)
-            last_candle = next((c for c in reversed(candle_patterns) if c.get('direction') != 'NEUTRAL'), None)
-            if last_struct is not None and last_candle is not None and last_struct.get('direction') == last_candle.get('direction'):
-                bonus = weights['patterns'] // 2
-                direction = last_struct.get('direction')
-                if direction in scores:
-                    scores[direction] += bonus
-                else:
-                    scores[direction] = bonus
-                details['Confluence'] = f"تطابق {last_struct.get('pattern', '')} مع {last_candle.get('pattern', '')} (تأكيد مضاعف +{bonus})"
-        except Exception as e:
-            pass
 
     # كتل الأوامر الطازجة
     is_fresh, fresh_dir = check_fresh_order_block(df_smc)
@@ -1789,21 +1758,13 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         if currency_strength:
             pair_name = symbol_name
             currencies = pair_name.split("/") if "/" in pair_name else []
-            
             if len(currencies) == 2:
                 base = currencies[0]
                 quote = currencies[1]
                 base_strength = currency_strength.get(base, 0)
                 quote_strength = currency_strength.get(quote, 0)
-                
                 net_score_temp = scores['BUY'] - scores['SELL']
-                if net_score_temp >= 5:
-                    temp_signal = "BUY"
-                elif net_score_temp <= -5:
-                    temp_signal = "SELL"
-                else:
-                    temp_signal = "WAIT"
-                
+                temp_signal = "BUY" if net_score_temp >= 5 else ("SELL" if net_score_temp <= -5 else "WAIT")
                 if temp_signal == "BUY" and base_strength < quote_strength:
                     scores['BUY'] -= 1
                     details['Currency_Strength'] = f"⚠️ {base} أضعف من {quote} (-1 BUY)"
@@ -1817,9 +1778,9 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
                     scores['SELL'] += 1
                     details['Currency_Strength'] = f"✅ {quote} قوي مقابل {base} (+1 SELL)"
 
+    # النتيجة الأولية
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
-    
     if net_score >= 5:
         signal = "BUY"
         confidence = min(100, 60 + (net_score / total_weight) * 100)
@@ -1839,7 +1800,6 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         except:
             mtf_signal = "NEUTRAL"
             mtf_count = 0
-    
     if signal != "WAIT" and mtf_signal != "NEUTRAL":
         if signal != mtf_signal:
             confidence = confidence * 0.7
@@ -1850,14 +1810,12 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
 
     # News Impact
     news_impact_score = 0
-    news_details = ""
     try:
         news = get_fmp_news()
         if news:
             news_analysis = analyze_news_impact(news)
             st.session_state.news_analysis = news_analysis
-            news_impact_score, news_details = get_news_impact_score(news_analysis, symbol)
-            
+            news_impact_score, _ = get_news_impact_score(news_analysis, symbol)
             if signal != "WAIT" and abs(news_impact_score) > 10:
                 if (signal == "BUY" and news_impact_score > 0) or (signal == "SELL" and news_impact_score < 0):
                     confidence = min(100, confidence * 1.1)
@@ -1912,8 +1870,10 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     # Weak Signal Filter
     if signal != "WAIT":
         has_strong_signal = False
-        if last_smc.get('order_block_bullish', False) or last_smc.get('order_block_bearish', False):
-            has_strong_signal = True
+        if not df_smc.empty:
+            last_smc = df_smc.iloc[-1]
+            if last_smc.get('order_block_bullish', False) or last_smc.get('order_block_bearish', False):
+                has_strong_signal = True
         if patterns:
             for p in patterns:
                 if p['score'] >= 4:
@@ -1929,11 +1889,9 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     stop_loss = None
     entry_price = None
     targets = {}
-    
     if signal in ["BUY", "SELL"] and confidence >= 60:
         atr_value = last['atr'] if not pd.isna(last['atr']) else 10
         entry_price = current_price
-        
         blocks = []
         start_idx = max(3, len(df) - 30)
         for i in range(start_idx, len(df) - 1):
@@ -1948,7 +1906,6 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
                 if body > avg_range and df['close'].iloc[i-1] > df['open'].iloc[i-1]:
                     blocks.append(('bearish', df['low'].iloc[i-1], df['high'].iloc[i-1]))
         order_blocks = blocks[-5:] if blocks else []
-        
         if signal == "BUY":
             recent_low = df['low'].iloc[-20:].min()
             ob_low = min([block[1] for block in order_blocks if block[0] == 'bullish'], default=current_price - atr_value * 0.8)
@@ -1959,13 +1916,11 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
             ob_high = max([block[2] for block in order_blocks if block[0] == 'bearish'], default=current_price + atr_value * 0.8)
             stop_loss = min(recent_high, ob_high, current_price + atr_value * 2.0)
             stop_loss = max(stop_loss, current_price + atr_value * 0.5)
-        
         min_distance = atr_value * 0.3
         if signal == "BUY" and (entry_price - stop_loss) < min_distance:
             stop_loss = entry_price - min_distance
         elif signal == "SELL" and (stop_loss - entry_price) < min_distance:
             stop_loss = entry_price + min_distance
-        
         risk = abs(entry_price - stop_loss) if stop_loss else atr_value
         if signal == "BUY":
             targets = {
@@ -1988,7 +1943,12 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
                 'risk': risk
             }
 
-    return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets
+    # حفظ حالة المؤشرات في session_state للعرض
+    st.session_state.indicator_status = indicator_status
+    failed = [k for k, v in indicator_status.items() if '❌' in v]
+    st.session_state.failed_indicators = failed
+
+    return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets, indicator_status
 
 # ==========================================
 # جمع إشارات جميع الأزواج
@@ -2000,26 +1960,21 @@ def get_all_signals_with_trades():
     total_pairs = len(PAIRS)
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
     for idx, (pair_name, symbol) in enumerate(PAIRS.items()):
         status_text.text(f"جاري تحليل {pair_name}... ({idx+1}/{total_pairs})")
         progress_bar.progress((idx + 1) / total_pairs)
-        
         try:
             df = get_historical_data(symbol, period="1mo", interval="1h")
             if df is None or len(df) < 100:
                 continue
             current_price = df['close'].iloc[-1]
-            
-            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, pair_name, symbol)
-            
+            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets, _ = generate_advanced_signal(df, current_price, pair_name, symbol)
             if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
                 price_str = f"${current_price:,.2f}"
                 fmt = "${:,.2f}"
             else:
                 price_str = f"{current_price:.4f}"
                 fmt = "{:.4f}"
-            
             trade_details = {}
             if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
                 trade_details = {
@@ -2030,7 +1985,6 @@ def get_all_signals_with_trades():
                     "target3": targets.get('target3'),
                     "risk_reward": f"1:{targets.get('risk_reward_3', 0):.1f}"
                 }
-            
             results.append({
                 "الزوج": pair_name,
                 "الإشارة": signal,
@@ -2046,13 +2000,12 @@ def get_all_signals_with_trades():
             })
         except Exception as e:
             continue
-    
     progress_bar.empty()
     status_text.empty()
     return pd.DataFrame(results)
 
 # ==========================================
-# إدارة الصفقات
+# إدارة الصفقات (نفس الكود السابق)
 # ==========================================
 
 class TradeManager:
@@ -2144,7 +2097,6 @@ def detect_reversal(df, trade):
     entry = trade["entry"]
     current_price = last['close']
     signals = []
-    
     if 'rsi' in df.columns and not pd.isna(last['rsi']):
         rsi = last['rsi']
         if direction == "BUY":
@@ -2157,7 +2109,6 @@ def detect_reversal(df, trade):
                 signals.append("RSI تحت 30 (تشبع بيعي)")
             elif rsi > 70 and current_price > entry:
                 signals.append("RSI فوق 70 مع صعود (ضعف)")
-
     if 'macd' in df.columns and 'macd_signal' in df.columns:
         if direction == "BUY":
             if last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal']:
@@ -2165,7 +2116,6 @@ def detect_reversal(df, trade):
         else:
             if last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal']:
                 signals.append("MACD تقاطع صاعد (انعكاس)")
-
     candle_range = abs(last['high'] - last['low'])
     if candle_range > 0:
         if direction == "BUY":
@@ -2176,7 +2126,6 @@ def detect_reversal(df, trade):
             lower_wick = min(last['close'], last['open']) - last['low']
             if lower_wick > candle_range * 0.5:
                 signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
-
     if direction == "BUY":
         recent_low = df['low'].iloc[-10:].min()
         if current_price < recent_low:
@@ -2185,13 +2134,12 @@ def detect_reversal(df, trade):
         recent_high = df['high'].iloc[-10:].max()
         if current_price > recent_high:
             signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
-
     if signals:
         return True, " | ".join(signals)
     return False, ""
 
 # ==========================================
-# شرح القرار
+# شرح القرار (نفس الكود السابق)
 # ==========================================
 
 def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_count, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets):
@@ -2215,7 +2163,6 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
             if v:
                 explanation += f"  - {k}: {v}\n"
         explanation += "💡 **نصيحة**: انتظر حتى تتجاوز النتيجة ±5 أو تتحسن الثقة فوق 60%."
-    
     if stop_loss and entry_price and targets:
         explanation += f"\n\n📍 **سعر الدخول المقترح:** {entry_price:.4f}"
         explanation += f"\n🛑 **وقف الخسارة:** {stop_loss:.4f} (المسافة: {abs(entry_price - stop_loss):.4f})"
@@ -2223,16 +2170,13 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
         explanation += f"\n   - الهدف 1 (1:1): {targets['target1']:.4f}"
         explanation += f"\n   - الهدف 2 (1:1.5): {targets['target2']:.4f}"
         explanation += f"\n   - الهدف 3 (1:2): {targets['target3']:.4f}"
-    
     explanation += f"\n\n🕒 **تحليل الأطر الزمنية**: {mtf_signal} (عدد الأطر: {mtf_count})"
     if mtf_signal != "NEUTRAL":
         explanation += f"\n📊 **إجماع MTF**: {mtf_count} إطار زمني متفق مع الإشارة"
-    
     if patterns:
         explanation += "\n\n📐 **النماذج المكتشفة:**\n"
         for p in patterns:
             explanation += f"- {p['pattern']} ({p['direction']}) - قوة: {p['score']}/5\n"
-    
     if tbs_info and tbs_info[0]:
         tbs_type, tbs_entry, tbs_stop, tbs_level = tbs_info
         if tbs_type:
@@ -2243,10 +2187,8 @@ def explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_cou
                 explanation += f"   - سعر الدخول المقترح: {tbs_entry:.4f}\n"
             if tbs_stop:
                 explanation += f"   - وقف الخسارة: {tbs_stop:.4f}\n"
-
     if 'News_Impact' in details:
         explanation += f"\n\n📰 **تأثير الأخبار:** {details['News_Impact']}"
-
     return explanation
 
 # ==========================================
@@ -2297,43 +2239,10 @@ def time_remaining(dt):
     return f"{hours}h {minutes}m"
 
 # ==========================================
-# بداية الواجهة الرئيسية (Streamlit)
+# بداية الواجهة الرئيسية
 # ==========================================
 
-# تهيئة حالة الجلسة
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "current_trade" not in st.session_state:
-    st.session_state.current_trade = None
-if "trades" not in st.session_state:
-    st.session_state.trades = []
-if "price_data" not in st.session_state:
-    st.session_state.price_data = None
-if "show_form" not in st.session_state:
-    st.session_state.show_form = False
-if "daily_pnl" not in st.session_state:
-    st.session_state.daily_pnl = 0
-if "daily_trades" not in st.session_state:
-    st.session_state.daily_trades = 0
-if "last_update" not in st.session_state:
-    st.session_state.last_update = datetime.now()
-if "refresh_trigger" not in st.session_state:
-    st.session_state.refresh_trigger = False
-if "all_signals" not in st.session_state:
-    st.session_state.all_signals = None
-if "show_indicators" not in st.session_state:
-    st.session_state.show_indicators = True
-if "currency_strength" not in st.session_state:
-    st.session_state.currency_strength = None
-if "economic_events" not in st.session_state:
-    st.session_state.economic_events = None
-if "news_analysis" not in st.session_state:
-    st.session_state.news_analysis = None
-
-# ==========================================
-# الشريط الجانبي (Sidebar)
-# ==========================================
-
+# الشريط الجانبي
 with st.sidebar:
     st.markdown("### 📊 حالة السوق")
     status, status_text, next_event, close_time = get_market_status()
@@ -2346,10 +2255,9 @@ with st.sidebar:
         st.markdown(f"⏳ **يفتح في:** {time_remaining(next_event)}")
         st.markdown(f"🔓 **افتتاح:** {format_time(next_event)}")
     st.markdown("---")
-    
-    # مؤشرات العملات
+
+    # قوة العملات
     st.markdown("### 💰 قوة العملات")
-    
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔄 تحديث القوة", key="refresh_currency_strength", width='stretch'):
@@ -2360,23 +2268,16 @@ with st.sidebar:
         if st.button("🗑️ مسح", key="clear_currency_strength", width='stretch'):
             st.session_state.currency_strength = None
             st.rerun()
-    
     if st.session_state.currency_strength:
         strength = st.session_state.currency_strength
         sorted_currencies = sorted(strength.items(), key=lambda x: x[1], reverse=True)
-        
         cols = st.columns(4)
         for i, (currency, value) in enumerate(sorted_currencies):
             if i >= 4:
                 break
             color = "🟢" if value > 0.5 else ("🟡" if value > -0.5 else "🔴")
             with cols[i % 4]:
-                st.metric(
-                    f"{color} {currency}",
-                    f"{value:+.2f}%",
-                    delta_color="normal"
-                )
-        
+                st.metric(f"{color} {currency}", f"{value:+.2f}%", delta_color="normal")
         if len(sorted_currencies) >= 2:
             strongest = sorted_currencies[0]
             weakest = sorted_currencies[-1]
@@ -2386,7 +2287,6 @@ with st.sidebar:
                 <span style="color: #ff4444;">▼ {weakest[0]} {weakest[1]:+.2f}%</span>
             </div>
             """, unsafe_allow_html=True)
-            
             best_pairs = []
             if strongest[0] != weakest[0]:
                 best_buy = f"{strongest[0]}/{weakest[0]}"
@@ -2396,16 +2296,14 @@ with st.sidebar:
                         best_pairs.append(("🟢 شراء", best_buy))
                     if best_sell in pair_name and "XAU" not in pair_name and "XAG" not in pair_name and "BTC" not in pair_name and "ETH" not in pair_name:
                         best_pairs.append(("🔴 بيع", best_sell))
-            
             if best_pairs:
                 st.markdown("**📊 أفضل الصفقات:**")
                 for action, pair in best_pairs[:2]:
                     st.markdown(f"- {action} {pair}")
     else:
         st.info("اضغط 'تحديث القوة'")
-    
     st.markdown("---")
-    
+
     # جميع الإشارات
     st.markdown("### 📋 جميع الإشارات المتاحة")
     col1, col2 = st.columns(2)
@@ -2419,7 +2317,6 @@ with st.sidebar:
         if st.button("🗑️ مسح", key="clear_all_signals", width='stretch'):
             st.session_state.all_signals = None
             st.rerun()
-    
     if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
         df_signals = st.session_state.all_signals.copy()
         def color_signal(val):
@@ -2450,7 +2347,6 @@ with st.sidebar:
         st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%H:%M:%S')}")
     else:
         st.info("اضغط 'تحديث الكل' لعرض جميع الإشارات")
-    
     st.markdown("---")
     st.markdown("### 🔍 اختر الزوج للتحليل")
     selected_pair_name = st.selectbox("اختر الزوج للتحليل المتقدم", list(PAIRS.keys()), index=0, key="pair_selector")
@@ -2465,7 +2361,7 @@ with st.sidebar:
 # الواجهة الرئيسية
 # ==========================================
 
-# جلب البيانات للزوج المختار
+# جلب البيانات
 for attempt in range(3):
     current_price, change = get_spot_price(selected_symbol)
     if current_price is not None:
@@ -2486,7 +2382,7 @@ if current_price is None:
     change = 0
 
 # توليد الإشارة
-signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets = generate_advanced_signal(df, current_price, selected_pair_name, selected_symbol)
+signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets, indicator_status = generate_advanced_signal(df, current_price, selected_pair_name, selected_symbol)
 mtf_signal, mtf_count = get_mtf_signal(selected_symbol, current_price)
 
 # عرض السعر
@@ -2507,7 +2403,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# زر تحديث
 col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 2, 1])
 with col_refresh2:
     if st.button("🔄 تحديث البيانات", key="refresh_data_button", width='stretch'):
@@ -2518,6 +2413,21 @@ with col_refresh2:
         st.rerun()
 
 st.caption(f"🕐 آخر تحديث: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
+
+# عرض حالة المؤشرات
+with st.expander("🔍 حالة المؤشرات والأدوات", expanded=False):
+    if indicator_status:
+        for name, status in indicator_status.items():
+            if '✅' in status:
+                st.success(f"{name}: {status}")
+            elif '⚠️' in status or '⚪' in status:
+                st.warning(f"{name}: {status}")
+            else:
+                st.error(f"{name}: {status}")
+    if st.session_state.data_errors:
+        st.warning("⚠️ أخطاء في جلب البيانات:")
+        for err in st.session_state.data_errors:
+            st.caption(f"- {err}")
 
 # مؤشرات السوق
 col_btn, col_title = st.columns([1, 5])
@@ -2532,12 +2442,12 @@ with col_title:
 if st.session_state.show_indicators:
     cols = st.columns(6)
     last = df.iloc[-1]
-    cols[0].metric("RSI", f"{last['rsi']:.1f}")
-    cols[1].metric("ATR", f"${last['atr']:.2f}" if "Gold" in selected_pair_name else f"{last['atr']:.4f}")
-    cols[2].metric("ADX", f"{last['adx']:.1f}")
-    cols[3].metric("VWAP", f"${last['vwap']:.2f}" if "Gold" in selected_pair_name else f"{last['vwap']:.4f}")
-    cols[4].metric("MFI", f"{last['mfi']:.1f}")
-    cols[5].metric("MACD Hist", f"{last['macd_histogram']:.4f}")
+    cols[0].metric("RSI", f"{last['rsi']:.1f}" if not pd.isna(last['rsi']) else "N/A")
+    cols[1].metric("ATR", f"${last['atr']:.2f}" if "Gold" in selected_pair_name else f"{last['atr']:.4f}" if not pd.isna(last['atr']) else "N/A")
+    cols[2].metric("ADX", f"{last['adx']:.1f}" if not pd.isna(last['adx']) else "N/A")
+    cols[3].metric("VWAP", f"${last['vwap']:.2f}" if "Gold" in selected_pair_name else f"{last['vwap']:.4f}" if not pd.isna(last['vwap']) else "N/A")
+    cols[4].metric("MFI", f"{last['mfi']:.1f}" if not pd.isna(last['mfi']) else "N/A")
+    cols[5].metric("MACD Hist", f"{last['macd_histogram']:.4f}" if not pd.isna(last['macd_histogram']) else "N/A")
 else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
 
@@ -2547,7 +2457,6 @@ st.markdown("---")
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
-    
     st.markdown(f"""
     <div class="suggested-trade">
         <b>الاتجاه:</b> {direction_text} (الثقة: {confidence:.0f}%)<br>
@@ -2559,7 +2468,6 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         <b>📈 نسبة المخاطرة/المكافأة القصوى:</b> {risk_reward}
     </div>
     """, unsafe_allow_html=True)
-    
     if st.button("➕ إضافة هذه الصفقة", key="add_suggested_trade", width='stretch'):
         trade_manager = TradeManager()
         account_balance = 100000
@@ -2568,9 +2476,7 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         risk_amount = abs(entry_price - stop_loss)
         lot_size = risk_per_trade / (risk_amount * 100) if risk_amount > 0 else 0.01
         lot_size = round(lot_size, 2)
-        
         trailing_dist = last['atr'] * 0.3 if 'atr' in last and not pd.isna(last['atr']) else (3 if "Gold" in selected_pair_name else 0.0003)
-        
         trade_data = {
             "direction": signal,
             "entry": entry_price,
@@ -2584,7 +2490,6 @@ if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price 
         trade_id = trade_manager.add_trade(trade_data)
         st.success(f"✅ تم إضافة الصفقة {trade_id} بنجاح!")
         st.rerun()
-
 else:
     st.info("⏳ لا توجد صفقة مقترحة حالياً (انتظر إشارة قوية)")
 
@@ -2631,26 +2536,20 @@ with st.expander("📝 شرح القرار", expanded=True):
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
 # ==========================================
-# التقويم الاقتصادي
+# التقويم الاقتصادي وتحليل الأخبار (نفس الكود السابق)
 # ==========================================
 st.markdown("---")
 st.markdown("### 📅 التقويم الاقتصادي")
-
 if st.button("🔄 تحديث التقويم الاقتصادي", key="refresh_economic_calendar", width='stretch'):
     with st.spinner("جارٍ جلب بيانات التقويم..."):
         st.session_state.economic_events = get_fmp_economic_calendar()
-
 if st.session_state.economic_events:
     display_economic_events(st.session_state.economic_events)
 else:
     st.info("اضغط 'تحديث التقويم الاقتصادي' لعرض الأحداث")
 
-# ==========================================
-# تحليل الأخبار
-# ==========================================
 st.markdown("---")
 st.markdown("### 📰 تحليل الأخبار")
-
 if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_analysis", width='stretch'):
     with st.spinner("جارٍ تحليل الأخبار..."):
         news = get_fmp_news()
@@ -2658,10 +2557,8 @@ if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_anal
             st.session_state.news_analysis = analyze_news_impact(news)
         else:
             st.session_state.news_analysis = None
-
 if st.session_state.news_analysis:
     display_news_analysis(st.session_state.news_analysis)
-    
     if signal != "WAIT":
         news_impact, _ = get_news_impact_score(st.session_state.news_analysis, selected_symbol)
         if abs(news_impact) > 10:
@@ -2675,52 +2572,33 @@ else:
     st.info("اضغط 'تحديث تحليل الأخبار' لعرض التحليل")
 
 # ==========================================
-# تحليل الارتباط بين العملات
+# تحليل الارتباط (نفس الكود السابق)
 # ==========================================
 st.markdown("---")
 st.markdown("### 🔗 تحليل الارتباط بين العملات")
-
 corr_pairs = st.multiselect(
     "اختر الأزواج لتحليل الارتباط:",
     options=list(PAIRS.keys()),
     default=["XAU/USD (Gold)", "EUR/USD", "USD/JPY", "GBP/USD"],
     key="correlation_pairs"
 )
-
 if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="show_correlation_matrix", width='stretch'):
     with st.spinner("جارٍ حساب الارتباطات..."):
         symbols = [PAIRS[pair] for pair in corr_pairs]
         corr_matrix = get_correlation_matrix(symbols)
-        
         if not corr_matrix.empty:
-            st.dataframe(
-                corr_matrix.round(3),
-                use_container_width=True,
-                column_config={col: st.column_config.NumberColumn(format="%.3f") for col in corr_matrix.columns}
-            )
-            
+            st.dataframe(corr_matrix.round(3), use_container_width=True,
+                         column_config={col: st.column_config.NumberColumn(format="%.3f") for col in corr_matrix.columns})
             fig_corr = go.Figure()
             pair_names = list(corr_matrix.columns)
             for i, pair1 in enumerate(pair_names):
-                fig_corr.add_trace(go.Bar(
-                    x=pair_names,
-                    y=corr_matrix.iloc[i].values,
-                    name=pair1,
-                    text=[f"{val:.2f}" for val in corr_matrix.iloc[i].values],
-                    textposition='outside'
-                ))
-            
-            fig_corr.update_layout(
-                height=400,
-                template='plotly_dark',
-                title="مصفوفة الارتباط بين الأزواج",
-                barmode='group',
-                xaxis_title="الأزواج",
-                yaxis_title="معامل الارتباط",
-                yaxis=dict(range=[-1, 1])
-            )
+                fig_corr.add_trace(go.Bar(x=pair_names, y=corr_matrix.iloc[i].values,
+                                          name=pair1, text=[f"{val:.2f}" for val in corr_matrix.iloc[i].values],
+                                          textposition='outside'))
+            fig_corr.update_layout(height=400, template='plotly_dark', title="مصفوفة الارتباط بين الأزواج",
+                                   barmode='group', xaxis_title="الأزواج", yaxis_title="معامل الارتباط",
+                                   yaxis=dict(range=[-1, 1]))
             st.plotly_chart(fig_corr, use_container_width=True)
-            
             strong_correlations = []
             for i, pair1 in enumerate(pair_names):
                 for j, pair2 in enumerate(pair_names):
@@ -2729,7 +2607,6 @@ if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="sh
                         if abs(corr_val) > 0.7:
                             direction = "موجب (نفس الاتجاه)" if corr_val > 0 else "سالب (عكس الاتجاه)"
                             strong_correlations.append(f"**{corr_pairs[i]}** ↔ **{corr_pairs[j]}**: {corr_val:.3f} ({direction})")
-            
             if strong_correlations:
                 st.markdown("#### 📌 ارتباطات قوية مكتشفة:")
                 for corr in strong_correlations:
@@ -2737,17 +2614,12 @@ if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="sh
         else:
             st.warning("لا توجد بيانات كافية لحساب الارتباط")
 
-# ==========================================
-# تحليل ارتباط الأزواج بالذهب
-# ==========================================
 st.markdown("---")
 st.markdown("### 📊 ارتباط الأزواج بالذهب")
-
 if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="analyze_gold_correlation", width='stretch'):
     with st.spinner("جارٍ التحليل..."):
         gold_symbol = "GC=F"
         correlation_results = []
-        
         for pair_name, symbol in PAIRS.items():
             if symbol != gold_symbol and "Gold" not in pair_name and "Silver" not in pair_name:
                 corr = get_pair_correlation(gold_symbol, symbol)
@@ -2758,23 +2630,14 @@ if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="an
                         "القوة": "قوي" if abs(corr) > 0.7 else ("متوسط" if abs(corr) > 0.4 else "ضعيف"),
                         "الاتجاه": "نفس" if corr > 0 else "عكس"
                     })
-        
         if correlation_results:
-            df_corr = pd.DataFrame(correlation_results)
-            df_corr = df_corr.sort_values("الارتباط بالذهب", ascending=False)
-            
-            st.dataframe(
-                df_corr,
-                column_config={
-                    "الزوج": st.column_config.TextColumn("الزوج"),
-                    "الارتباط بالذهب": st.column_config.NumberColumn("الارتباط", format="%.3f"),
-                    "القوة": st.column_config.TextColumn("القوة"),
-                    "الاتجاه": st.column_config.TextColumn("الاتجاه")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-            
+            df_corr = pd.DataFrame(correlation_results).sort_values("الارتباط بالذهب", ascending=False)
+            st.dataframe(df_corr, column_config={
+                "الزوج": st.column_config.TextColumn("الزوج"),
+                "الارتباط بالذهب": st.column_config.NumberColumn("الارتباط", format="%.3f"),
+                "القوة": st.column_config.TextColumn("القوة"),
+                "الاتجاه": st.column_config.TextColumn("الاتجاه")
+            }, hide_index=True, use_container_width=True)
             fig_gold_corr = go.Figure()
             fig_gold_corr.add_trace(go.Bar(
                 x=df_corr["الزوج"],
@@ -2783,20 +2646,14 @@ if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="an
                 text=[f"{val:.3f}" for val in df_corr["الارتباط بالذهب"]],
                 textposition='outside'
             ))
-            fig_gold_corr.update_layout(
-                height=400,
-                template='plotly_dark',
-                title="ارتباط الأزواج بالذهب",
-                xaxis_title="الزوج",
-                yaxis_title="معامل الارتباط",
-                yaxis=dict(range=[-1, 1])
-            )
+            fig_gold_corr.update_layout(height=400, template='plotly_dark',
+                                        title="ارتباط الأزواج بالذهب",
+                                        xaxis_title="الزوج", yaxis_title="معامل الارتباط",
+                                        yaxis=dict(range=[-1, 1]))
             st.plotly_chart(fig_gold_corr, use_container_width=True)
-            
             if correlation_results:
                 max_pos = max([r for r in correlation_results if r["الارتباط بالذهب"] > 0], key=lambda x: x["الارتباط بالذهب"]) if any(r["الارتباط بالذهب"] > 0 for r in correlation_results) else None
                 max_neg = min([r for r in correlation_results if r["الارتباط بالذهب"] < 0], key=lambda x: x["الارتباط بالذهب"]) if any(r["الارتباط بالذهب"] < 0 for r in correlation_results) else None
-                
                 if max_pos:
                     st.info(f"🟢 أقوى ارتباط موجب: **{max_pos['الزوج']}** ({max_pos['الارتباط بالذهب']:.3f}) - يتحرك بنفس اتجاه الذهب")
                 if max_neg:
@@ -2809,38 +2666,27 @@ if st.button("🔄 تحليل ارتباط الأزواج بالذهب", key="an
 # ==========================================
 st.markdown("---")
 st.markdown("### 🚀 جميع الصفقات المقترحة (عبر جميع الأزواج)")
-
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
     df_all = st.session_state.all_signals.copy()
     df_trades = df_all[(df_all["الإشارة"].isin(["BUY", "SELL"])) & (df_all["الثقة"] >= 60)]
-    
     if not df_trades.empty:
         cols_to_show = ["الزوج", "الإشارة", "الثقة", "سعر الدخول", "وقف الخسارة", "الهدف 1", "الهدف 2", "الهدف 3", "نسبة المخاطرة"]
         def style_signal(val):
-            if val == "BUY":
-                return "🟢 شراء"
-            elif val == "SELL":
-                return "🔴 بيع"
+            if val == "BUY": return "🟢 شراء"
+            elif val == "SELL": return "🔴 بيع"
             return val
         df_trades["الإشارة"] = df_trades["الإشارة"].apply(style_signal)
-        
-        st.dataframe(
-            df_trades[cols_to_show],
-            column_config={
-                "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
-                "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
-                "الثقة": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
-                "سعر الدخول": st.column_config.TextColumn("الدخول"),
-                "وقف الخسارة": st.column_config.TextColumn("الوقف"),
-                "الهدف 1": st.column_config.TextColumn("هدف 1"),
-                "الهدف 2": st.column_config.TextColumn("هدف 2"),
-                "الهدف 3": st.column_config.TextColumn("هدف 3"),
-                "نسبة المخاطرة": st.column_config.TextColumn("R/R"),
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
+        st.dataframe(df_trades[cols_to_show], column_config={
+            "الزوج": st.column_config.TextColumn("الزوج", width="medium"),
+            "الإشارة": st.column_config.TextColumn("الإشارة", width="small"),
+            "الثقة": st.column_config.NumberColumn("الثقة", format="%.1f%%"),
+            "سعر الدخول": st.column_config.TextColumn("الدخول"),
+            "وقف الخسارة": st.column_config.TextColumn("الوقف"),
+            "الهدف 1": st.column_config.TextColumn("هدف 1"),
+            "الهدف 2": st.column_config.TextColumn("هدف 2"),
+            "الهدف 3": st.column_config.TextColumn("هدف 3"),
+            "نسبة المخاطرة": st.column_config.TextColumn("R/R"),
+        }, hide_index=True, use_container_width=True)
         st.caption(f"🟢 إجمالي صفقات الشراء: {len(df_trades[df_trades['الإشارة'] == '🟢 شراء'])}  |  🔴 إجمالي صفقات البيع: {len(df_trades[df_trades['الإشارة'] == '🔴 بيع'])}")
     else:
         st.info("لا توجد صفقات مقترحة حالياً (جميع الإشارات ضعيفة أو انتظار).")
