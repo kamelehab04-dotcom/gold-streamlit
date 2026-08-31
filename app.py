@@ -1313,8 +1313,13 @@ def display_economic_events(events):
         return
     for event in events[:15]:
         impact = event.get('impact', '')
-        impact_icon = "🔴" if impact in ['High', 'عالٍ'] else ("🟡" if impact in ['Medium', 'متوسط'] else "
-                impact_icon = "🔴" if impact in ['High', 'عالٍ'] else ("🟡" if impact in ['Medium', 'متوسط'] else "🟢")
+        def display_economic_events(events):
+    if not events:
+        st.info("لا توجد أحداث اقتصادية")
+        return
+    for event in events[:15]:
+        impact = event.get('impact', '')
+        impact_icon = "🔴" if impact in ['High', 'عالٍ'] else ("🟡" if impact in ['Medium', 'متوسط'] else "🟢")
         impact_class = "event-high" if impact in ['High', 'عالٍ'] else ("event-medium" if impact in ['Medium', 'متوسط'] else "event-low")
         st.markdown(f"""
         <div class="news-card {impact_class}">
