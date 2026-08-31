@@ -1311,22 +1311,36 @@ def display_economic_events(events):
     if not events:
         st.info("لا توجد أحداث اقتصادية")
         return
-    for event in events[:15]:
     def display_economic_events(events):
     if not events:
         st.info("لا توجد أحداث اقتصادية")
         return
     for event in events[:15]:
         impact = event.get('impact', '')
-        impact_icon = "🔴" if impact in ['High', 'عالٍ'] else ("🟡" if impact in ['Medium', 'متوسط'] else "🟢")
-        impact_class = "event-high" if impact in ['High', 'عالٍ'] else ("event-medium" if impact in ['Medium', 'متوسط'] else "event-low")
+        if impact in ['High', 'عالٍ']:
+            impact_icon = "🔴"
+            impact_class = "event-high"
+        elif impact in ['Medium', 'متوسط']:
+            impact_icon = "🟡"
+            impact_class = "event-medium"
+        else:
+            impact_icon = "🟢"
+            impact_class = "event-low"
+        
+        country = event.get('country', '')
+        event_name = event.get('event', '')
+        date = event.get('date', '')
+        time_val = event.get('time', '')
+        forecast = event.get('forecast', 'N/A')
+        previous = event.get('previous', 'N/A')
+        actual = event.get('actual', 'N/A')
+        
         st.markdown(f"""
         <div class="news-card {impact_class}">
-            <div class="news-title">{impact_icon} <b>{event.get('country', '')}</b> - {event.get('event', '')}</div>
-            <div class="news-date">🕐 {event.get('date', '')} {event.get('time', '')} | التوقع: {event.get('forecast', 'N/A')} | السابق: {event.get('previous', 'N/A')} | الفعلي: {event.get('actual', 'N/A')}</div>
+            <div class="news-title">{impact_icon} <b>{country}</b> - {event_name}</div>
+            <div class="news-date">🕐 {date} {time_val} | التوقع: {forecast} | السابق: {previous} | الفعلي: {actual}</div>
         </div>
         """, unsafe_allow_html=True)
-
 # ==========================================
 # دوال التنبيهات وحجم الصفقة
 # ==========================================
