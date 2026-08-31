@@ -1,5 +1,5 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية)
+# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية المحسّنة)
 # تاريخ التحديث: 2026-08-31
 # المصدر: Twelve Data (رئيسي) + FastForex + GoldAPI + yfinance (احتياطي)
 # ==========================================
@@ -38,6 +38,10 @@ FASTFOREX_API_KEY = "4cd179a14f-a982d5aedd-tkn80n"
 # Telegram Config (اختياري)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# ملفات التخزين
+SIGNALS_HISTORY_FILE = "signals_history.json"
+ORDERS_BLOCKS_FILE = "order_blocks_alert.json"
 
 # ==========================================
 # الهوية البصرية
@@ -163,6 +167,24 @@ st.markdown("""
         color: #ffd700;
         font-weight: bold;
     }
+    .confluence-bar {
+        background: #16213e;
+        border-radius: 10px;
+        padding: 10px;
+        margin: 10px 0;
+    }
+    .confluence-label {
+        color: #ccc;
+        font-size: 0.9rem;
+        margin-bottom: 5px;
+    }
+    .ob-alert {
+        background: #2a1a1a;
+        border-left: 4px solid #ffaa00;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 5px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -170,7 +192,7 @@ st.markdown("""
 <div class="main-header">
     <div style="text-align: right;">
         <div class="main-title">▲ BLACK PYRAMID ▲</div>
-        <div class="main-subtitle">Advanced Trading Intelligence • Multi-Timeframe (4H/Daily) • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar • News Analysis</div>
+        <div class="main-subtitle">Advanced Trading Intelligence • Multi-Timeframe (4H/Daily) • SMC/ICT • Liquidity • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Currency Strength • Economic Calendar • News Analysis • Performance Tracking • Pivot Points • Confluence Score • Order Block Alerts</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -212,6 +234,10 @@ if "failed_indicators" not in st.session_state:
     st.session_state.failed_indicators = []
 if "indicator_status" not in st.session_state:
     st.session_state.indicator_status = {}
+if "signals_history" not in st.session_state:
+    st.session_state.signals_history = []
+if "ob_alerts" not in st.session_state:
+    st.session_state.ob_alerts = []
 
 # ==========================================
 # قائمة الأزواج وخريطة Twelve Data
@@ -296,6 +322,189 @@ CURRENCY_INDICES = {
     "NZD": ["NZDUSD=X", "EURNZD=X", "GBPNZD=X", "AUDNZD=X", "NZDJPY=X", "NZDCAD=X"],
     "CAD": ["USDCAD=X", "EURCAD=X", "GBPCAD=X", "AUDCAD=X", "NZDCAD=X", "CADJPY=X", "CADCHF=X"]
 }
+
+# ==========================================
+# دوال جديدة: تتبع الأداء، البيفوت، التوافق البصري، تنبيهات OB
+# ==========================================
+def load_signals_history():
+    """تحميل سجل الإشارات السابقة"""
+    try:
+        if os.path.exists(SIGNALS_HISTORY_FILE):
+            with open(SIGNALS_HISTORY_FILE, "r", encoding='utf-8') as f:
+                return json.load(f)
+    except:
+        pass
+    return []
+
+def save_signals_history(history):
+    """حفظ سجل الإشارات"""
+    with open(SIGNALS_HISTORY_FILE, "w", encoding='utf-8') as f:
+        json.dump(history, f, indent=2, ensure_ascii=False)
+
+def record_signal(symbol, symbol_name, signal, confidence, entry, stop_loss, targets, current_time):
+    """تسجيل إشارة قوية للمتابعة"""
+    history = load_signals_history()
+    record = {
+        "id": len(history) + 1,
+        "symbol": symbol,
+        "symbol_name": symbol_name,
+        "signal": signal,
+        "confidence": confidence,
+        "entry": entry,
+        "stop_loss": stop_loss,
+        "target1": targets.get('target1'),
+        "target2": targets.get('target2'),
+        "target3": targets.get('target3'),
+        "start_time": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "bars_elapsed": 0,
+        "status": "open",
+        "result": None,
+        "exit_price": None,
+        "closed_time": None
+    }
+    history.append(record)
+    save_signals_history(history)
+
+def evaluate_past_signals(current_prices_dict):
+    """تقييم الإشارات المفتوحة بعد مرور 10 شموع (4h)"""
+    history = load_signals_history()
+    updated = False
+    for sig in history:
+        if sig["status"] == "open":
+            # البحث عن السعر الحالي
+            symbol = sig["symbol"]
+            if symbol in current_prices_dict:
+                current_price = current_prices_dict[symbol]
+                sig["bars_elapsed"] += 1  # نفترض تحديث كل 4 ساعات
+                if sig["bars_elapsed"] >= 10:  # بعد 10 شموع 4H
+                    # تحديد النتيجة بناءً على الوقف والأهداف
+                    if sig["signal"] == "BUY":
+                        if current_price <= sig["stop_loss"]:
+                            sig["status"] = "closed"
+                            sig["result"] = "loss"
+                            sig["exit_price"] = sig["stop_loss"]
+                        elif current_price >= sig["target2"]:
+                            sig["status"] = "closed"
+                            sig["result"] = "win"
+                            sig["exit_price"] = sig["target2"]
+                        elif current_price >= sig["target1"]:
+                            sig["status"] = "closed"
+                            sig["result"] = "partial"
+                            sig["exit_price"] = sig["target1"]
+                    elif sig["signal"] == "SELL":
+                        if current_price >= sig["stop_loss"]:
+                            sig["status"] = "closed"
+                            sig["result"] = "loss"
+                            sig["exit_price"] = sig["stop_loss"]
+                        elif current_price <= sig["target2"]:
+                            sig["status"] = "closed"
+                            sig["result"] = "win"
+                            sig["exit_price"] = sig["target2"]
+                        elif current_price <= sig["target1"]:
+                            sig["status"] = "closed"
+                            sig["result"] = "partial"
+                            sig["exit_price"] = sig["target1"]
+                    if sig["status"] == "closed":
+                        sig["closed_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        # حساب الربح التقريبي
+                        if sig["result"] == "win":
+                            sig["profit"] = abs(sig["exit_price"] - sig["entry"]) * 100  # تقريبي
+                        elif sig["result"] == "loss":
+                            sig["profit"] = -abs(sig["entry"] - sig["exit_price"]) * 100
+                        else:
+                            sig["profit"] = abs(sig["exit_price"] - sig["entry"]) * 50  # جزئي
+                    updated = True
+    if updated:
+        save_signals_history(history)
+    return history
+
+def get_signal_stats(history):
+    """حساب إحصائيات الأداء"""
+    if not history:
+        return {
+            "total": 0,
+            "wins": 0,
+            "losses": 0,
+            "partials": 0,
+            "win_rate": 0,
+            "avg_profit": 0,
+            "best_pair": None,
+            "best_time": None
+        }
+    closed = [s for s in history if s["status"] == "closed"]
+    wins = [s for s in closed if s["result"] == "win"]
+    losses = [s for s in closed if s["result"] == "loss"]
+    partials = [s for s in closed if s["result"] == "partial"]
+    total = len(closed)
+    win_rate = (len(wins) / total * 100) if total > 0 else 0
+    avg_profit = sum(s.get("profit", 0) for s in closed) / total if total > 0 else 0
+    # أفضل زوج (بناءً على عدد الصفقات الرابحة)
+    best_pair = None
+    if closed:
+        pair_perf = {}
+        for s in closed:
+            pair = s["symbol_name"]
+            if pair not in pair_perf:
+                pair_perf[pair] = {"wins": 0, "total": 0}
+            pair_perf[pair]["total"] += 1
+            if s["result"] == "win":
+                pair_perf[pair]["wins"] += 1
+        if pair_perf:
+            best_pair = max(pair_perf, key=lambda x: pair_perf[x]["wins"]/pair_perf[x]["total"] if pair_perf[x]["total"]>0 else 0)
+    return {
+        "total": total,
+        "wins": len(wins),
+        "losses": len(losses),
+        "partials": len(partials),
+        "win_rate": win_rate,
+        "avg_profit": avg_profit,
+        "best_pair": best_pair,
+        "best_time": None
+    }
+
+def calculate_daily_pivots(symbol):
+    """حساب نقاط البيفوت اليومية من بيانات الأمس"""
+    try:
+        df_daily = get_twelvedata_historical(symbol, interval="1day", outputsize=2)
+        if df_daily is not None and len(df_daily) >= 2:
+            yesterday = df_daily.iloc[-2]
+            high = yesterday['high']
+            low = yesterday['low']
+            close = yesterday['close']
+            pivot = (high + low + close) / 3
+            r1 = 2 * pivot - low
+            s1 = 2 * pivot - high
+            r2 = pivot + (high - low)
+            s2 = pivot - (high - low)
+            r3 = high + 2 * (pivot - low)
+            s3 = low - 2 * (high - pivot)
+            return {
+                "pivot": pivot, "r1": r1, "s1": s1,
+                "r2": r2, "s2": s2, "r3": r3, "s3": s3
+            }
+    except:
+        pass
+    return None
+
+def check_order_block_proximity(df_smc, current_price, atr_value):
+    """فحص القرب من Order Block حديث"""
+    alerts = []
+    if df_smc is None or len(df_smc) < 10:
+        return alerts
+    last_idx = len(df_smc) - 1
+    for i in range(max(0, last_idx-20), last_idx):
+        if df_smc['order_block_bullish'].iloc[i]:
+            ob_high = df_smc['high'].iloc[i]
+            ob_low = df_smc['low'].iloc[i]
+            # إذا كان السعر قريبًا من OB (ضمن 0.3 ATR)
+            if abs(current_price - ob_high) < atr_value * 0.3 or abs(current_price - ob_low) < atr_value * 0.3:
+                alerts.append(f"سعر قريب من Order Block شراء عند {ob_low:.4f}-{ob_high:.4f}")
+        if df_smc['order_block_bearish'].iloc[i]:
+            ob_high = df_smc['high'].iloc[i]
+            ob_low = df_smc['low'].iloc[i]
+            if abs(current_price - ob_high) < atr_value * 0.3 or abs(current_price - ob_low) < atr_value * 0.3:
+                alerts.append(f"سعر قريب من Order Block بيع عند {ob_low:.4f}-{ob_high:.4f}")
+    return alerts
 
 # ==========================================
 # دوال Twelve Data
@@ -1419,11 +1628,11 @@ def get_dynamic_weights(df, asset_type="forex"):
     return weights
 
 # ==========================================
-# دالة الإشارة المتكاملة
+# دالة الإشارة المتكاملة (مع الميزات الجديدة)
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     if df is None or len(df) < 50:
-        return "WAIT", 50, 0, {}, [], None, None, None, None, {}
+        return "WAIT", 50, 0, {}, [], None, None, None, None, {}, 0, {}
 
     indicator_status = {}
 
@@ -1859,6 +2068,17 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
 
     confidence = max(0, min(100, confidence))
 
+    # حساب درجة التوافق البصري
+    confluence_score = 0
+    if smc_bullish_score > 0 or smc_bearish_score > 0:
+        confluence_score += 1
+    if indicator_bullish > 0 or indicator_bearish > 0:
+        confluence_score += 1
+    if daily_trend != "NEUTRAL":
+        confluence_score += 1
+    if mtf_signal != "NEUTRAL":
+        confluence_score += 1
+
     # حساب مستويات الدخول والخروج
     stop_loss = None
     entry_price = None
@@ -1918,17 +2138,24 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
             signal = "WAIT"
             confidence = max(confidence, 50)
 
-    # إرسال تنبيه تيليجرام
-    if signal in ["BUY", "SELL"] and confidence >= 75:
+    # تسجيل الإشارة القوية
+    if signal in ["BUY", "SELL"] and confidence >= 70 and stop_loss and entry_price and targets:
+        record_signal(symbol, symbol_name, signal, confidence, entry_price, stop_loss, targets, datetime.now())
+        # إرسال تنبيه تيليجرام
         message = f"🔔 إشارة قوية: {signal} {symbol_name} بثقة {confidence:.0f}%\nالدخول: {current_price:.4f}\nوقف: {stop_loss:.4f}\nالأهداف: {targets.get('target1', 0):.4f}, {targets.get('target2', 0):.4f}, {targets.get('target3', 0):.4f}"
         send_telegram_alert(message)
+
+    # تنبيهات Order Block
+    ob_alerts = check_order_block_proximity(df_smc, current_price, last['atr'] if not pd.isna(last['atr']) else 1.0)
+    if ob_alerts:
+        st.session_state.ob_alerts = ob_alerts
 
     tbs_info = (tbs_type, tbs_entry, tbs_stop, tbs_level)
     st.session_state.indicator_status = indicator_status
     failed = [k for k, v in indicator_status.items() if '❌' in v]
     st.session_state.failed_indicators = failed
 
-    return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets, indicator_status
+    return signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets, indicator_status, confluence_score, {"ob_alerts": ob_alerts}
 
 # ==========================================
 # دالة جمع الإشارات
@@ -1976,7 +2203,7 @@ def get_all_signals_with_trades():
             if df is None or len(df) < 50:
                 continue
             current_price = df['close'].iloc[-1]
-            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets, _ = generate_advanced_signal(df, current_price, pair_name, symbol)
+            signal, confidence, net_score, _, _, _, stop_loss, entry_price, targets, _, _, _ = generate_advanced_signal(df, current_price, pair_name, symbol)
             if "Gold" in pair_name or "Silver" in pair_name or "Bitcoin" in pair_name or "Ethereum" in pair_name:
                 price_str = f"${current_price:,.2f}"
                 fmt = "${:,.2f}"
@@ -2379,7 +2606,7 @@ if current_price is None:
     current_price = df['close'].iloc[-1]
     change = 0
 
-signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets, indicator_status = generate_advanced_signal(df, current_price, selected_pair_name, selected_symbol)
+signal, confidence, net_score, details, patterns, tbs_info, stop_loss, entry_price, targets, indicator_status, confluence_score, extra = generate_advanced_signal(df, current_price, selected_pair_name, selected_symbol)
 
 mtf_signal, mtf_weight = get_mtf_signal(selected_symbol, current_price)
 
@@ -2425,6 +2652,12 @@ with st.expander("🔍 حالة المؤشرات والأدوات", expanded=Fal
         for err in st.session_state.data_errors:
             st.caption(f"- {err}")
 
+# عرض تنبيهات Order Block
+if extra and "ob_alerts" in extra and extra["ob_alerts"]:
+    st.markdown("#### 🔔 تنبيهات Order Block القريبة")
+    for alert in extra["ob_alerts"]:
+        st.markdown(f'<div class="ob-alert">⚠️ {alert}</div>', unsafe_allow_html=True)
+
 col_btn, col_title = st.columns([1, 5])
 with col_btn:
     btn_label = "📊 إخفاء" if st.session_state.show_indicators else "📊 إظهار"
@@ -2447,6 +2680,13 @@ else:
     st.caption("👆 اضغط 'إظهار' لعرض مؤشرات السوق")
 
 st.markdown("---")
+
+# عرض درجة التوافق البصري
+st.markdown('<div class="confluence-bar">', unsafe_allow_html=True)
+st.markdown('<div class="confluence-label">📊 درجة التوافق بين الطبقات (0-4)</div>', unsafe_allow_html=True)
+st.progress(confluence_score / 4)
+st.markdown(f"**الدرجة: {confluence_score}/4** - كلما زادت، كانت الإشارة أقوى وأدق.")
+st.markdown('</div>', unsafe_allow_html=True)
 
 # عرض الصفقة المقترحة
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
@@ -2512,6 +2752,28 @@ st.markdown(f"""
 with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_weight, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
+
+# عرض سجل الأداء
+st.markdown("---")
+st.markdown("### 📈 سجل أداء الإشارات")
+signals_history = load_signals_history()
+# تقييم الإشارات المفتوحة (يمكن تحديثه عند كل تشغيل)
+current_prices_dict = {symbol: get_spot_price(symbol)[0] for symbol in PAIRS.values() if get_spot_price(symbol)[0] is not None}
+signals_history = evaluate_past_signals(current_prices_dict)
+if signals_history:
+    stats = get_signal_stats(signals_history)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("إجمالي الصفقات المغلقة", stats["total"])
+    col2.metric("نسبة الربح", f"{stats['win_rate']:.1f}%")
+    col3.metric("متوسط الربح", f"{stats['avg_profit']:.1f}")
+    if stats["best_pair"]:
+        col4.metric("أفضل زوج", stats["best_pair"])
+    st.write("**آخر 10 إشارات:**")
+    df_hist = pd.DataFrame(signals_history[-10:])
+    if not df_hist.empty:
+        st.dataframe(df_hist[["symbol_name", "signal", "confidence", "entry", "status", "result"]], use_container_width=True)
+else:
+    st.info("لا توجد إشارات مسجلة بعد")
 
 st.markdown("---")
 st.markdown("### 📅 التقويم الاقتصادي")
@@ -2696,6 +2958,9 @@ df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
 df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
 
+# حساب البيفوت اليومي
+pivots = calculate_daily_pivots(selected_symbol)
+
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
                     row_heights=[0.6, 0.2, 0.2])
 
@@ -2707,6 +2972,13 @@ fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dic
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
+
+# إضافة خطوط البيفوت
+if pivots:
+    for level in ['pivot', 'r1', 's1', 'r2', 's2']:
+        if level in pivots and pivots[level] is not None:
+            fig.add_hline(y=pivots[level], line_dash="dash", line_color="rgba(255,165,0,0.4)", row=1, col=1)
+            fig.add_annotation(x=df.index[-1], y=pivots[level], text=level.upper(), showarrow=False, row=1, col=1)
 
 if not df_smc['bsl'].isna().all():
     fig.add_hline(y=df_smc['bsl'].iloc[-1], line_dash="dash", line_color="rgba(0,255,0,0.5)", row=1, col=1)
@@ -2735,7 +3007,7 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown(f"""
 <div class="footer">
     <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
-    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • News Analysis • Dynamic Settings • Integrated Signals & Trade Management<br>
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • News Analysis • Performance Tracking • Pivot Points • Confluence Score • Order Block Alerts<br>
     <span style="color:#555;">Data Source: Twelve Data (Primary) | FastForex | GoldAPI | yfinance (Fallback)</span>
 </div>
 """, unsafe_allow_html=True)
