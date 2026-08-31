@@ -458,6 +458,128 @@ def get_historical_data(symbol, period="3mo", interval="4h", max_retries=3):
         if attempt < max_retries - 1:
             time.sleep(2)
     return None
+    # ==========================================
+# دوال البيانات الأخرى
+# ==========================================
+@st.cache_data(ttl=30)
+def get_all_forex():
+    main_symbols = {
+        "DXY": "DX-Y.NYB",
+        "EURUSD": "EURUSD=X",
+        "GBPUSD": "GBPUSD=X",
+        "USDJPY": "USDJPY=X",
+        "USDCHF": "USDCHF=X",
+        "AUDUSD": "AUDUSD=X",
+        "NZDUSD": "NZDUSD=X",
+        "USDCAD": "USDCAD=X"
+    }
+    results = {}
+    symbols_list = [TWELVE_SYMBOL_MAP.get(sym, sym) for sym in main_symbols.values()]
+    symbols_str = ",".join(symbols_list)
+    url = f"https://api.twelvedata.com/price?symbol={symbols_str}&apikey={TWELVE_API_KEY}"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list):
+                for item in data:
+                    if 'symbol' in item and 'price' in item:
+                        for name, sym in main_symbols.items():
+                            if TWELVE_SYMBOL_MAP.get(sym, sym) == item['symbol']:
+                                results[name] = {'price': float(item['price']), 'change': 0.0}
+                                break
+    except:
+        pass
+    for name, symbol in main_symbols.items():
+        if name not in results:
+            try:
+                ticker = yf.Ticker(symbol)
+                data = ticker.history(period="1d", interval="5m")
+                if not data.empty:
+                    last = data.iloc[-1]
+                    first = data.iloc[0]
+                    change = ((last['Close'] - first['Close']) / first['Close']) * 100 if first['Close'] != 0 else 0
+                    results[name] = {'price': float(last['Close']), 'change': float(change)}
+                else:
+                    results[name] = {'price': 0, 'change': 0}
+            except:
+                results[name] = {'price': 0, 'change': 0}
+    return results
+
+@st.cache_data(ttl=60)
+def get_currency_strength():
+    strength = {}
+    all_pairs = []
+    for pairs in CURRENCY_INDICES.values():
+        all_pairs.extend(pairs)
+    all_pairs = list(set(all_pairs))
+    symbols_list = [TWELVE_SYMBOL_MAP.get(pair, pair) for pair in all_pairs if pair in TWELVE_SYMBOL_MAP]
+    if not symbols_list:
+        return {}
+    prices = {}
+    for i in range(0, len(symbols_list), 8):
+        chunk = symbols_list[i:i+8]
+        symbols_str = ",".join(chunk)
+        url = f"https://api.twelvedata.com/price?symbol={symbols_str}&apikey={TWELVE_API_KEY}"
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    for item in data:
+                        if 'symbol' in item and 'price' in item:
+                            prices[item['symbol']] = float(item['price'])
+        except:
+            pass
+    for currency, pairs in CURRENCY_INDICES.items():
+        changes = []
+        for pair in pairs:
+            td_sym = TWELVE_SYMBOL_MAP.get(pair, pair)
+            if td_sym in prices:
+                try:
+                    df = get_twelvedata_historical(pair, interval="1h", outputsize=24)
+                    if df is not None and len(df) > 1:
+                        last = df['close'].iloc[-1]
+                        first = df['close'].iloc[0]
+                        change = ((last - first) / first) * 100 if first != 0 else 0
+                        if pair.split('=')[0].startswith(currency):
+                            changes.append(change)
+                        else:
+                            changes.append(-change)
+                except:
+                    continue
+        if changes:
+            strength[currency] = round(sum(changes) / len(changes), 2)
+        else:
+            strength[currency] = 0.0
+    return strength
+
+@st.cache_data(ttl=120)
+def get_correlation_matrix(pairs):
+    correlation_data = {}
+    for pair in pairs:
+        try:
+            df = get_twelvedata_historical(pair, interval="4h", outputsize=100)
+            if df is not None and not df.empty:
+                correlation_data[pair] = df['close']
+        except:
+            continue
+    if correlation_data:
+        df_corr = pd.DataFrame(correlation_data)
+        return df_corr.corr()
+    return pd.DataFrame()
+
+@st.cache_data(ttl=120)
+def get_pair_correlation(symbol1, symbol2):
+    try:
+        df1 = get_twelvedata_historical(symbol1, interval="4h", outputsize=100)
+        df2 = get_twelvedata_historical(symbol2, interval="4h", outputsize=100)
+        if df1 is not None and df2 is not None and not df1.empty and not df2.empty:
+            df1_aligned = df1['close'].reindex(df2.index, method='nearest')
+            return round(df1_aligned.corr(df2['close']), 3)
+    except:
+        pass
+    return None
 
 # ==========================================
 # دوال جديدة: تحليل DXY وقوة الدولار والارتباط
