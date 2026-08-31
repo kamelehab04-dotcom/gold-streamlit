@@ -1,5 +1,5 @@
 # ==========================================
-# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية مع التحديثات الهرمية والتخفيفات)
+# BLACK PYRAMID – الإصدار 2002 (النسخة النهائية)
 # تاريخ التحديث: 2026-08-31
 # المصدر: Twelve Data (رئيسي) + FastForex + GoldAPI + yfinance (احتياطي)
 # ==========================================
@@ -32,8 +32,8 @@ st.set_page_config(
 # ==========================================
 GOLD_API_KEY = "goldapi-ec1f975155d746fdd0b810cd202d0a66-io"
 FMP_API_KEY = "EBdaCkJXtIphxCdiZpW3EWCAb4IKpz8N"
-TWELVE_API_KEY = "b46ffed1c34b4a89ac203bc5c0756fd8"  # المفتاح الجديد
-FASTFOREX_API_KEY = "4cd179a14f-a982d5aedd-tkn80n"  # مفتاح Fast Forex
+TWELVE_API_KEY = "b46ffed1c34b4a89ac203bc5c0756fd8"
+FASTFOREX_API_KEY = "4cd179a14f-a982d5aedd-tkn80n"
 
 # Telegram Config (اختياري)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -416,7 +416,7 @@ def get_spot_price(symbol="GC=F"):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="3mo", interval="4h", max_retries=3):
-    """جلب البيانات التاريخية – الإطار الأساسي الآن 4 ساعات"""
+    """جلب البيانات التاريخية"""
     output_size = 500
     if period == "5d":
         output_size = 50
@@ -1086,7 +1086,7 @@ def get_daily_trend(symbol):
         pass
     return "NEUTRAL"
 
-def confirm_signal(df, signal, bars=1):  # تم تخفيف التأكيد إلى شمعة واحدة
+def confirm_signal(df, signal, bars=1):
     if len(df) < bars:
         return False
     for i in range(1, bars+1):
@@ -1311,10 +1311,6 @@ def display_economic_events(events):
     if not events:
         st.info("لا توجد أحداث اقتصادية")
         return
-    def display_economic_events(events):
-    if not events:
-        st.info("لا توجد أحداث اقتصادية")
-        return
     for event in events[:15]:
         impact = event.get('impact', '')
         if impact in ['High', 'عالٍ']:
@@ -1326,7 +1322,6 @@ def display_economic_events(events):
         else:
             impact_icon = "🟢"
             impact_class = "event-low"
-        
         country = event.get('country', '')
         event_name = event.get('event', '')
         date = event.get('date', '')
@@ -1334,13 +1329,13 @@ def display_economic_events(events):
         forecast = event.get('forecast', 'N/A')
         previous = event.get('previous', 'N/A')
         actual = event.get('actual', 'N/A')
-        
         st.markdown(f"""
         <div class="news-card {impact_class}">
             <div class="news-title">{impact_icon} <b>{country}</b> - {event_name}</div>
             <div class="news-date">🕐 {date} {time_val} | التوقع: {forecast} | السابق: {previous} | الفعلي: {actual}</div>
         </div>
         """, unsafe_allow_html=True)
+
 # ==========================================
 # دوال التنبيهات وحجم الصفقة
 # ==========================================
@@ -1424,10 +1419,10 @@ def get_dynamic_weights(df, asset_type="forex"):
     return weights
 
 # ==========================================
-# دالة الإشارة المتكاملة (مع التخفيفات)
+# دالة الإشارة المتكاملة
 # ==========================================
 def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
-    if df is None or len(df) < 50:  # خفض الحد الأدنى من 100 إلى 50
+    if df is None or len(df) < 50:
         return "WAIT", 50, 0, {}, [], None, None, None, None, {}
 
     indicator_status = {}
@@ -1730,7 +1725,6 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     net_score = scores['BUY'] - scores['SELL']
     total_weight = sum(weights.values())
 
-    # شروط مخففة
     if net_score >= 3 and (smc_bullish_score > 0 or indicator_bullish >= 2):
         signal = "BUY"
         confidence = min(100, 55 + (net_score / total_weight) * 100)
@@ -1745,7 +1739,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         confidence *= 0.7
         details['Confluence'] = "⚠️ تعارض بين SMC والمؤشرات ×0.7"
 
-    # تأكيد الشموع (شمعة واحدة فقط)
+    # تأكيد الشموع
     if signal != "WAIT":
         if not confirm_signal(df, signal, bars=1):
             confidence *= 0.9
@@ -1753,7 +1747,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
         else:
             details['Confirmation'] = "✅ تم تأكيد الإشارة"
 
-    # فلتر الاتجاه اليومي (مخفف)
+    # فلتر الاتجاه اليومي
     if signal != "WAIT" and daily_trend != "NEUTRAL":
         if (signal == "BUY" and daily_trend == "BEARISH") or (signal == "SELL" and daily_trend == "BULLISH"):
             confidence *= 0.75
@@ -1762,7 +1756,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
             confidence = min(100, confidence * 1.1)
             details['Daily_Trend_Filter'] = "✅ متوافق مع الاتجاه اليومي +10%"
 
-    # فلتر الأخبار عالية التأثير
+    # فلتر الأخبار
     if signal != "WAIT":
         try:
             calendar = get_fmp_economic_calendar()
@@ -1869,7 +1863,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
     stop_loss = None
     entry_price = None
     targets = {}
-    if signal in ["BUY", "SELL"] and confidence >= 60:  # خفض من 70 إلى 60
+    if signal in ["BUY", "SELL"] and confidence >= 60:
         try:
             df_long = get_twelvedata_historical(symbol, interval="4h", outputsize=100)
             if df_long is not None and len(df_long) > 20:
@@ -1909,7 +1903,7 @@ def generate_advanced_signal(df, current_price, symbol_name="", symbol=""):
                 'risk': atr_value * 2.0 * risk_multiplier
             }
 
-        if targets.get('risk_reward_3', 0) < 1.5:  # خفض من 2.0 إلى 1.5
+        if targets.get('risk_reward_3', 0) < 1.5:
             confidence *= 0.85
             details['RiskReward'] = f"⚠️ R:R {targets.get('risk_reward_3', 0):.1f} < 1.5 ×0.85"
             if confidence < 50:
@@ -2170,14 +2164,6 @@ def detect_reversal(df, trade):
             lower_wick = min(last['close'], last['open']) - last['low']
             if lower_wick > candle_range * 0.5:
                 signals.append("شمعة انعكاس صاعد (ذيل سفلي طويل)")
-    if direction == "BUY":
-        recent_low = df['low'].iloc[-10:].min()
-        if current_price < recent_low:
-            signals.append(f"كسر الدعم القريب ({recent_low:.4f})")
-    else:
-        recent_high = df['high'].iloc[-10:].max()
-        if current_price > recent_high:
-            signals.append(f"كسر المقاومة القريبة ({recent_high:.4f})")
     if signals:
         return True, " | ".join(signals)
     return False, ""
@@ -2462,7 +2448,7 @@ else:
 
 st.markdown("---")
 
-# عرض الصفقة المقترحة (مع خفض العتبة إلى 60)
+# عرض الصفقة المقترحة
 if signal in ["BUY", "SELL"] and confidence >= 60 and stop_loss and entry_price and targets:
     direction_text = "شراء (BUY)" if signal == "BUY" else "بيع (SELL)"
     risk_reward = f"1:{targets['risk_reward_3']:.1f}"
@@ -2527,4 +2513,229 @@ with st.expander("📝 شرح القرار", expanded=True):
     explanation = explain_decision(signal, confidence, net_score, details, mtf_signal, mtf_weight, patterns, tbs_info, df, current_price, stop_loss, entry_price, targets)
     st.markdown(f'<div class="explanation-box">{explanation}</div>', unsafe_allow_html=True)
 
-# ... (بقية الواجهة كما في النسخة السابقة: التقويم، الأخبار، الارتباط، الصفقات، الرسم البياني، التذييل)
+st.markdown("---")
+st.markdown("### 📅 التقويم الاقتصادي")
+if st.button("🔄 تحديث التقويم الاقتصادي", key="refresh_economic_calendar", width='stretch'):
+    with st.spinner("جارٍ جلب بيانات التقويم..."):
+        st.session_state.economic_events = get_fmp_economic_calendar()
+if st.session_state.economic_events:
+    display_economic_events(st.session_state.economic_events)
+else:
+    st.info("اضغط 'تحديث التقويم الاقتصادي' لعرض الأحداث")
+
+st.markdown("---")
+st.markdown("### 📰 تحليل الأخبار")
+if st.button("🔄 تحديث تحليل الأخبار", key="refresh_news_analysis", width='stretch'):
+    with st.spinner("جارٍ تحليل الأخبار..."):
+        news = get_fmp_news()
+        if news:
+            st.session_state.news_analysis = analyze_news_impact(news)
+        else:
+            st.session_state.news_analysis = None
+if st.session_state.news_analysis:
+    display_news_analysis(st.session_state.news_analysis)
+    if signal != "WAIT":
+        news_impact, _ = get_news_impact_score(st.session_state.news_analysis, selected_symbol)
+        if abs(news_impact) > 10:
+            if (signal == "BUY" and news_impact > 0) or (signal == "SELL" and news_impact < 0):
+                st.success(f"✅ الأخبار تدعم قرار {signal} (تأثير: {news_impact:+.0f})")
+            else:
+                st.warning(f"⚠️ الأخبار تعارض قرار {signal} (تأثير: {news_impact:+.0f})")
+        else:
+            st.info(f"📰 تأثير الأخبار محايد ({news_impact:+.0f})")
+else:
+    st.info("اضغط 'تحديث تحليل الأخبار' لعرض التحليل")
+
+st.markdown("---")
+st.markdown("### 🔗 تحليل الارتباط بين العملات")
+corr_pairs = st.multiselect(
+    "اختر الأزواج لتحليل الارتباط:",
+    options=list(PAIRS.keys()),
+    default=["XAU/USD (Gold)", "EUR/USD", "USD/JPY", "GBP/USD"],
+    key="correlation_pairs"
+)
+if corr_pairs and st.button("📊 عرض مصفوفة الارتباط", key="show_correlation_matrix", width='stretch'):
+    with st.spinner("جارٍ حساب الارتباطات..."):
+        symbols = [PAIRS[pair] for pair in corr_pairs]
+        corr_matrix = get_correlation_matrix(symbols)
+        if not corr_matrix.empty:
+            st.dataframe(corr_matrix.round(3), use_container_width=True,
+                         column_config={col: st.column_config.NumberColumn(format="%.3f") for col in corr_matrix.columns})
+            fig_corr = go.Figure()
+            pair_names = list(corr_matrix.columns)
+            for i, pair1 in enumerate(pair_names):
+                fig_corr.add_trace(go.Bar(x=pair_names, y=corr_matrix.iloc[i].values,
+                                          name=pair1, text=[f"{val:.2f}" for val in corr_matrix.iloc[i].values],
+                                          textposition='outside'))
+            fig_corr.update_layout(height=400, template='plotly_dark', title="مصفوفة الارتباط بين الأزواج",
+                                   barmode='group', xaxis_title="الأزواج", yaxis_title="معامل الارتباط",
+                                   yaxis=dict(range=[-1, 1]))
+            st.plotly_chart(fig_corr, use_container_width=True)
+        else:
+            st.warning("لا توجد بيانات كافية لحساب الارتباط")
+
+st.markdown("---")
+st.markdown("### 💼 إدارة الصفقات")
+trade_manager = TradeManager()
+
+for trade in trade_manager.open_trades:
+    if trade["status"] == "open":
+        if trade["trailing_enabled"]:
+            trade_manager.update_trailing_stop(trade["id"], current_price)
+        is_partial, msg = trade_manager.check_partial_close(trade["id"], current_price)
+        if is_partial:
+            st.success(f"🔄 {msg}")
+            send_telegram_alert(f"✅ إغلاق جزئي للصفقة {trade['id']} على {selected_pair_name}")
+
+reversal_messages = []
+for trade in trade_manager.open_trades:
+    if trade["status"] == "open":
+        is_reversal, reversal_msg = detect_reversal(df, trade)
+        if is_reversal:
+            reversal_messages.append(f"⚠️ الصفقة {trade['id']}: {reversal_msg}")
+            send_telegram_alert(f"⚠️ انعكاس محتمل للصفقة {trade['id']}: {reversal_msg}")
+
+if reversal_messages:
+    st.markdown("---")
+    st.markdown("### 🔄 تنبيهات الانعكاس")
+    for msg in reversal_messages:
+        st.markdown(f"""
+        <div class="reversal-alert">
+            {msg}
+            <br><span style="color:#aaa; font-size:0.8rem;">يُنصح بمراجعة الصفقة أو إغلاقها</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+if trade_manager.open_trades:
+    st.write("**الصفقات المفتوحة:**")
+    for trade in trade_manager.open_trades:
+        if trade["stage"] == 0:
+            stage_text = "🟡 وقف ثابت"
+        elif trade["stage"] == 1:
+            stage_text = "🟢 نقطة تعادل"
+        elif trade["stage"] >= 2:
+            stage_text = "🔵 وقف متحرك"
+        partial_text = " | ✅ إغلاق جزئي تم" if trade["partial_close_done"] else ""
+        st.markdown(f"""
+        <div class="trade-row">
+            <b>{trade['id']}</b> | {trade['direction']} | الدخول: {trade['entry']} | اللوت الحالي: {trade['lots']} | 
+            الوقف الحالي: {trade['stop_loss']} | الهدف: {trade['take_profit']}
+            <br><span style="color:#aaa;">المرحلة: {stage_text}{partial_text} {" | 🔄 وقف متحرك مفعّل" if trade['trailing_enabled'] else ""}</span>
+        </div>
+        """, unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        if col1.button(f"🔄 تحديث الوقف {trade['id']}", key=f"update_stop_{trade['id']}", width='stretch'):
+            if trade_manager.update_trailing_stop(trade["id"], current_price):
+                st.success("تم تحديث الوقف المتحرك!")
+                st.rerun()
+            else:
+                st.info("الوقف في أفضل وضعية حالياً")
+        if col2.button(f"🔍 كشف انعكاس {trade['id']}", key=f"check_reversal_{trade['id']}", width='stretch'):
+            is_reversal, msg = detect_reversal(df, trade)
+            if is_reversal:
+                st.warning(f"⚠️ انعكاس مكتشف: {msg}")
+            else:
+                st.success("✅ لا توجد إشارة انعكاس حالياً")
+        if col3.button(f"❌ إغلاق {trade['id']}", key=f"close_trade_{trade['id']}", width='stretch'):
+            profit = trade_manager.close_trade(trade['id'], current_price)
+            st.success(f"تم الإغلاق، الربح: ${profit:.2f}" if profit else "تم الإغلاق")
+            st.rerun()
+else:
+    st.write("لا توجد صفقات مفتوحة")
+
+if trade_manager.closed_trades:
+    profits = [t.get('profit', 0) for t in trade_manager.closed_trades if 'profit' in t]
+    if profits:
+        win_rate = sum(1 for p in profits if p > 0) / len(profits) * 100
+        total_profit = sum(profits)
+        avg_profit = total_profit / len(profits)
+        col_p1, col_p2, col_p3 = st.columns(3)
+        col_p1.metric("نسبة الربح", f"{win_rate:.1f}%")
+        col_p2.metric("إجمالي الربح", f"${total_profit:.2f}")
+        col_p3.metric("متوسط الربح", f"${avg_profit:.2f}")
+
+if st.session_state.show_form:
+    with st.form("new_trade_form"):
+        st.subheader("➕ تفاصيل الصفقة")
+        direction = st.selectbox("الاتجاه", ["BUY", "SELL"], key="trade_direction")
+        entry = st.number_input("سعر الدخول", value=float(current_price), format="%.2f" if "Gold" in selected_pair_name else "%.4f", key="trade_entry")
+        stop = st.number_input("وقف الخسارة", value=float(current_price - 20 if "Gold" in selected_pair_name else 0.001), format="%.2f" if "Gold" in selected_pair_name else "%.4f", key="trade_stop")
+        targets_input = st.text_input("الأهداف (مفصولة بفاصلة)", placeholder="1950, 1960, 1970" if "Gold" in selected_pair_name else "1.1050, 1.1080, 1.1120", key="trade_targets")
+        lots = st.number_input("عدد اللوتات (0 للتلقائي)", min_value=0.0, value=0.0, step=0.01, key="trade_lots")
+        submitted = st.form_submit_button("إضافة الصفقة")
+        if submitted and entry > 0 and stop > 0:
+            targets_list = [float(x.strip()) for x in targets_input.split(",") if x.strip()]
+            if lots == 0:
+                lots = calculate_lot_size(entry, stop)
+            target1 = targets_list[0] if len(targets_list) > 0 else (entry + 40 if "Gold" in selected_pair_name else entry + 0.002)
+            target2 = targets_list[1] if len(targets_list) > 1 else target1 * 1.5
+            target3 = targets_list[2] if len(targets_list) > 2 else target1 * 2
+            trade_data = {
+                "direction": direction,
+                "entry": entry,
+                "lots": lots,
+                "stop_loss": stop,
+                "take_profit": target2,
+                "target1": target1,
+                "target2": target2,
+                "target3": target3,
+                "trailing_enabled": False,
+                "trailing_distance": 0,
+                "notes": "تمت إضافتها يدوياً"
+            }
+            trade_id = trade_manager.add_trade(trade_data)
+            st.success(f"✅ تم إضافة الصفقة {trade_id} بحجم {lots} لوت")
+            st.session_state.show_form = False
+            st.rerun()
+
+st.markdown("---")
+st.markdown("### 📈 Price Chart")
+
+df_smc = analyze_smc_ict(df)
+df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+
+fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                    row_heights=[0.6, 0.2, 0.2])
+
+fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gold', width=1.5)), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema20'], name='EMA20', line=dict(color='orange', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema50'], name='EMA50', line=dict(color='red', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['ema200'], name='EMA200', line=dict(color='purple', dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['bb_upper'], name='BB Upper', line=dict(color='gray', dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['bb_middle'], name='BB Middle', line=dict(color='gray', dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['bb_lower'], name='BB Lower', line=dict(color='gray', dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='blue', width=0.8)), row=1, col=1)
+
+if not df_smc['bsl'].isna().all():
+    fig.add_hline(y=df_smc['bsl'].iloc[-1], line_dash="dash", line_color="rgba(0,255,0,0.5)", row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=df_smc['bsl'].iloc[-1], text="BSL", showarrow=True, arrowhead=1, row=1, col=1)
+if not df_smc['ssl'].isna().all():
+    fig.add_hline(y=df_smc['ssl'].iloc[-1], line_dash="dash", line_color="rgba(255,0,0,0.5)", row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=df_smc['ssl'].iloc[-1], text="SSL", showarrow=True, arrowhead=1, row=1, col=1)
+
+if stop_loss and entry_price:
+    fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", opacity=0.7, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=stop_loss, text="Stop Loss", showarrow=True, arrowhead=1, row=1, col=1)
+    fig.add_hline(y=entry_price, line_dash="dash", line_color="green", opacity=0.7, row=1, col=1)
+    fig.add_annotation(x=df.index[-1], y=entry_price, text="Entry", showarrow=True, arrowhead=1, row=1, col=1)
+
+fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='purple')), row=2, col=1)
+fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
+fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
+
+fig.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='blue')), row=3, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], name='Signal', line=dict(color='red')), row=3, col=1)
+fig.add_bar(x=df.index, y=df['macd_histogram'], name='Histogram', marker_color='gray', opacity=0.3, row=3, col=1)
+
+fig.update_layout(height=800, template='plotly_dark', showlegend=True)
+st.plotly_chart(fig, use_container_width=True)
+
+st.markdown(f"""
+<div class="footer">
+    <span class="brand">▲ BLACK PYRAMID v2002</span> • Advanced Trading Intelligence<br>
+    SMC/ICT • Liquidity (BSL/SSL) • SMR • Patterns • TBS • MTF • Divergence • Candlestick • Killzones • Fibonacci • Currency Strength • Correlation Analysis • Economic Calendar • News Analysis • Dynamic Settings • Integrated Signals & Trade Management<br>
+    <span style="color:#555;">Data Source: Twelve Data (Primary) | FastForex | GoldAPI | yfinance (Fallback)</span>
+</div>
+""", unsafe_allow_html=True)
