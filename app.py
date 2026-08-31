@@ -1312,8 +1312,7 @@ def display_economic_events(events):
         st.info("لا توجد أحداث اقتصادية")
         return
     for event in events[:15]:
-        impact = event.get('impact', '')
-        def display_economic_events(events):
+    def display_economic_events(events):
     if not events:
         st.info("لا توجد أحداث اقتصادية")
         return
