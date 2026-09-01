@@ -1770,11 +1770,14 @@ st.markdown(f"""
 
 
 # ============================================================
-# SIDEBAR
+# MAIN CONTROLS (دمج الشريط الجانبي)
 # ============================================================
 
-with st.sidebar:
-    st.header("⚙️ الإعدادات")
+st.markdown("### ⚙️ الإعدادات والتحكم")
+
+col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1.5, 1.5])
+
+with col1:
     selected_pair = st.selectbox(
         "اختر الأصل",
         list(PAIRS.keys()),
@@ -1784,8 +1787,7 @@ with st.sidebar:
     st.session_state.selected_pair = selected_pair
     symbol = PAIRS[selected_pair]
 
-    st.markdown("---")
-
+with col2:
     balance = st.number_input(
         "رصيد الحساب",
         min_value=100.0,
@@ -1793,42 +1795,55 @@ with st.sidebar:
         step=100.0,
     )
 
+with col3:
     risk_percent = st.number_input(
-        "المخاطرة لكل صفقة %",
+        "المخاطرة %",
         min_value=0.1,
         max_value=5.0,
         value=DEFAULT_RISK_PERCENT,
         step=0.1,
     )
 
-    if st.button("🔄 مسح الكاش وإعادة التحليل", use_container_width=True):
+with col4:
+    if st.button("🔄 مسح الكاش", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-    st.markdown("---")
+with col5:
     st.metric("صفقات اليوم", f"{st.session_state.daily_trade_count}/{MAX_DAILY_TRADES}")
 
-    if st.button("📋 تحليل جميع الأصول", use_container_width=True):
-        with st.spinner("تحليل الأصول..."):
-            st.session_state.all_signals = get_all_signals()
 
-    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-        st.dataframe(
-            st.session_state.all_signals[
-                ["الزوج", "الإشارة", "الثقة", "MTF", "التوافق", "السعر"]
-            ],
-            hide_index=True,
-            use_container_width=True,
-            height=360,
-        )
+# ============================================================
+# ALL ASSETS BUTTON
+# ============================================================
 
-    st.markdown("---")
+if st.button("📋 تحليل جميع الأصول", use_container_width=True):
+    with st.spinner("تحليل الأصول..."):
+        st.session_state.all_signals = get_all_signals()
 
-    if st.button("📅 تحديث التقويم الاقتصادي", use_container_width=True):
-        st.session_state.economic_events = get_fmp_economic_calendar()
+if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+    st.dataframe(
+        st.session_state.all_signals[
+            ["الزوج", "الإشارة", "الثقة", "MTF", "التوافق", "السعر"]
+        ],
+        hide_index=True,
+        use_container_width=True,
+        height=360,
+    )
 
-    if st.session_state.economic_events:
-        st.caption(event_risk_message(st.session_state.economic_events, selected_pair))
+
+# ============================================================
+# ECONOMIC CALENDAR
+# ============================================================
+
+if st.button("📅 تحديث التقويم الاقتصادي", use_container_width=True):
+    st.session_state.economic_events = get_fmp_economic_calendar()
+
+if st.session_state.economic_events:
+    st.caption(event_risk_message(st.session_state.economic_events, selected_pair))
+
+
+st.markdown("---")
 
 
 # ============================================================
@@ -2219,7 +2234,7 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # ============================================================
-# ECONOMIC CALENDAR
+# ECONOMIC CALENDAR DISPLAY
 # ============================================================
 
 if st.session_state.economic_events:
