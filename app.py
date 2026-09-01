@@ -283,24 +283,22 @@ def get_alpha_vantage_data(symbol, interval, limit=500):
 
 @st.cache_data(ttl=300)
 def get_historical_data(symbol, period="3mo", interval="4h"):
-    # 1) yfinance
-    df = get_yfinance_data(symbol, period, interval)
-    if df is not None and len(df) > 50:
-        if interval == "4h":
+    # yfinance يدعم فترات: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo
+    # لا يدعم 4h، لذلك نجلب 1h ثم نعيد التجميع
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period=period, interval="1h")  # نجلب ساعة
+        if not df.empty and len(df) > 50:
+            df.columns = [c.lower() for c in df.columns]
+            # إعادة تجميع إلى 4 ساعات
             df = df.resample('4h').agg({
                 'open':'first','high':'max','low':'min','close':'last','volume':'sum'
             }).dropna()
-        return df
-    # 2) Stooq
-    df = get_stooq_data(symbol, interval)
-    if df is not None and len(df) > 50:
-        return df
-    # 3) Twelve Data
+            return df
+    except Exception as e:
+        pass
+    # محاولة Twelve Data كاحتياطي
     df = get_twelvedata_historical(symbol, interval, 500)
-    if df is not None and len(df) > 50:
-        return df
-    # 4) Alpha Vantage
-    df = get_alpha_vantage_data(symbol, interval)
     if df is not None and len(df) > 50:
         return df
     return None
