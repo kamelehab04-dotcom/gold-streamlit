@@ -20,6 +20,8 @@ import json
 import math
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import concurrent.futures
+import time
 
 import numpy as np
 import pandas as pd
@@ -183,6 +185,8 @@ def init_state():
         "daily_trade_count": 0,
         "trade_date": datetime.now().strftime("%Y-%m-%d"),
         "last_analysis": None,
+        "analyzing_all": False,
+        "analysis_time": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -1469,20 +1473,28 @@ class TradeManager:
 
 
 # ============================================================
-# ALL SIGNALS
+# ALL SIGNALS - PARALLEL VERSION
 # ============================================================
 
-def get_all_signals():
+@st.cache_data(ttl=600, show_spinner=False)
+def get_all_signals_parallel():
+    """
+    تحليل جميع الأصول باستخدام threading لجلب البيانات بالتوازي.
+    """
     results = []
-    for pair_name, symbol in PAIRS.items():
+    total = len(PAIRS)
+    progress_bar = st.progress(0, text="جاري تحليل الأصول...")
+    status_text = st.empty()
+
+    def analyze_one(pair_name, symbol):
         try:
-            price, change = get_spot_price(symbol)
+            price, _ = get_spot_price(symbol)
             df = get_historical_data(symbol, "3mo", "4h")
             if price is None or df is None:
-                continue
+                return None
             result = generate_signal(df, price, pair_name, symbol)
             levels = result["levels"] or {}
-            results.append({
+            return {
                 "الزوج": pair_name,
                 "الإشارة": result["signal"],
                 "الثقة": round(result["confidence"], 1),
@@ -1495,11 +1507,35 @@ def get_all_signals():
                 "TP1": fmt_price(levels.get("target1"), pair_name),
                 "TP2": fmt_price(levels.get("target2"), pair_name),
                 "RR3": round(levels.get("risk_reward_3", 0), 2) if levels else 0,
-            })
+            }
         except Exception:
-            continue
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_pair = {
+            executor.submit(analyze_one, pair_name, symbol): (pair_name, i)
+            for i, (pair_name, symbol) in enumerate(PAIRS.items())
+        }
+
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_pair):
+            pair_name, idx = future_to_pair[future]
+            try:
+                res = future.result()
+                if res:
+                    results.append(res)
+            except Exception:
+                pass
+            completed += 1
+            progress_bar.progress(completed / total, text=f"تم تحليل {completed} من {total} أصل")
+            status_text.caption(f"آخر زوج تم تحليله: {pair_name}")
+
+    progress_bar.empty()
+    status_text.empty()
+
     if not results:
         return pd.DataFrame()
+
     out = pd.DataFrame(results)
     signal_order = {"BUY": 0, "SELL": 1, "WAIT": 2}
     out["_order"] = out["الإشارة"].map(signal_order).fillna(3)
@@ -1814,22 +1850,48 @@ with col5:
 
 
 # ============================================================
-# ALL ASSETS BUTTON
+# ALL ASSETS ANALYSIS - BUTTONS & RESULTS
 # ============================================================
 
-if st.button("📋 تحليل جميع الأصول", use_container_width=True):
-    with st.spinner("تحليل الأصول..."):
-        st.session_state.all_signals = get_all_signals()
+col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
 
+with col_btn1:
+    if st.button("📋 تحليل جميع الأصول (سريع)", use_container_width=True):
+        with st.spinner("جاري التحليل المتوازي... قد يستغرق 5-10 ثوانٍ"):
+            start_time = time.time()
+            df_signals = get_all_signals_parallel()
+            st.session_state.all_signals = df_signals
+            st.session_state.analyzing_all = True
+            st.session_state.analysis_time = time.time() - start_time
+        st.rerun()
+
+with col_btn2:
+    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+        if st.button("🗑️ مسح النتائج", use_container_width=True):
+            st.session_state.all_signals = None
+            st.session_state.analyzing_all = False
+            st.session_state.analysis_time = None
+            st.rerun()
+
+with col_btn3:
+    if st.session_state.get("analysis_time"):
+        st.metric("⏱️ زمن التحليل", f"{st.session_state.analysis_time:.1f} ثانية")
+
+# عرض النتائج
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+    st.success(f"✅ تم تحليل {len(st.session_state.all_signals)} أصلاً بنجاح.")
     st.dataframe(
         st.session_state.all_signals[
-            ["الزوج", "الإشارة", "الثقة", "MTF", "التوافق", "السعر"]
+            ["الزوج", "الإشارة", "الثقة", "MTF", "التوافق", "السعر", "SL", "TP1", "RR3"]
         ],
         hide_index=True,
         use_container_width=True,
-        height=360,
+        height=450,
     )
+elif st.session_state.analyzing_all:
+    st.warning("⚠️ لم يتم العثور على نتائج. قد تكون بعض الأسواق مغلقة أو لا تتوفر بيانات.")
+else:
+    st.info("اضغط على 'تحليل جميع الأصول (سريع)' لعرض الإشارات لجميع الأزواج.")
 
 
 # ============================================================
@@ -1963,7 +2025,7 @@ ctx1.metric("DXY", result["details"]["DXY"])
 ctx2.metric("Regime", result["details"]["Regime"])
 ctx3.metric("Divergence", result["details"]["Divergence"])
 
-st.caption(result["details"]["USD"] if "USD" in result["details"] else "")
+st.caption(result["details"].get("USD", ""))
 
 if "Gold" in selected_pair:
     corr = get_gold_dxy_correlation()
