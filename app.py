@@ -47,6 +47,19 @@ MIN_RR_TP1 = 1.00
 MIN_RR_TP2 = 1.50
 MIN_RR_TP3 = 2.00
 
+# A+ selective-entry layer. These thresholds intentionally make the
+# system more selective without weakening the underlying directional score.
+APLUS_MIN_MTF_CONF = 80.0
+APLUS_MIN_CONFIDENCE = 78.0
+APLUS_MIN_GAP = 25.0
+APLUS_MIN_CONFLUENCE = 4
+APLUS_MIN_PILLAR = 60.0
+APLUS_MIN_MOMENTUM_CONF = 2
+APLUS_MIN_RR_TP1 = 1.20
+APLUS_MIN_RR_TP2 = 1.80
+APLUS_MIN_RR_TP3 = 2.50
+PULLBACK_MAX_ATR = 1.50
+
 ASSET_PROFILES = {
     "forex": {
         "atr_period": 14,
@@ -1468,6 +1481,246 @@ def calculate_position_size(pair_name, entry, stop, balance, risk_percent):
 
 
 # ============================================================
+# A+ SETUP / ENTRY ENGINE
+# ============================================================
+
+def evaluate_aplus_setup(df, signal, buy, sell, confidence, mtf_bias, mtf_conf):
+    """Strict quality gate for A+ trades.
+
+    Direction and setup quality are kept separate from the final executable
+    entry. A strong directional setup may therefore become SETUP_WAIT instead
+    of being mislabeled as a weak WAIT.
+    """
+    pillar_data = None
+    # The caller injects pillar data through df.attrs to avoid changing the
+    # existing directional_score return contract.
+    pillar_data = df.attrs.get("pillar_data")
+    if not pillar_data or signal not in ("BUY", "SELL"):
+        return {
+            "eligible": False,
+            "status": "NO_TRADE",
+            "reasons": ["لا توجد إشارة اتجاهية صالحة."],
+            "confluence": 0,
+            "momentum_confirmations": 0,
+            "trigger": False,
+        }
+
+    direction = signal
+    side = pillar_data[direction]
+    opposite = pillar_data["SELL" if direction == "BUY" else "BUY"]
+
+    confluence = sum(1 for p in PILLAR_WEIGHTS if side[p] >= 50)
+    structure_ok = side["structure"] >= APLUS_MIN_PILLAR
+    trend_ok = side["trend"] >= APLUS_MIN_PILLAR
+
+    momentum_confirmations = 0
+    last = df.iloc[-1]
+    rsi = safe_float(last["rsi"], 50)
+    if direction == "BUY":
+        momentum_confirmations += int(rsi >= 52)
+        momentum_confirmations += int(last["macd"] > last["macd_signal"])
+        momentum_confirmations += int(last["macd_histogram"] > 0)
+    else:
+        momentum_confirmations += int(rsi <= 48)
+        momentum_confirmations += int(last["macd"] < last["macd_signal"])
+        momentum_confirmations += int(last["macd_histogram"] < 0)
+
+    gap = abs(buy - sell)
+    mtf_ok = mtf_bias == ("BULLISH" if direction == "BUY" else "BEARISH")
+    gap_ok = gap >= APLUS_MIN_GAP
+    confidence_ok = confidence >= APLUS_MIN_CONFIDENCE
+    confluence_ok = confluence >= APLUS_MIN_CONFLUENCE
+    momentum_ok = momentum_confirmations >= APLUS_MIN_MOMENTUM_CONF
+
+    # A direct trade needs no strong opposing pillar. A single weak opposing
+    # pillar is tolerated; two or more strong opposing pillars are a conflict.
+    opposite_strong = sum(1 for p in PILLAR_WEIGHTS if opposite[p] >= 60)
+    conflict_ok = opposite_strong <= 1
+
+    trigger = candle_confirmation(df, direction)
+    reasons = []
+    if not mtf_ok:
+        reasons.append("MTF لا يؤكد اتجاه A+.")
+    if not confidence_ok:
+        reasons.append(f"الثقة أقل من {APLUS_MIN_CONFIDENCE:.0f}%.")
+    if not gap_ok:
+        reasons.append(f"فرق BUY/SELL أقل من {APLUS_MIN_GAP:.0f} نقطة.")
+    if not confluence_ok:
+        reasons.append(f"التوافق أقل من {APLUS_MIN_CONFLUENCE}/5.")
+    if not structure_ok:
+        reasons.append("Structure أقل من 60.")
+    if not trend_ok:
+        reasons.append("Trend أقل من 60.")
+    if not momentum_ok:
+        reasons.append("Momentum لا يحقق 2/3 confirmations.")
+    if not conflict_ok:
+        reasons.append("يوجد تعارض قوي من أكثر من محور مقابل.")
+
+    eligible = all([
+        mtf_ok, confidence_ok, gap_ok, confluence_ok,
+        structure_ok, trend_ok, momentum_ok, conflict_ok,
+    ])
+
+    if not eligible:
+        return {
+            "eligible": False,
+            "status": "NO_TRADE",
+            "reasons": reasons,
+            "confluence": confluence,
+            "momentum_confirmations": momentum_confirmations,
+            "trigger": trigger,
+            "opposite_strong": opposite_strong,
+        }
+
+    if trigger:
+        return {
+            "eligible": True,
+            "status": "A+ BUY" if direction == "BUY" else "A+ SELL",
+            "reasons": ["كل بوابات A+ ناجحة.", "Trigger سعري مؤكد."],
+            "confluence": confluence,
+            "momentum_confirmations": momentum_confirmations,
+            "trigger": True,
+            "opposite_strong": opposite_strong,
+        }
+
+    return {
+        "eligible": True,
+        "status": "BULLISH SETUP" if direction == "BUY" else "BEARISH SETUP",
+        "reasons": [
+            "Setup A+ مكتمل لكن لا يوجد Trigger سعري بعد.",
+            "انتظر Pullback/Break + Retest قبل التنفيذ.",
+        ],
+        "confluence": confluence,
+        "momentum_confirmations": momentum_confirmations,
+        "trigger": False,
+        "opposite_strong": opposite_strong,
+    }
+
+
+def calculate_aplus_levels(df, signal, current_price, profile):
+    """Calculate executable levels using the existing structural engine,
+    but require the stricter A+ RR thresholds."""
+    levels = calculate_trade_levels(df, signal, current_price, profile)
+    if not levels:
+        return None, False, "تعذر بناء مستويات A+."
+
+    checks = [
+        levels["risk_reward_1"] >= APLUS_MIN_RR_TP1,
+        levels["risk_reward_2"] >= APLUS_MIN_RR_TP2,
+        levels["risk_reward_3"] >= APLUS_MIN_RR_TP3,
+    ]
+    if all(checks):
+        return levels, True, ""
+
+    return levels, False, (
+        f"RR غير كافٍ لـA+: TP1≥{APLUS_MIN_RR_TP1:.2f}, "
+        f"TP2≥{APLUS_MIN_RR_TP2:.2f}, TP3≥{APLUS_MIN_RR_TP3:.2f}."
+    )
+
+
+def calculate_pullback_levels(df, signal, current_price, profile):
+    """Build a conservative pullback zone for a valid A+ directional setup.
+
+    Candidates are existing, decision-safe levels: EMA20/EMA50, the latest
+    bullish/bearish order block, FVG bounds, and premium/discount midpoint.
+    The zone is limited to 1.5 ATR from the current price.
+    """
+    atr = safe_float(df["atr"].iloc[-1], np.nan)
+    if not np.isfinite(atr) or atr <= 0:
+        return None
+
+    last = df.iloc[-1]
+    candidates = []
+    if signal == "BUY":
+        raw = [
+            safe_float(last["ema20"], np.nan),
+            safe_float(last["ema50"], np.nan),
+            safe_float(last["premium_mid"], np.nan),
+        ]
+        if bool(last["order_block_bullish"]):
+            raw += [safe_float(last["ob_low"], np.nan), safe_float(last["ob_high"], np.nan)]
+        if bool(last["fvg_bullish"]):
+            raw += [safe_float(last["fvg_bull_low"], np.nan), safe_float(last["fvg_bull_high"], np.nan)]
+        candidates = [x for x in raw if np.isfinite(x) and x < current_price]
+        candidates = [x for x in candidates if current_price - x <= PULLBACK_MAX_ATR * atr]
+        if not candidates:
+            return None
+        zone_high = max(candidates)
+        zone_low = min(candidates)
+        entry = zone_high
+        stop_candidates = [
+            safe_float(df["ssl"].iloc[-1], np.nan),
+            safe_float(df["low"].iloc[-8:].min(), np.nan),
+            zone_low,
+        ]
+        stop_base = max(x for x in stop_candidates if np.isfinite(x) and x < entry)
+        stop = stop_base - 0.20 * atr
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        targets = [
+            safe_float(df["bsl"].iloc[-1], np.nan),
+            safe_float(df["high"].iloc[-8:].max(), np.nan),
+        ]
+        targets = sorted(x for x in targets if np.isfinite(x) and x > entry)
+        t1 = targets[0] if targets else entry + risk * APLUS_MIN_RR_TP1
+        t2 = max(entry + risk * APLUS_MIN_RR_TP2, t1 + risk * 0.20)
+        t3 = max(entry + risk * APLUS_MIN_RR_TP3, t2 + risk * 0.20)
+    else:
+        raw = [
+            safe_float(last["ema20"], np.nan),
+            safe_float(last["ema50"], np.nan),
+            safe_float(last["premium_mid"], np.nan),
+        ]
+        if bool(last["order_block_bearish"]):
+            raw += [safe_float(last["ob_low"], np.nan), safe_float(last["ob_high"], np.nan)]
+        if bool(last["fvg_bearish"]):
+            raw += [safe_float(last["fvg_bear_low"], np.nan), safe_float(last["fvg_bear_high"], np.nan)]
+        candidates = [x for x in raw if np.isfinite(x) and x > current_price]
+        candidates = [x for x in candidates if x - current_price <= PULLBACK_MAX_ATR * atr]
+        if not candidates:
+            return None
+        zone_low = min(candidates)
+        zone_high = max(candidates)
+        entry = zone_low
+        stop_candidates = [
+            safe_float(df["bsl"].iloc[-1], np.nan),
+            safe_float(df["high"].iloc[-8:].max(), np.nan),
+            zone_high,
+        ]
+        stop_base = min(x for x in stop_candidates if np.isfinite(x) and x > entry)
+        stop = stop_base + 0.20 * atr
+        risk = stop - entry
+        if risk <= 0:
+            return None
+        targets = [
+            safe_float(df["ssl"].iloc[-1], np.nan),
+            safe_float(df["low"].iloc[-8:].min(), np.nan),
+        ]
+        targets = sorted((x for x in targets if np.isfinite(x) and x < entry), reverse=True)
+        t1 = targets[0] if targets else entry - risk * APLUS_MIN_RR_TP1
+        t2 = min(entry - risk * APLUS_MIN_RR_TP2, t1 - risk * 0.20)
+        t3 = min(entry - risk * APLUS_MIN_RR_TP3, t2 - risk * 0.20)
+
+    rr1 = abs(t1 - entry) / risk
+    rr2 = abs(t2 - entry) / risk
+    rr3 = abs(t3 - entry) / risk
+    return {
+        "entry": float(entry),
+        "entry_zone_low": float(zone_low),
+        "entry_zone_high": float(zone_high),
+        "stop_loss": float(stop),
+        "target1": float(t1),
+        "target2": float(t2),
+        "target3": float(t3),
+        "risk": float(risk),
+        "risk_reward_1": float(rr1),
+        "risk_reward_2": float(rr2),
+        "risk_reward_3": float(rr3),
+    }
+
+
+# ============================================================
 # FINAL SIGNAL ENGINE
 # ============================================================
 
@@ -1476,13 +1729,14 @@ def generate_signal(df, current_price, pair_name, symbol):
     df = build_features(df, profile)
 
     scores = directional_score(df, pair_name, symbol)
+    df.attrs["pillar_data"] = scores["pillars"]
 
     mtf_bias, mtf_conf, mtf_details = get_mtf_analysis(symbol)
 
     buy = scores["buy"]
     sell = scores["sell"]
 
-    # MTF is a gate/confirmation layer, not a standalone RSI signal.
+    # MTF remains a directional confirmation layer.
     if mtf_bias == "BULLISH":
         buy += 8
         sell -= 4
@@ -1499,30 +1753,28 @@ def generate_signal(df, current_price, pair_name, symbol):
     gap = abs(buy - sell)
     max_score = max(buy, sell)
 
-    # Directional confluence: opposite evidence is conflict, not support.
     if gap < 10:
-        signal = "WAIT"
+        base_signal = "WAIT"
     elif buy > sell:
-        signal = "BUY"
+        base_signal = "BUY"
     else:
-        signal = "SELL"
+        base_signal = "SELL"
 
-    # Strong structure conflict forces WAIT.
     last = df.iloc[-1]
     if bool(last["mss_bullish"]) and sell > buy:
-        signal = "WAIT"
+        base_signal = "WAIT"
     if bool(last["mss_bearish"]) and buy > sell:
-        signal = "WAIT"
+        base_signal = "WAIT"
 
-    # Regime-aware RSI: oversold/overbought does not create a trade alone.
     rsi = safe_float(last["rsi"], 50)
-    if signal == "BUY" and rsi > 75 and not bool(last["mss_bullish"]):
+    if base_signal == "BUY" and rsi > 75 and not bool(last["mss_bullish"]):
         buy -= 5
-    if signal == "SELL" and rsi < 25 and not bool(last["mss_bearish"]):
+    if base_signal == "SELL" and rsi < 25 and not bool(last["mss_bearish"]):
         sell -= 5
 
     buy = clamp(buy, 0, 100)
     sell = clamp(sell, 0, 100)
+    max_score = max(buy, sell)
 
     confidence = clamp(
         50 + max(0, abs(buy - sell)) * 0.75 + max(0, max_score - 60) * 0.25,
@@ -1530,43 +1782,56 @@ def generate_signal(df, current_price, pair_name, symbol):
         95,
     )
 
+    # Directional confluence is calculated before the status changes to
+    # SETUP_WAIT/NO_TRADE, so a strong setup is never displayed as 0/5.
+    if base_signal == "BUY":
+        confluence = sum(1 for p in PILLAR_WEIGHTS if scores["pillars"]["BUY"][p] >= 50)
+    elif base_signal == "SELL":
+        confluence = sum(1 for p in PILLAR_WEIGHTS if scores["pillars"]["SELL"][p] >= 50)
+    else:
+        confluence = 0
+
+    setup = evaluate_aplus_setup(
+        df, base_signal, buy, sell, confidence, mtf_bias, mtf_conf
+    )
+
     levels = None
     risk_ok = False
     risk_msg = ""
+    signal = "WAIT"
+    status = "NO_TRADE"
+    setup_direction = base_signal if base_signal in ("BUY", "SELL") else None
 
-    if signal in ("BUY", "SELL"):
-        levels = calculate_trade_levels(df, signal, current_price, profile)
-        risk_ok, risk_msg = validate_levels(signal, levels, profile)
+    if setup["eligible"] and base_signal in ("BUY", "SELL"):
+        status = setup["status"]
+        if setup["trigger"]:
+            levels, risk_ok, risk_msg = calculate_aplus_levels(
+                df, base_signal, current_price, profile
+            )
+            if risk_ok:
+                signal = base_signal
+            else:
+                # Strong setup, bad current entry: preserve direction and
+                # provide a pullback plan rather than fabricating a BUY.
+                status = "BULLISH SETUP" if base_signal == "BUY" else "BEARISH SETUP"
+                levels = calculate_pullback_levels(df, base_signal, current_price, profile)
+                risk_msg = risk_msg or "انتظر Pullback لتحسين RR."
+        else:
+            levels = calculate_pullback_levels(df, base_signal, current_price, profile)
+            if levels is None:
+                risk_msg = "Setup A+ موجود لكن لم يمكن بناء منطقة Pullback آمنة."
 
-        if not risk_ok:
-            signal = "WAIT"
-            confidence = min(confidence, 68)
-
-    # Final confidence is reduced if MTF strongly disagrees.
-    if signal == "BUY" and mtf_bias == "BEARISH":
-        confidence *= 0.82
-        signal = "WAIT" if confidence < profile["confidence_threshold"] else signal
-
-    if signal == "SELL" and mtf_bias == "BULLISH":
-        confidence *= 0.82
-        signal = "WAIT" if confidence < profile["confidence_threshold"] else signal
-
-    # Confidence threshold.
-    if signal in ("BUY", "SELL") and confidence < profile["confidence_threshold"]:
+    # MTF disagreement remains a hard block for executable A+ trades.
+    if signal == "BUY" and mtf_bias != "BULLISH":
         signal = "WAIT"
+        status = "NO_TRADE"
+    if signal == "SELL" and mtf_bias != "BEARISH":
+        signal = "WAIT"
+        status = "NO_TRADE"
 
-    # Confluence count is directional.
-    pillar_data = scores["pillars"]
-    if signal == "BUY":
-        confluence = sum(
-            1 for p in PILLAR_WEIGHTS if pillar_data["BUY"][p] >= 50
-        )
-    elif signal == "SELL":
-        confluence = sum(
-            1 for p in PILLAR_WEIGHTS if pillar_data["SELL"][p] >= 50
-        )
-    else:
-        confluence = 0
+    if signal in ("BUY", "SELL") and confidence < APLUS_MIN_CONFIDENCE:
+        signal = "WAIT"
+        status = "NO_TRADE"
 
     details = {
         "BUY Score": round(buy, 1),
@@ -1576,23 +1841,36 @@ def generate_signal(df, current_price, pair_name, symbol):
         "Regime": scores["regime"],
         "DXY": scores["dxy_bias"],
         "Divergence": scores["divergence"] or "None",
-        "Risk Gate": "PASS" if risk_ok else risk_msg,
+        "A+ Status": status,
+        "A+ Gap": round(gap, 1),
+        "A+ Momentum": f"{setup['momentum_confirmations']}/3",
+        "A+ Trigger": "PASS" if setup["trigger"] else "WAIT",
+        "Risk Gate": "PASS" if risk_ok else (risk_msg or "A+ quality gate not passed."),
     }
+
+    reasons = scores["reasons"][:]
+    reasons.extend(setup["reasons"])
+    if risk_msg:
+        reasons.append(risk_msg)
 
     return {
         "signal": signal,
+        "status": status,
+        "setup_direction": setup_direction,
         "confidence": confidence,
         "buy_score": buy,
         "sell_score": sell,
         "net_score": buy - sell,
-        "confluence": confluence,
+        "confluence": setup["confluence"] if setup["confluence"] else confluence,
         "details": details,
-        "reasons": scores["reasons"],
-        "pillars": pillar_data,
+        "reasons": reasons,
+        "pillars": scores["pillars"],
         "mtf_bias": mtf_bias,
         "mtf_conf": mtf_conf,
         "mtf_details": mtf_details,
         "levels": levels,
+        "risk_ok": risk_ok,
+        "aplus": setup,
         "df": df,
     }
 
@@ -2026,10 +2304,11 @@ c4.metric("النظام", APP_VERSION)
 # ============================================================
 
 signal_color = "#00e676" if signal == "BUY" else "#ff5252" if signal == "SELL" else "#ffc107"
+display_status = result.get("status", signal)
 
 st.markdown(f"""
 <div class="signal-box">
-    <div class="signal-text" style="color:{signal_color};">{signal}</div>
+    <div class="signal-text" style="color:{signal_color};">{display_status}</div>
     <div>Confidence Score: {confidence:.1f}%</div>
     <div>BUY: {result['buy_score']:.1f} | SELL: {result['sell_score']:.1f}</div>
     <div>Directional Confluence: {result['confluence']}/5</div>
@@ -2126,7 +2405,7 @@ for k, v in result["details"].items():
 
 st.markdown("### 🎯 خطة الصفقة")
 
-if signal in ("BUY", "SELL") and levels:
+if signal in ("BUY", "SELL") and levels and result.get("risk_ok"):
     l1, l2, l3, l4 = st.columns(4)
 
     l1.metric("Entry", fmt_price(levels["entry"], selected_pair))
@@ -2186,7 +2465,20 @@ if signal in ("BUY", "SELL") and levels:
             st.rerun()
 
 else:
-    st.warning("WAIT — لا توجد صفقة صالحة وفق شروط Structure + MTF + Risk.")
+    if result.get("status") in ("BULLISH SETUP", "BEARISH SETUP"):
+        st.warning(
+            f"{result['status']} — الاتجاه A+، لكن التنفيذ ينتظر Trigger/Pullback. "
+            "لا يتم فتح Paper Trade حتى تمر بوابة A+ كاملة."
+        )
+        if levels and "entry_zone_low" in levels:
+            st.info(
+                f"منطقة الدخول المفضلة: {fmt_price(levels['entry_zone_low'], selected_pair)} → "
+                f"{fmt_price(levels['entry_zone_high'], selected_pair)} | "
+                f"SL: {fmt_price(levels['stop_loss'], selected_pair)} | "
+                f"TP3: {fmt_price(levels['target3'], selected_pair)}"
+            )
+    else:
+        st.warning("NO TRADE — شروط A+ الكاملة غير مكتملة.")
 
 
 # ============================================================
