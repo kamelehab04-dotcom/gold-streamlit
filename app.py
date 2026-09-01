@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # BLACK PYRAMID v2003
 # Hierarchical Intelligence Engine
 # مبني على BLACK PYRAMID v2002 مع إعادة بناء:
@@ -48,7 +48,7 @@ MAX_DAILY_TRADES = 4
 LOW_CONF_DAILY_LIMIT = 2
 
 
-CONFIDENCE_MIN_TRADE = 65.0
+CONFIDENCE_MIN_TRADE = 70.0
 MIN_RR_TP1 = 1.00
 MIN_RR_TP2 = 1.50
 MIN_RR_TP3 = 2.00
@@ -67,7 +67,7 @@ ASSET_PROFILES = {
         "atr_trail": 1.00,
         "swing_order": 3,
         "structure_lookback": 120,
-        "confidence_threshold": 65,
+        "confidence_threshold": 70,
         "min_rr": 1.50,
         "pip_size": 0.0001,
         "contract_size": 100000,
@@ -84,7 +84,7 @@ ASSET_PROFILES = {
         "atr_trail": 1.20,
         "swing_order": 3,
         "structure_lookback": 175,
-        "confidence_threshold": 65,
+        "confidence_threshold": 72,
         "min_rr": 1.50,
         "pip_size": 0.01,
         "contract_size": 100,
@@ -101,7 +101,7 @@ ASSET_PROFILES = {
         "atr_trail": 1.50,
         "swing_order": 4,
         "structure_lookback": 250,
-        "confidence_threshold": 70,
+        "confidence_threshold": 75,
         "min_rr": 1.50,
         "pip_size": 0.01,
         "contract_size": 1,
@@ -268,25 +268,6 @@ def reset_daily_counter():
         st.session_state.daily_trade_count = 0
 
 
-
-
-def trade_grade(confidence, confluence, gap, risk_ok=True):
-    """
-    Classify a valid directional setup without weakening the Risk Engine.
-
-    A = premium setup
-    B = tradable setup (this includes the 65-79.9 confidence zone,
-        so a 66.8 BUY is a real BUY rather than WAIT)
-    C = lower-quality setup; shown separately and not promoted to A/B
-    """
-    if not risk_ok:
-        return "C"
-
-    if confidence >= 80 and confluence >= 4 and gap >= 15:
-        return "A"
-    if confidence >= 65:
-        return "B"
-    return "C"
 
 
 def can_open_trade(confidence):
@@ -1897,15 +1878,12 @@ def generate_signal(df, current_price, pair_name, symbol):
 
 
     # Confidence threshold.
-    # 65% is the executable floor. Quality is expressed by A/B/C grade
-    # instead of converting every sub-70% setup into WAIT.
     if signal in ("BUY", "SELL") and confidence < profile["confidence_threshold"]:
         signal = "WAIT"
 
 
     # Confluence count is directional.
     pillar_data = scores["pillars"]
-    candidate_signal = "BUY" if buy > sell else "SELL" if sell > buy else "WAIT"
     if signal == "BUY":
         confluence = sum(
             1 for p in PILLAR_WEIGHTS if pillar_data["BUY"][p] >= 50
@@ -1914,24 +1892,8 @@ def generate_signal(df, current_price, pair_name, symbol):
         confluence = sum(
             1 for p in PILLAR_WEIGHTS if pillar_data["SELL"][p] >= 50
         )
-    elif candidate_signal == "BUY":
-        confluence = sum(
-            1 for p in PILLAR_WEIGHTS if pillar_data["BUY"][p] >= 50
-        )
-    elif candidate_signal == "SELL":
-        confluence = sum(
-            1 for p in PILLAR_WEIGHTS if pillar_data["SELL"][p] >= 50
-        )
     else:
         confluence = 0
-
-
-    grade = trade_grade(
-        confidence,
-        confluence,
-        gap,
-        risk_ok=risk_ok,
-    )
 
 
     details = {
@@ -1953,7 +1915,6 @@ def generate_signal(df, current_price, pair_name, symbol):
         "sell_score": sell,
         "net_score": buy - sell,
         "confluence": confluence,
-        "grade": grade,
         "details": details,
         "reasons": scores["reasons"],
         "pillars": pillar_data,
@@ -2495,7 +2456,6 @@ st.markdown(f"""
     <div>Confidence Score: {confidence:.1f}%</div>
     <div>BUY: {result['buy_score']:.1f} | SELL: {result['sell_score']:.1f}</div>
     <div>Directional Confluence: {result['confluence']}/5</div>
-    <div style="font-size:1.15rem;font-weight:700;">Grade: {result['grade']}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -2654,15 +2614,7 @@ if signal in ("BUY", "SELL") and levels:
     if not allowed:
         st.warning(reason)
     else:
-        grade = result["grade"]
-        grade_label = {
-            "A": "A — صفقة قوية جدًا",
-            "B": "B — صفقة قابلة للتنفيذ",
-            "C": "C — صفقة مقبولة لكن أقل جودة",
-        }[grade]
-        st.info(f"تصنيف الصفقة: **{grade}** — {grade_label}")
-
-        if st.button(f"➕ إضافة صفقة {signal} — Grade {grade} إلى Paper Trade", use_container_width=True):
+        if st.button("➕ إضافة الصفقة إلى Paper Trade", use_container_width=True):
             manager = TradeManager()
 
 
@@ -2679,7 +2631,6 @@ if signal in ("BUY", "SELL") and levels:
                 "take_profit": levels["target2"],
                 "confidence": confidence,
                 "confluence": result["confluence"],
-                "grade": result["grade"],
                 "risk_reward": levels["risk_reward_3"],
                 "notes": "; ".join(result["reasons"][:8]),
             }
@@ -2697,7 +2648,7 @@ if signal in ("BUY", "SELL") and levels:
 
 
 else:
-    st.warning("WAIT — لا توجد صفقة صالحة وفق شروط Structure + MTF + Risk. لا يتم فتح C تلقائيًا إذا لم يجتز حد التنفيذ.")
+    st.warning("WAIT — لا توجد صفقة صالحة وفق شروط Structure + MTF + Risk.")
 
 
 
