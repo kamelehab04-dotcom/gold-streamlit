@@ -1,5 +1,6 @@
+# BLACK PYRAMID v2004 — SMC/MTF/Confirmation/Risk Upgrade
 # ============================================================
-# BLACK PYRAMID v2003.1
+# BLACK PYRAMID v2003.2
 # Hierarchical Intelligence Engine
 # Structure → Regime → Setup → Confirmation → Context → Risk
 # + Fallback Symbols for Gold/Silver/DXY
@@ -26,7 +27,7 @@ from plotly.subplots import make_subplots
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2003.1"
+APP_VERSION = "2004"
 TRADES_FILE = Path("trades_data_v2003.json")
 
 DEFAULT_BALANCE = 100000.0
@@ -387,7 +388,9 @@ def calc_rsi(series, period=14):
     avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+    rsi = rsi.where(avg_loss > 0, 100.0)
+    rsi = rsi.where(avg_gain > 0, 0.0)
+    return rsi.fillna(50).clip(0, 100)
 
 def calc_atr(df, period=14):
     prev_close = df["close"].shift(1)
@@ -413,12 +416,16 @@ def calc_bollinger(series, period=20, std=2.0):
 
 def calc_mfi(df, period=14):
     tp = (df["high"] + df["low"] + df["close"]) / 3
-    raw = tp * df["volume"].replace(0, np.nan)
+    volume = pd.to_numeric(df["volume"], errors="coerce").fillna(0).clip(lower=0)
+    raw = tp * volume
     direction = tp.diff()
-    pos = raw.where(direction > 0, 0.0).rolling(period).sum()
-    neg = raw.where(direction < 0, 0.0).abs().rolling(period).sum()
+    pos = raw.where(direction > 0, 0.0).rolling(period, min_periods=period).sum()
+    neg = raw.where(direction < 0, 0.0).abs().rolling(period, min_periods=period).sum()
     ratio = pos / neg.replace(0, np.nan)
-    return (100 - (100 / (1 + ratio))).fillna(50)
+    mfi = 100 - (100 / (1 + ratio))
+    mfi = mfi.where(neg > 0, 100.0)
+    mfi = mfi.where(pos > 0, 0.0)
+    return mfi.fillna(50).clip(0, 100)
 
 def calc_chaikin(df, period=21):
     hl = (df["high"] - df["low"]).replace(0, np.nan)
@@ -789,6 +796,7 @@ def get_mtf_analysis(symbol, pair_name=None):
 # CONTEXT ENGINE: DXY / USD / GOLD
 # ============================================================
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_dxy_context():
     df = get_historical_data("DX-Y.NYB", "6mo", "4h")
     if df is None:
@@ -834,6 +842,7 @@ def get_pair_usd_context(pair_name):
             return 1.0, "ضعف الدولار يدعم الزوج."
     return 0.0, "تأثير الدولار محايد."
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_gold_dxy_correlation():
     dxy = get_historical_data("DX-Y.NYB", "3mo", "4h")
     gold = get_historical_data("GC=F", "3mo", "4h")
@@ -1022,6 +1031,139 @@ def directional_score(df, pair_name, symbol):
     }
 
 
+
+# ============================================================
+# SMC / MTF / CONFIRMATION / RISK ENGINE v2004
+# ============================================================
+
+def smc_confluence_score(df, direction):
+    """تقييم مستقل لتوافق SMC قبل الإشارة النهائية."""
+    if df is None or len(df) < 20:
+        return 0.0, ["SMC: بيانات غير كافية"]
+
+    last = df.iloc[-1]
+    score = 0.0
+    reasons = []
+
+    checks = [
+        ("BOS", bool(last.get("bos_bullish", False) if direction == "BUY"
+                    else last.get("bos_bearish", False)), 25),
+        ("MSS", bool(last.get("mss_bullish", False) if direction == "BUY"
+                    else last.get("mss_bearish", False)), 20),
+        ("Liquidity Sweep", bool(last.get("liquidity_sweep_bullish", False) if direction == "BUY"
+                    else last.get("liquidity_sweep_bearish", False)), 20),
+        ("FVG", bool(last.get("fvg_bullish", False) if direction == "BUY"
+                    else last.get("fvg_bearish", False)), 15),
+        ("Order Block", bool(last.get("order_block_bullish", False) if direction == "BUY"
+                    else last.get("order_block_bearish", False)), 15),
+    ]
+
+    for name, ok, weight in checks:
+        if ok:
+            score += weight
+            reasons.append(f"SMC {name}: مؤيد")
+        else:
+            reasons.append(f"SMC {name}: غير مؤكد")
+
+    if direction == "BUY" and bool(last.get("in_discount", False)):
+        score += 5
+        reasons.append("السعر في Discount")
+    elif direction == "SELL" and bool(last.get("in_premium", False)):
+        score += 5
+        reasons.append("السعر في Premium")
+
+    return min(score, 100.0), reasons
+
+
+def mtf_alignment_score(mtf_details, direction):
+    """قياس اتساق 1D/4H/1H/15M مع اتجاه الصفقة."""
+    if not mtf_details:
+        return 0.0, ["MTF: لا توجد بيانات"]
+
+    weights = {"1D": 4, "4H": 3, "1H": 2, "15M": 1}
+    target = "BULLISH" if direction == "BUY" else "BEARISH"
+    total = sum(weights.values())
+    aligned = 0.0
+    reasons = []
+
+    for tf, weight in weights.items():
+        info = mtf_details.get(tf, {})
+        bias = info.get("bias", "NEUTRAL")
+        strength = float(info.get("strength", 0) or 0)
+
+        if bias == target:
+            aligned += weight * min(max(strength / 5.0, 0.0), 1.0)
+            reasons.append(f"{tf}: متوافق")
+        elif bias == "NEUTRAL":
+            reasons.append(f"{tf}: محايد")
+        else:
+            reasons.append(f"{tf}: معارض")
+
+    score = (aligned / total) * 100.0
+    return score, reasons
+
+
+def risk_gate(levels, direction, current_price, min_rr=1.20):
+    """بوابة أخيرة تمنع التنفيذ إذا كان SL/TP أو RR غير منطقي."""
+    if not levels:
+        return False, "لا توجد مستويات Risk صالحة"
+
+    try:
+        entry = float(levels["entry"])
+        stop = float(levels["stop_loss"])
+        t1 = float(levels["target1"])
+        rr = float(levels.get("risk_reward_1", 0))
+    except Exception:
+        return False, "تعذر قراءة مستويات الصفقة"
+
+    if not all(np.isfinite(v) for v in (entry, stop, t1, rr)):
+        return False, "مستويات الصفقة تحتوي على قيم غير صالحة"
+
+    if direction == "BUY":
+        valid_geometry = stop < entry < t1
+    else:
+        valid_geometry = t1 < entry < stop
+
+    if not valid_geometry:
+        return False, "ترتيب Entry/SL/TP غير صحيح"
+
+    if rr < min_rr:
+        return False, f"RR TP1 منخفض: {rr:.2f}"
+
+    if current_price and abs(entry - float(current_price)) > abs(entry) * 0.01:
+        return False, "Entry بعيد بشكل غير طبيعي عن السعر الحالي"
+
+    return True, "Risk Gate PASS"
+
+
+def final_decision_gate(signal, confidence, confirmation_score,
+                        smc_score, mtf_score, risk_ok, news_block=False):
+    """تحويل الإشارة التحليلية إلى قرار EXECUTE أو WAIT."""
+    if signal not in ("BUY", "SELL"):
+        return "WAIT", "لا توجد إشارة اتجاهية"
+
+    if news_block:
+        return "WAIT", "News Block: خبر عالي التأثير"
+
+    if confidence < 70:
+        return "WAIT", f"Confidence منخفضة: {confidence:.1f}%"
+
+    if confirmation_score < 60:
+        return "WAIT", f"Confirmation منخفض: {confirmation_score:.1f}"
+
+    if smc_score < 45:
+        return "WAIT", f"SMC Confluence منخفض: {smc_score:.1f}"
+
+    if mtf_score < 45:
+        return "WAIT", f"MTF Alignment منخفض: {mtf_score:.1f}"
+
+    if not risk_ok:
+        return "WAIT", "Risk Gate FAIL"
+
+    return "EXECUTE", "اجتازت الإشارة SMC + MTF + Confirmation + Risk"
+
+
+
 # ============================================================
 # CONFIRMATION GATE v2003.1
 # ============================================================
@@ -1087,9 +1229,11 @@ def confirmation_gate(df, direction, pillar_scores, regime):
     return score >= 60, max(0.0, min(100.0, score)), reasons
 
 
-def execution_permission(raw_confidence, confirmation_score, news_block=False):
+def execution_permission(raw_confidence, confirmation_score, news_block=False, risk_ok=True):
     if news_block:
         return "WAIT", "خبر عالي التأثير: يمنع التنفيذ مؤقتًا"
+    if not risk_ok:
+        return "WAIT", "Risk Gate غير صالح"
     if raw_confidence < 70:
         return "WAIT", "الثقة الأساسية أقل من الحد الأدنى"
     if confirmation_score < 60:
@@ -1224,7 +1368,7 @@ def calculate_position_size(pair_name, entry, stop, balance, risk_percent):
 # FINAL SIGNAL ENGINE
 # ============================================================
 
-def generate_signal(df, current_price, pair_name, symbol):
+def generate_signal(df, current_price, pair_name, symbol, news_block=False):
     profile = profile_for(pair_name)
     df = build_features(df, profile)
     scores = directional_score(df, pair_name, symbol)
@@ -1311,12 +1455,18 @@ def generate_signal(df, current_price, pair_name, symbol):
     )
 
     execution_status, execution_reason = execution_permission(
-        confidence, confirmation_score,
+        confidence,
+        confirmation_score,
+        news_block=news_block,
+        risk_ok=risk_ok,
     )
 
     if signal == "WAIT":
         execution_status = "WAIT"
         execution_reason = "الإشارة الأساسية WAIT — لا صفقة"
+    elif not confirmation_ok:
+        execution_status = "WAIT"
+        execution_reason = "طبقة Confirmation لم تجتز الحد الأدنى — لا تنفيذ"
 
     details = {
         "BUY Score": round(buy, 1),
@@ -1325,6 +1475,7 @@ def generate_signal(df, current_price, pair_name, symbol):
         "MTF Confidence": round(mtf_conf, 1),
         "Regime": scores["regime"],
         "DXY": scores["dxy_bias"],
+        "USD Context": scores["usd_msg"],
         "Divergence": scores["divergence"] or "None",
         "Risk Gate": "PASS" if risk_ok else risk_msg,
         "Confirmation Score": round(confirmation_score, 1),
@@ -1359,6 +1510,16 @@ def generate_signal(df, current_price, pair_name, symbol):
 # ============================================================
 # TRADE STORAGE / MANAGEMENT
 # ============================================================
+
+def pnl_multiplier(pair_name):
+    """Approximate contract multiplier used by Paper Trade P&L."""
+    asset = asset_type_from_name(pair_name)
+    if asset == "forex":
+        return 100000.0
+    if asset == "gold":
+        return 100.0
+    return 1.0
+
 
 class TradeManager:
     def __init__(self, path=TRADES_FILE):
@@ -1414,10 +1575,11 @@ class TradeManager:
             entry = float(trade["entry"])
             lots = float(trade["lots"])
             direction = trade["direction"]
+            multiplier = pnl_multiplier(trade.get("pair_name", ""))
             if direction == "BUY":
-                pnl = (current_price - entry) * lots
+                pnl = (current_price - entry) * lots * multiplier
             else:
-                pnl = (entry - current_price) * lots
+                pnl = (entry - current_price) * lots * multiplier
             trade["status"] = "closed"
             trade["close_price"] = current_price
             trade["close_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1569,20 +1731,49 @@ def get_fmp_economic_calendar():
     except Exception:
         return []
 
+def has_high_impact_event(events, pair_name):
+    """Return True when a high-impact calendar event is relevant to the selected asset."""
+    if not events:
+        return False
+
+    name = str(pair_name).upper()
+    currencies = set()
+
+    if "/" in name:
+        base, quote = [x.strip() for x in name.split("/")[:2]]
+        currencies.update([base, quote])
+    elif "DXY" in name or "GOLD" in name or "SILVER" in name or "XAU" in name or "XAG" in name:
+        currencies.add("USD")
+
+    country_map = {
+        "US": "USD", "UNITED STATES": "USD", "USD": "USD",
+        "EU": "EUR", "EURO AREA": "EUR", "EUR": "EUR",
+        "GB": "GBP", "UK": "GBP", "GBP": "GBP",
+        "JP": "JPY", "JAPAN": "JPY", "JPY": "JPY",
+        "CH": "CHF", "SWITZERLAND": "CHF", "CHF": "CHF",
+        "AU": "AUD", "AUSTRALIA": "AUD", "AUD": "AUD",
+        "NZ": "NZD", "NEW ZEALAND": "NZD", "NZD": "NZD",
+        "CA": "CAD", "CANADA": "CAD", "CAD": "CAD",
+    }
+
+    for event in events:
+        impact = str(event.get("impact", "")).strip().lower()
+        if impact not in ("high", "3", "عالٍ", "high impact"):
+            continue
+        country = str(event.get("country", "")).strip().upper()
+        mapped = country_map.get(country, country)
+        if mapped in currencies:
+            return True
+    return False
+
+
 def event_risk_message(events, pair_name):
     if not events:
         return "لا توجد بيانات تقويم متاحة."
-    relevant = []
-    for e in events:
-        country = str(e.get("country", "")).upper()
-        impact = str(e.get("impact", "")).lower()
-        if impact not in ("high", "3", "عالٍ", "high impact"):
-            continue
-        if "USD" in pair_name and country in ("USD", "US"):
-            relevant.append(e)
-    if relevant:
-        return "⚠️ يوجد خبر عالي التأثير مرتبط بالدولار؛ تعامل معه كخطر تقلب وليس كإشارة BUY/SELL."
+    if has_high_impact_event(events, pair_name):
+        return "⚠️ يوجد خبر عالي التأثير مرتبط بالأصل؛ يُعامل كخطر تقلب وليس كإشارة BUY/SELL."
     return "لا يوجد حاليًا قفل خبر عالي التأثير مطابق بشكل واضح."
+
 
 
 # ============================================================
@@ -1800,7 +1991,10 @@ if df_raw is None:
     st.error("تعذر تحميل البيانات التاريخية. جرّب مسح الكاش.")
     st.stop()
 
-result = generate_signal(df_raw, current_price, selected_pair, symbol)
+news_block = has_high_impact_event(st.session_state.economic_events, selected_pair)
+result = generate_signal(
+    df_raw, current_price, selected_pair, symbol, news_block=news_block
+)
 df = result["df"]
 levels = result["levels"]
 signal = result["signal"]
@@ -1854,7 +2048,7 @@ for idx, pillar in enumerate(PILLAR_WEIGHTS):
 # CONFIRMATION GATE
 # ============================================================
 
-st.markdown("### 🛡️ طبقة التأكيد (Confirmation Gate v2003.1)")
+st.markdown("### 🛡️ طبقة التأكيد (Confirmation Gate v2003.2)")
 
 conf_score = result["confirmation_score"]
 conf_ok = result["confirmation_ok"]
@@ -2021,7 +2215,7 @@ if st.button("فتح نموذج الصفقة اليدوية", use_container_widt
     st.session_state.show_manual = not st.session_state.show_manual
 
 if st.session_state.show_manual:
-    with st.form("manual_trade_v2003"):
+    with st.form("manual_trade_v2003_1"):
         direction = st.selectbox("الاتجاه", ["BUY", "SELL"])
         entry = st.number_input("Entry", value=float(current_price), min_value=0.000001)
         stop = st.number_input(
@@ -2040,11 +2234,17 @@ if st.session_state.show_manual:
                 (direction == "BUY" and stop < entry < t1 < t2 < t3)
                 or (direction == "SELL" and t3 < t2 < t1 < entry < stop)
             )
+            allowed_manual, manual_reason = can_open_trade(0)
             if not valid:
                 st.error("ترتيب Entry/SL/TP غير صحيح.")
+            elif not allowed_manual:
+                st.warning(manual_reason)
             else:
                 lots = manual_lots if manual_lots > 0 else calculate_position_size(
                     selected_pair, entry, stop, balance, risk_percent)
+                if lots <= 0:
+                    st.error("تعذر حساب حجم الصفقة. راجع Entry وStop والرصيد.")
+                    st.stop()
                 manager = TradeManager()
                 tid = manager.add_trade({
                     "symbol": symbol, "pair_name": selected_pair,
@@ -2079,8 +2279,9 @@ fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], name="BB Upper"), row=1, 
 fig.add_trace(go.Scatter(x=df.index, y=df["bb_lower"], name="BB Lower"), row=1, col=1)
 
 fig.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI"), row=2, col=1)
-fig.add_hline(y=70, row=2, col=1, line_dash="dash")
-fig.add_hline(y=30, row=2, col=1, line_dash="dash")
+_chart_profile = profile_for(selected_pair)
+fig.add_hline(y=_chart_profile["rsi_ob"], row=2, col=1, line_dash="dash")
+fig.add_hline(y=_chart_profile["rsi_os"], row=2, col=1, line_dash="dash")
 
 fig.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD"), row=3, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Signal"), row=3, col=1)
