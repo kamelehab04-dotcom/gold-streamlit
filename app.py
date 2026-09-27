@@ -2,6 +2,7 @@
 # BLACK PYRAMID v2003.1
 # Hierarchical Intelligence Engine
 # Structure → Regime → Setup → Confirmation → Context → Risk
+# + Fallback Symbols for Gold/Silver/DXY
 # ============================================================
 
 import os
@@ -106,6 +107,15 @@ CURRENCY_PAIRS = {
     "AUD": ["AUDUSD=X", "EURAUD=X", "GBPAUD=X", "AUDJPY=X", "AUDNZD=X", "AUDCAD=X"],
     "NZD": ["NZDUSD=X", "EURNZD=X", "GBPNZD=X", "AUDNZD=X", "NZDJPY=X", "NZDCAD=X"],
     "CAD": ["USDCAD=X", "EURCAD=X", "GBPCAD=X", "AUDCAD=X", "NZDCAD=X", "CADJPY=X", "CADCHF=X"],
+}
+
+# خريطة بدائل لرموز yfinance للمشاكل المعروفة
+YF_SYMBOL_ALTERNATIVES = {
+    "GC=F": ["GC=F", "XAUUSD=X", "GLD"],
+    "SI=F": ["SI=F", "XAGUSD=X", "SLV"],
+    "DX-Y.NYB": ["DX-Y.NYB", "DX=F", "UUP"],
+    "BTC-USD": ["BTC-USD", "BTC=F"],
+    "ETH-USD": ["ETH-USD", "ETH=F"],
 }
 
 
@@ -214,7 +224,7 @@ def can_open_trade(confidence):
 # DATA LAYER
 # ============================================================
 
-def normalize_ohlcv(df):
+def normalize_ohlcv(df, min_rows=50):
     if df is None or df.empty:
         return None
     df = df.copy()
@@ -244,7 +254,7 @@ def normalize_ohlcv(df):
     df = df[required + ["volume"]].dropna(subset=required)
     df = df[~df.index.duplicated(keep="last")]
     df = df.sort_index()
-    return df if len(df) >= 50 else None
+    return df if len(df) >= min_rows else None
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
@@ -296,30 +306,72 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
 
 @st.cache_data(ttl=90, show_spinner=False)
 def get_historical_data(symbol, period="3mo", interval="4h"):
-    df = get_yfinance(symbol, period, interval)
-    if df is not None and len(df) >= 50:
-        return df
+    candidates = YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol])
+
+    # جرّب yfinance مع كل رمز بديل
+    for yf_sym in candidates:
+        df = get_yfinance(yf_sym, period, interval)
+        if df is not None and len(df) >= 50:
+            return df
+
+    # جرّب TwelveData
     df = get_twelve_data(symbol, interval, 500)
     if df is not None and len(df) >= 50:
         return df
+
+    # محاولة أخيرة: فترة أقصر
+    for yf_sym in candidates:
+        df = get_yfinance(yf_sym, "1mo", interval)
+        if df is not None and len(df) >= 30:
+            return df
+
     return None
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_spot_price(symbol):
+    """
+    جلب السعر اللحظي مع 5 طبقات fallback:
+    1) yfinance 5m/1d
+    2) yfinance 1h/5d
+    3) yfinance 1d/1mo
+    4) TwelveData
+    5) آخر إغلاق من البيانات التاريخية
+    """
+    candidates = YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol])
+
+    # المحاولات 1-3: عبر yfinance مع رموز بديلة
+    for yf_sym in candidates:
+        for period, interval in [("1d", "5m"), ("5d", "1h"), ("1mo", "1d")]:
+            try:
+                df = yf.download(
+                    yf_sym, period=period, interval=interval,
+                    auto_adjust=False, progress=False, threads=False,
+                )
+                df = normalize_ohlcv(df, min_rows=1)
+                if df is not None and not df.empty:
+                    first = float(df["close"].iloc[0])
+                    last = float(df["close"].iloc[-1])
+                    change = ((last - first) / first * 100) if first else 0.0
+                    return last, change
+            except Exception:
+                continue
+
+    # المحاولة 4: TwelveData
     try:
-        df = yf.download(symbol, period="1d", interval="5m",
-                         auto_adjust=False, progress=False, threads=False)
-        df = normalize_ohlcv(df)
+        df = get_twelve_data(symbol, "1h", 5)
         if df is not None and not df.empty:
-            first = float(df["close"].iloc[0])
-            last = float(df["close"].iloc[-1])
-            change = ((last - first) / first * 100) if first else 0.0
-            return last, change
+            return float(df["close"].iloc[-1]), 0.0
     except Exception:
         pass
-    df = get_twelve_data(symbol, "1h", 5)
-    if df is not None and not df.empty:
-        return float(df["close"].iloc[-1]), 0.0
+
+    # المحاولة 5: آخر إغلاق من البيانات التاريخية
+    try:
+        df = get_historical_data(symbol, "3mo", "4h")
+        if df is not None and not df.empty:
+            return float(df["close"].iloc[-1]), 0.0
+    except Exception:
+        pass
+
     return None, None
 
 
@@ -669,7 +721,7 @@ def build_features(df, profile):
 
 
 # ============================================================
-# MULTI-TIMEFRAME ENGINE (uses asset-specific profile)
+# MULTI-TIMEFRAME ENGINE
 # ============================================================
 
 def timeframe_bias(df, pair_name=None):
@@ -1251,9 +1303,7 @@ def generate_signal(df, current_price, pair_name, symbol):
     else:
         confluence = 0
 
-    # ============================================
-    # CONFIRMATION GATE v2003.1
-    # ============================================
+    # CONFIRMATION GATE
     directional_candidate = signal if signal in ("BUY", "SELL") else ("BUY" if buy > sell else "SELL")
 
     confirmation_ok, confirmation_score, confirmation_reasons = confirmation_gate(
@@ -1742,12 +1792,12 @@ st.markdown("---")
 
 current_price, change = get_spot_price(symbol)
 if current_price is None:
-    st.error("تعذر الحصول على السعر الحالي.")
+    st.error("تعذر الحصول على السعر الحالي. جرّب مسح الكاش أو تغيير الأصل.")
     st.stop()
 
 df_raw = get_historical_data(symbol, "3mo", "4h")
 if df_raw is None:
-    st.error("تعذر تحميل البيانات التاريخية.")
+    st.error("تعذر تحميل البيانات التاريخية. جرّب مسح الكاش.")
     st.stop()
 
 result = generate_signal(df_raw, current_price, selected_pair, symbol)
