@@ -118,7 +118,6 @@ YF_SYMBOL_ALTERNATIVES = {
     "NZDUSD=X": ["NZDUSD=X", "NZD=F"],
 }
 
-# Correlation groups — لمنع الصفقات المترابطة
 CORRELATION_GROUPS = {
     "USD_SHORT": ["EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X"],
     "USD_LONG":  ["USDJPY=X", "USDCHF=X", "USDCAD=X"],
@@ -126,7 +125,6 @@ CORRELATION_GROUPS = {
     "CRYPTO":    ["BTC-USD", "ETH-USD"],
 }
 
-# Kill Zones (UTC hours)
 KILL_ZONES = {
     "London Open":  (7, 10),
     "NY Open":      (12, 15),
@@ -460,10 +458,9 @@ def calc_ichimoku(df, tenkan=9, kijun=26, senkou=52):
 # INSTITUTIONAL FILTERS v2005 (13 filters)
 # ============================================================
 
-# ---------- FILTER 1: HTF Zone (Premium/Discount) ----------
+# ---------- FILTER 1: HTF Zone ----------
 @st.cache_data(ttl=180, show_spinner=False)
 def htf_zone_filter(symbol, direction, profile_key):
-    """يرفض BUY في Premium و SELL في Discount على اليومي."""
     try:
         df_d1 = get_historical_data(symbol, "1y", "1d")
         if df_d1 is None or len(df_d1) < 60:
@@ -486,10 +483,9 @@ def htf_zone_filter(symbol, direction, profile_key):
         return True, "HTF فشل التحميل", "UNKNOWN"
 
 
-# ---------- FILTER 2: LTF Entry Trigger ----------
+# ---------- FILTER 2: LTF Trigger ----------
 @st.cache_data(ttl=180, show_spinner=False)
 def ltf_entry_trigger(symbol, direction, profile_key):
-    """يتحقق من ظهور trigger على 1H."""
     try:
         df = get_historical_data(symbol, "3mo", "1h")
         if df is None or len(df) < 60:
@@ -521,7 +517,7 @@ def ltf_entry_trigger(symbol, direction, profile_key):
         return True, "LTF فشل — مسموح"
 
 
-# ---------- FILTER 3: Session Filter ----------
+# ---------- FILTER 3: Session ----------
 def session_filter(pair_name, strict=True):
     now_utc = datetime.now(timezone.utc).hour
     london_open = 7 <= now_utc <= 16
@@ -548,7 +544,7 @@ def session_filter(pair_name, strict=True):
     return False, "خارج الجلسات النشطة", "DEAD"
 
 
-# ---------- FILTER 4: Volatility Regime ----------
+# ---------- FILTER 4: Volatility ----------
 def volatility_regime_filter(df):
     atr = df["atr"].dropna() if "atr" in df.columns else pd.Series()
     if len(atr) < 100:
@@ -595,7 +591,7 @@ def correlation_guard(new_symbol, direction, open_trades):
     return True, "لا تعارض ارتباطي"
 
 
-# ---------- FILTER 7: News Time Window ----------
+# ---------- FILTER 7: News Window ----------
 def news_time_block(events, pair_name, window_minutes=45):
     if not events:
         return False, ""
@@ -633,7 +629,7 @@ def news_time_block(events, pair_name, window_minutes=45):
     return False, ""
 
 
-# ---------- FILTER 8: Displacement Candle ----------
+# ---------- FILTER 8: Displacement ----------
 def displacement_check(df, direction):
     if len(df) < 2:
         return False, "بيانات غير كافية"
@@ -662,7 +658,7 @@ def in_kill_zone(asset_type):
     return False, "خارج Kill Zones"
 
 
-# ---------- FILTER 10: OTE (Optimal Trade Entry) ----------
+# ---------- FILTER 10: OTE ----------
 def ote_filter(df, direction):
     swings_h = get_last_two_swings(df, "high")
     swings_l = get_last_two_swings(df, "low")
@@ -744,7 +740,7 @@ def weekly_bias(symbol, pair_name):
 
 
 # ============================================================
-# SWING / STRUCTURE ENGINE
+# SWING / STRUCTURE
 # ============================================================
 
 def find_confirmed_swings(df, order=3):
@@ -823,7 +819,7 @@ def detect_bos_mss(df):
 
 
 # ============================================================
-# LIQUIDITY / FVG / ORDER BLOCK
+# LIQUIDITY / FVG / OB
 # ============================================================
 
 def detect_liquidity_sweeps(df, tolerance_atr=0.10):
@@ -981,7 +977,7 @@ def build_features(df, profile):
 
 
 # ============================================================
-# MTF ENGINE
+# MTF
 # ============================================================
 
 def timeframe_bias(df, pair_name=None):
@@ -1030,7 +1026,7 @@ def get_mtf_analysis(symbol, pair_name=None):
 
 
 # ============================================================
-# CONTEXT ENGINE
+# CONTEXT
 # ============================================================
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1102,7 +1098,6 @@ def directional_score(df, pair_name, symbol):
     scores = {"BUY": {k: 0.0 for k in PILLAR_WEIGHTS},
               "SELL": {k: 0.0 for k in PILLAR_WEIGHTS}}
     reasons = []
-    # STRUCTURE
     structure = structure_state(df)
     if structure["bullish"]:
         scores["BUY"]["structure"] += 45; reasons.append("الهيكل صاعد")
@@ -1120,7 +1115,6 @@ def directional_score(df, pair_name, symbol):
     if bool(last["fvg_bearish"]): scores["SELL"]["structure"] += 10
     if bool(last["in_discount"]): scores["BUY"]["structure"] += 10
     if bool(last["in_premium"]): scores["SELL"]["structure"] += 10
-    # TREND
     if last["ema20"] > last["ema50"] > last["ema200"]: scores["BUY"]["trend"] += 80
     elif last["ema20"] < last["ema50"] < last["ema200"]: scores["SELL"]["trend"] += 80
     else:
@@ -1131,7 +1125,6 @@ def directional_score(df, pair_name, symbol):
     if np.isfinite(ct) and np.isfinite(cb):
         if last["close"] > ct: scores["BUY"]["trend"] += 20
         elif last["close"] < cb: scores["SELL"]["trend"] += 20
-    # MOMENTUM
     rsi = safe_float(last["rsi"], 50)
     if rsi >= 55: scores["BUY"]["momentum"] += 45
     elif rsi <= 45: scores["SELL"]["momentum"] += 45
@@ -1141,7 +1134,6 @@ def directional_score(df, pair_name, symbol):
         scores["SELL"]["momentum"] += 45
     if last["mfi"] >= 55: scores["BUY"]["momentum"] += 10
     elif last["mfi"] <= 45: scores["SELL"]["momentum"] += 10
-    # VOLUME
     if last["close"] > last["vwap"]: scores["BUY"]["volume"] += 45
     elif last["close"] < last["vwap"]: scores["SELL"]["volume"] += 45
     if last["chaikin_mf"] > 0: scores["BUY"]["volume"] += 35
@@ -1150,8 +1142,7 @@ def directional_score(df, pair_name, symbol):
     if va and np.isfinite(va) and last["volume"] > va:
         if last["close"] > last["open"]: scores["BUY"]["volume"] += 20
         elif last["close"] < last["open"]: scores["SELL"]["volume"] += 20
-    # CONTEXT
-    dxy_bias, dxy_conf, _ = get_dxy_context()
+    dxy_bias, _, _ = get_dxy_context()
     usd_impact, usd_msg = get_pair_usd_context(pair_name)
     if usd_impact > 0: scores["BUY"]["context"] += 45
     elif usd_impact < 0: scores["SELL"]["context"] += 45
@@ -1163,7 +1154,6 @@ def directional_score(df, pair_name, symbol):
     regime, _ = detect_regime(df)
     if regime == "TREND_BULLISH": scores["BUY"]["context"] += 20
     elif regime == "TREND_BEARISH": scores["SELL"]["context"] += 20
-    # Totals
     tb = ts = 0.0
     for p, w in PILLAR_WEIGHTS.items():
         scores["BUY"][p] = clamp(scores["BUY"][p], 0, 100)
@@ -1190,10 +1180,7 @@ def confirmation_gate(df, direction, pillar_scores, regime,
         return False, 0.0, ["بيانات غير كافية"], ["DATA"]
     profile = profile or ASSET_PROFILES["forex"]
     last = df.iloc[-1]
-    score = 0.0
-    reasons = []
-    blockers = []
-    # Regime
+    score = 0.0; reasons = []; blockers = []
     if (direction == "BUY" and regime == "TREND_BULLISH") or \
        (direction == "SELL" and regime == "TREND_BEARISH"):
         score += 20; reasons.append("Regime متوافق")
@@ -1203,38 +1190,31 @@ def confirmation_gate(df, direction, pillar_scores, regime,
         score += 5; reasons.append("Compression")
     else:
         blockers.append("Regime غير متوافق")
-    # MTF
     if (direction == "BUY" and mtf_bias == "BULLISH") or \
        (direction == "SELL" and mtf_bias == "BEARISH"):
         score += 25 * min(mtf_conf / 95, 1); reasons.append("MTF متوافق")
     elif mtf_bias != "NEUTRAL":
         blockers.append("MTF ضد الاتجاه")
-    # Weekly Bias (NEW v2005)
     if (direction == "BUY" and weekly_bias_val == "BULLISH") or \
        (direction == "SELL" and weekly_bias_val == "BEARISH"):
         score += 15; reasons.append("Weekly متوافق")
     elif weekly_bias_val != "NEUTRAL":
         blockers.append("Weekly Bias ضد الاتجاه")
-    # EMA
     ema_ok = (direction == "BUY" and last["ema20"] > last["ema50"]) or \
              (direction == "SELL" and last["ema20"] < last["ema50"])
     if ema_ok: score += 15; reasons.append("EMA alignment")
     else: blockers.append("EMA غير مؤيد")
-    # MACD
     macd_ok = (direction == "BUY" and last["macd_histogram"] > 0) or \
               (direction == "SELL" and last["macd_histogram"] < 0)
     if macd_ok: score += 15; reasons.append("MACD مؤيد")
     else: blockers.append("Momentum غير مؤيد")
-    # Candle
     if candle_confirmation(df, direction):
         score += 10; reasons.append("Candle confirmation")
-    # SMC
     smc_score, smc_reasons = smc_quality(df)
     if smc_score >= 40:
         score += 15; reasons.extend(smc_reasons[:3])
     elif smc_score < 20:
         blockers.append("SMC ضعيف")
-    # Pillar conflict
     own = sum(float(v) for v in pillar_scores.get(direction, {}).values())
     opp = sum(float(v) for v in pillar_scores.get(
         "SELL" if direction == "BUY" else "BUY", {}).values())
@@ -1410,58 +1390,45 @@ def generate_signal(df, current_price, pair_name, symbol,
     conf_ok, conf_score, conf_reasons, conf_blockers = confirmation_gate(
         df, candidate, pillars, scores["regime"], mtf_bias, mtf_conf, profile, wk_bias)
 
-    # ============ INSTITUTIONAL FILTERS v2005 ============
     filter_results = {}
     all_passed = True
     block_reason = ""
 
-    # HTF Zone
     htf_ok, htf_msg, htf_zone = htf_zone_filter(symbol, candidate, profile_key)
     filter_results["HTF Zone"] = {"pass": htf_ok, "msg": htf_msg, "zone": htf_zone}
     if not htf_ok: all_passed = False; block_reason = htf_msg
 
-    # LTF Trigger
     if all_passed and not skip_external_filters:
         ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
         filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
         if not ltf_ok: all_passed = False; block_reason = ltf_msg
 
-    # Session
     sess_ok, sess_msg, sess_label = session_filter(pair_name, strict=(profile_key != "crypto"))
     filter_results["Session"] = {"pass": sess_ok, "msg": sess_msg, "label": sess_label}
     if not sess_ok: all_passed = False; block_reason = block_reason or sess_msg
 
-    # Volatility
     vol_ok, vol_msg, vol_label = volatility_regime_filter(df)
     filter_results["Volatility"] = {"pass": vol_ok, "msg": vol_msg, "label": vol_label}
     if not vol_ok: all_passed = False; block_reason = block_reason or vol_msg
 
-    # Kill Zone
     kz_ok, kz_msg = in_kill_zone(asset_type_from_name(pair_name))
     filter_results["Kill Zone"] = {"pass": kz_ok, "msg": kz_msg}
-    # Kill Zone: soft warning (لا يمنع التنفيذ)
 
-    # OTE
     ote_ok, ote_msg = ote_filter(df, candidate)
     filter_results["OTE"] = {"pass": ote_ok, "msg": ote_msg}
 
-    # Displacement
     disp_ok, disp_msg = displacement_check(df, candidate)
     filter_results["Displacement"] = {"pass": disp_ok, "msg": disp_msg}
-    # Displacement: soft warning
 
-    # Correlation
     corr_ok, corr_msg = correlation_guard(symbol, candidate, open_trades or [])
     filter_results["Correlation"] = {"pass": corr_ok, "msg": corr_msg}
     if not corr_ok: all_passed = False; block_reason = block_reason or corr_msg
 
-    # News Time Window
     ntw_block, ntw_msg = news_time_block(
         st.session_state.get("economic_events") or [], pair_name)
     filter_results["News Window"] = {"pass": not ntw_block, "msg": ntw_msg or "لا خبر قريب"}
     if ntw_block: all_passed = False; block_reason = block_reason or ntw_msg
 
-    # ============ EXECUTION DECISION ============
     execution_status, execution_reason = execution_permission(
         confidence, conf_score, news_block, risk_ok, daily_allowed,
         profile, all_passed, block_reason)
@@ -1503,7 +1470,7 @@ def generate_signal(df, current_price, pair_name, symbol,
 
 
 # ============================================================
-# BACKTEST ENGINE v2005
+# BACKTEST ENGINE
 # ============================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1867,7 +1834,7 @@ with col3:
     risk_percent = st.number_input("المخاطرة %", min_value=0.1, max_value=5.0,
                                    value=DEFAULT_RISK_PERCENT, step=0.1)
 with col4:
-    if st.button("🔄 مسح الكاش", use_container_width=True):
+    if st.button("🔄 مسح الكاش", width="stretch"):
         st.cache_data.clear(); st.rerun()
 with col5:
     st.metric("صفقات اليوم", f"{st.session_state.daily_trade_count}/{MAX_DAILY_TRADES}")
@@ -1890,7 +1857,7 @@ if not ks_ok:
 
 col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
 with col_btn1:
-    if st.button("📋 تحليل جميع الأصول (سريع)", use_container_width=True):
+    if st.button("📋 تحليل جميع الأصول (سريع)", width="stretch"):
         with st.spinner("جاري التحليل المتوازي..."):
             start = time.time()
             st.session_state.all_signals = get_all_signals_parallel()
@@ -1899,7 +1866,7 @@ with col_btn1:
         st.rerun()
 with col_btn2:
     if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-        if st.button("🗑️ مسح النتائج", use_container_width=True):
+        if st.button("🗑️ مسح النتائج", width="stretch"):
             st.session_state.all_signals = None
             st.session_state.analyzing_all = False
             st.session_state.analysis_time = None
@@ -1911,7 +1878,7 @@ with col_btn3:
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
     st.success(f"✅ تم تحليل {len(st.session_state.all_signals)} أصلاً.")
     st.dataframe(st.session_state.all_signals, hide_index=True,
-                 use_container_width=True, height=450)
+                 width="stretch", height=450)
 elif st.session_state.analyzing_all:
     st.warning("⚠️ لم يتم العثور على نتائج.")
 else:
@@ -1922,7 +1889,7 @@ else:
 # ECONOMIC CALENDAR
 # ============================================================
 
-if st.button("📅 تحديث التقويم الاقتصادي", use_container_width=True):
+if st.button("📅 تحديث التقويم الاقتصادي", width="stretch"):
     st.session_state.economic_events = get_fmp_economic_calendar()
 if st.session_state.economic_events:
     st.caption(event_risk_message(st.session_state.economic_events, selected_pair))
@@ -1992,9 +1959,6 @@ st.markdown(f"""
 st.markdown("### 🎛️ الفلاتر المؤسسية (13 فلتر)")
 
 filters = result["filter_results"]
-filter_cols = st.columns(4)
-
-# Group filters into rows
 filter_items = list(filters.items())
 for row_start in range(0, len(filter_items), 4):
     row_items = filter_items[row_start:row_start + 4]
@@ -2106,7 +2070,7 @@ if signal in ("BUY", "SELL") and levels:
     elif not allowed:
         st.warning(reason)
     else:
-        if st.button("➕ إضافة الصفقة إلى Paper Trade", use_container_width=True):
+        if st.button("➕ إضافة الصفقة إلى Paper Trade", width="stretch"):
             manager = TradeManager()
             trade = {
                 "symbol": symbol, "pair_name": selected_pair,
@@ -2137,7 +2101,7 @@ st.markdown("### 🔬 Backtest سريع (آخر 200 نقطة)")
 
 bt_col1, bt_col2 = st.columns([2, 1])
 with bt_col1:
-    if st.button("▶️ تشغيل Backtest على الأصل الحالي", use_container_width=True):
+    if st.button("▶️ تشغيل Backtest على الأصل الحالي", width="stretch"):
         with st.spinner("جاري الاختبار..."):
             st.session_state.backtest_results = quick_backtest(symbol, selected_pair)
         st.rerun()
@@ -2185,7 +2149,7 @@ if manager.open_trades:
                     st.rerun()
             close_col, _ = st.columns([1, 2])
             if close_col.button(f"❌ إغلاق {trade['id']}",
-                                key=f"close_{trade['id']}", use_container_width=True):
+                                key=f"close_{trade['id']}", width="stretch"):
                 pnl = manager.close_trade(trade["id"], current_price, "manual")
                 st.success(f"تم الإغلاق. P&L: {pnl:.2f}")
                 st.rerun()
@@ -2199,7 +2163,7 @@ else:
 
 st.markdown("---")
 st.markdown("### 🛠️ صفقة يدوية")
-if st.button("فتح نموذج الصفقة اليدوية", use_container_width=True):
+if st.button("فتح نموذج الصفقة اليدوية", width="stretch"):
     st.session_state.show_manual = not st.session_state.show_manual
 
 if st.session_state.show_manual:
@@ -2259,8 +2223,8 @@ fig.add_trace(go.Scatter(x=df.index, y=df["ema20"], name="EMA20"), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], name="EMA50"), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["ema200"], name="EMA200"), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["vwap"], name="VWAP"), row=1, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], name="BB U"), row=1, col=1)
-fig.add_trace(go.Scatter(x=df.index, y=df["bb_lower"], name="BB L"), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], name="BB Upper"), row=1, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df["bb_lower"], name="BB Lower"), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI"), row=2, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["vrsi"], name="VRSI"), row=2, col=1)
 _chart_profile = profile_for(selected_pair)
@@ -2268,12 +2232,14 @@ fig.add_hline(y=_chart_profile["rsi_ob"], row=2, col=1, line_dash="dash")
 fig.add_hline(y=_chart_profile["rsi_os"], row=2, col=1, line_dash="dash")
 fig.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD"), row=3, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Signal"), row=3, col=1)
-fig.add_bar(x=df.index, y=df["macd_histogram"], name="Hist"), row=3, col=1)
+fig.add_bar(x=df.index, y=df["macd_histogram"], name="Hist", row=3, col=1)
+
 if levels:
     for lvl in ("stop_loss", "target1", "target2", "target3"):
         fig.add_hline(y=levels[lvl], row=1, col=1, line_dash="dot")
+
 fig.update_layout(height=850, template="plotly_dark", xaxis_rangeslider_visible=False)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 
 # ============================================================
@@ -2287,7 +2253,7 @@ if st.session_state.economic_events:
              "الوقت": e.get("time", "")}
             for e in st.session_state.economic_events[:20]]
     if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 # ============================================================
