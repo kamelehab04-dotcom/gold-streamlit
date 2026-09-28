@@ -1,10 +1,17 @@
 # ============================================================
-# BLACK PYRAMID v2005.5.4
-# Institutional Analysis Terminal — With Logo Hero
+# BLACK PYRAMID v2005.6 — PRECISION MODE
+# Institutional Analysis Terminal — High-Selectivity Signal Engine
 #
-# v2005.5.4 CHANGELOG:
-#  - Logo image embedded in hero (Base64)
-#  - Fallback to text if logo missing
+# v2005.6 CHANGELOG (Precision Mode):
+#  - Raised grade thresholds: A+=88, A=80, B=74, C=68
+#  - MIN_SIGNAL_GAP raised from 8 → 25
+#  - MIN_RR raised: 1.5 / 2.5 / 3.5
+#  - MTF alignment is now a HARD GATE (was soft penalty)
+#  - Regime RANGE/COMPRESSION is now a HARD GATE
+#  - Grade B is now WATCH-only (not executed)
+#  - Wider stop-loss (1.8x ATR forex / 2.2x gold / 2.5x crypto)
+#  - Candle body confirmation required (≥ 50% ATR)
+#  - Kill Switch triggers after 2 consecutive losses (was 3)
 # ============================================================
 
 import os
@@ -39,23 +46,40 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 # ============================================================
-# APP CONFIG
+# APP CONFIG — PRECISION MODE
 # ============================================================
 
-APP_VERSION = "v2005.5.4"
+APP_VERSION = "v2005.6-Precision"
 
-A_PLUS_MIN = 82.0
-A_MIN = 75.0
-B_MIN = 68.0
-C_MIN = 62.0
+# Grade thresholds (raised)
+A_PLUS_MIN = 88.0
+A_MIN = 80.0
+B_MIN = 74.0
+C_MIN = 68.0
 
+# Signal gates
+MIN_SIGNAL_GAP = 25             # كان 8
+MIN_CONFIDENCE = 75.0
+MIN_CONFIRMATION_SCORE = 70.0
+
+# Hard-gate toggles
+REQUIRE_MTF_ALIGNMENT = True
+REQUIRE_WEEKLY_ALIGNMENT = False   # optional
+REQUIRE_TREND_REGIME = True
+REQUIRE_CANDLE_BODY = True
+
+# RR minimums (raised)
+MIN_RR_TP1 = 1.50
+MIN_RR_TP2 = 2.50
+MIN_RR_TP3 = 3.50
+
+# Soft filters strict mode
 STRICT_SOFT_FILTERS = False
 MAX_SOFT_PENALTY = 8.0
 SOFT_PENALTY_TOP_N = 3
 
-MIN_RR_TP1 = 1.00
-MIN_RR_TP2 = 1.50
-MIN_RR_TP3 = 2.00
+# Kill switch
+MAX_CONSECUTIVE_LOSSES = 2      # كان 3
 
 LOGO_CANDIDATES = [
     "file_000000005cb4824697f509df31f2168a.png",
@@ -68,23 +92,23 @@ ASSET_PROFILES = {
     "forex": {
         "atr_period": 14, "rsi_period": 14, "rsi_ob": 70, "rsi_os": 30,
         "mfi_period": 14, "bb_period": 20, "bb_std": 2.0,
-        "atr_sl": 1.20, "atr_trail": 1.00, "swing_order": 3,
-        "structure_lookback": 120, "confidence_threshold": 70,
-        "min_rr": 1.50, "confirmation_threshold": 62,
+        "atr_sl": 1.80, "atr_trail": 1.20, "swing_order": 3,
+        "structure_lookback": 120, "confidence_threshold": 78,
+        "min_rr": 2.50, "confirmation_threshold": 70,
     },
     "gold": {
         "atr_period": 14, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20,
         "mfi_period": 9, "bb_period": 20, "bb_std": 2.2,
-        "atr_sl": 1.50, "atr_trail": 1.20, "swing_order": 3,
-        "structure_lookback": 175, "confidence_threshold": 72,
-        "min_rr": 1.50, "confirmation_threshold": 65,
+        "atr_sl": 2.20, "atr_trail": 1.50, "swing_order": 3,
+        "structure_lookback": 175, "confidence_threshold": 80,
+        "min_rr": 2.50, "confirmation_threshold": 72,
     },
     "crypto": {
         "atr_period": 14, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20,
         "mfi_period": 10, "bb_period": 50, "bb_std": 2.3,
-        "atr_sl": 1.80, "atr_trail": 1.50, "swing_order": 4,
-        "structure_lookback": 250, "confidence_threshold": 75,
-        "min_rr": 1.50, "confirmation_threshold": 68,
+        "atr_sl": 2.50, "atr_trail": 1.80, "swing_order": 4,
+        "structure_lookback": 250, "confidence_threshold": 82,
+        "min_rr": 2.50, "confirmation_threshold": 75,
     },
 }
 
@@ -1263,7 +1287,7 @@ def confirmation_gate(df, direction, pillar_scores, regime,
     if opp > own * 0.85: blockers.append("تعارض قوي Pillars")
     else: score += 5
     hard = any(x in blockers for x in ("MTF ضد الاتجاه", "Regime غير متوافق", "Weekly Bias ضد الاتجاه"))
-    threshold = profile.get("confirmation_threshold", 62)
+    threshold = profile.get("confirmation_threshold", 70)
     ok = score >= threshold and not hard and len(blockers) <= 2
     return ok, clamp(score, 0, 100), reasons, blockers
 
@@ -1292,32 +1316,34 @@ def calculate_trade_levels(df, signal, current_price, profile):
         candidates = [x for x in [swing_low, recent_low, ssl]
                       if np.isfinite(x) and x < current_price]
         structural_stop = max(candidates) if candidates else current_price - profile["atr_sl"] * atr
-        stop_loss = structural_stop - 0.20 * atr
+        stop_loss = structural_stop - 0.30 * atr   # padding أوسع
         risk = current_price - stop_loss
         if risk <= 0: return None
         targets = sorted([x for x in [recent_high, bsl]
                           if np.isfinite(x) and x > current_price])
-        t1 = targets[0] if targets else current_price + risk
-        t2 = current_price + risk * 1.5
-        t3 = current_price + risk * 2.0
-        if t1 <= current_price: t1 = current_price + risk
-        if t2 <= t1: t2 = current_price + risk * 1.5
-        if t3 <= t2: t3 = current_price + risk * 2.0
+        t1 = targets[0] if targets else current_price + risk * MIN_RR_TP1
+        t2 = current_price + risk * MIN_RR_TP2
+        t3 = current_price + risk * MIN_RR_TP3
+        if t1 <= current_price + risk * MIN_RR_TP1:
+            t1 = current_price + risk * MIN_RR_TP1
+        if t2 <= t1: t2 = current_price + risk * MIN_RR_TP2
+        if t3 <= t2: t3 = current_price + risk * MIN_RR_TP3
     else:
         candidates = [x for x in [swing_high, recent_high, bsl]
                       if np.isfinite(x) and x > current_price]
         structural_stop = min(candidates) if candidates else current_price + profile["atr_sl"] * atr
-        stop_loss = structural_stop + 0.20 * atr
+        stop_loss = structural_stop + 0.30 * atr
         risk = stop_loss - current_price
         if risk <= 0: return None
         targets = sorted([x for x in [recent_low, ssl]
                           if np.isfinite(x) and x < current_price], reverse=True)
-        t1 = targets[0] if targets else current_price - risk
-        t2 = current_price - risk * 1.5
-        t3 = current_price - risk * 2.0
-        if t1 >= current_price: t1 = current_price - risk
-        if t2 >= t1: t2 = current_price - risk * 1.5
-        if t3 >= t2: t3 = current_price - risk * 2.0
+        t1 = targets[0] if targets else current_price - risk * MIN_RR_TP1
+        t2 = current_price - risk * MIN_RR_TP2
+        t3 = current_price - risk * MIN_RR_TP3
+        if t1 >= current_price - risk * MIN_RR_TP1:
+            t1 = current_price - risk * MIN_RR_TP1
+        if t2 >= t1: t2 = current_price - risk * MIN_RR_TP2
+        if t3 >= t2: t3 = current_price - risk * MIN_RR_TP3
     rr1 = abs(t1 - current_price) / risk
     rr2 = abs(t2 - current_price) / risk
     rr3 = abs(t3 - current_price) / risk
@@ -1336,13 +1362,13 @@ def validate_levels(signal, levels, profile):
         if not levels["target1"] < levels["entry"] < levels["stop_loss"]:
             return False, "ترتيب SELL غير صالح"
     if levels["risk_reward_1"] < MIN_RR_TP1: return False, "TP1 RR منخفض"
-    if levels["risk_reward_2"] < profile["min_rr"]: return False, "TP2 RR منخفض"
+    if levels["risk_reward_2"] < MIN_RR_TP2: return False, "TP2 RR منخفض"
     if levels["risk_reward_3"] < MIN_RR_TP3: return False, "TP3 RR منخفض"
     return True, ""
 
 
 # ============================================================
-# SIGNAL ENGINE
+# SIGNAL ENGINE — PRECISION MODE
 # ============================================================
 
 def generate_signal(df, current_price, pair_name, symbol,
@@ -1375,8 +1401,9 @@ def generate_signal(df, current_price, pair_name, symbol,
     elif wk_bias == "BEARISH": sell += 5; buy -= 3
     buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
 
+    # ---- v2005.6: Signal gate (25 gap minimum) ----
     gap = abs(buy - sell)
-    signal = "WAIT" if gap < 8 else ("BUY" if buy > sell else "SELL")
+    signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
 
     last = df.iloc[-1]
     mss_conflict = False
@@ -1393,15 +1420,48 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     confidence = clamp(50 + abs(buy - sell) * 0.75 + max(0, max(buy, sell) - 60) * 0.25, 50, 95)
 
+    # ---- v2005.6: MTF as HARD GATE ----
+    if REQUIRE_MTF_ALIGNMENT and signal in ("BUY", "SELL"):
+        if mtf_bias != "NEUTRAL":
+            if (signal == "BUY" and mtf_bias != "BULLISH") or \
+               (signal == "SELL" and mtf_bias != "BEARISH"):
+                signal = "WAIT"
+                confidence = 0
+
+    # ---- v2005.6: Weekly as optional HARD GATE ----
+    if REQUIRE_WEEKLY_ALIGNMENT and signal in ("BUY", "SELL"):
+        if wk_bias != "NEUTRAL":
+            if (signal == "BUY" and wk_bias != "BULLISH") or \
+               (signal == "SELL" and wk_bias != "BEARISH"):
+                signal = "WAIT"
+                confidence = 0
+
+    # ---- v2005.6: Regime as HARD GATE ----
+    if REQUIRE_TREND_REGIME and signal in ("BUY", "SELL"):
+        if scores["regime"] in ("RANGE", "COMPRESSION", "UNKNOWN"):
+            signal = "WAIT"
+            confidence = 0
+
+    # ---- v2005.6: Candle body confirmation ----
+    if REQUIRE_CANDLE_BODY and signal in ("BUY", "SELL"):
+        atr_now = safe_float(last.get("atr"), 0)
+        if atr_now > 0:
+            body = abs(float(last["close"]) - float(last["open"]))
+            if body < 0.50 * atr_now:
+                signal = "WAIT"
+                confidence = 0
+            elif signal == "BUY" and last["close"] < last["open"]:
+                signal = "WAIT"
+                confidence = 0
+            elif signal == "SELL" and last["close"] > last["open"]:
+                signal = "WAIT"
+                confidence = 0
+
     candidate = signal if signal in ("BUY", "SELL") else ("BUY" if buy > sell else "SELL")
     levels = calculate_trade_levels(df, candidate, current_price, profile)
     risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "تعذر")
     if signal in ("BUY", "SELL") and not risk_ok:
-        signal = "WAIT"; confidence = min(confidence, 60)
-    if signal == "BUY" and mtf_bias == "BEARISH":
-        confidence *= 0.82
-    if signal == "SELL" and mtf_bias == "BULLISH":
-        confidence *= 0.82
+        signal = "WAIT"; confidence = 0
 
     pillars = scores["pillars"]
     w_confluence = weighted_confluence(pillars, candidate)
@@ -1409,6 +1469,11 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     conf_ok, conf_score, conf_reasons, conf_blockers = confirmation_gate(
         df, candidate, pillars, scores["regime"], mtf_bias, mtf_conf, profile, wk_bias)
+
+    # ---- v2005.6: Confirmation gate as HARD GATE ----
+    if signal in ("BUY", "SELL") and conf_score < MIN_CONFIRMATION_SCORE:
+        signal = "WAIT"
+        confidence = 0
 
     filter_results = {}
     soft_penalty_items = []
@@ -1484,15 +1549,16 @@ def generate_signal(df, current_price, pair_name, symbol,
     raw_confidence = confidence
     penalty_total, applied_penalties = compute_soft_penalty(
         soft_penalty_items, strict=strict_soft)
-    effective_confidence = clamp(raw_confidence - penalty_total, 50, 95)
+    effective_confidence = clamp(raw_confidence - penalty_total, 0, 95)
 
-    if raw_confidence >= A_PLUS_MIN and conf_score >= 78:
+    # ---- v2005.6: Grade — precision thresholds ----
+    if raw_confidence >= A_PLUS_MIN and conf_score >= 82:
         trade_grade = "A+"
-    elif raw_confidence >= A_MIN and conf_score >= 70:
+    elif raw_confidence >= A_MIN and conf_score >= 75:
         trade_grade = "A"
-    elif raw_confidence >= B_MIN and conf_score >= 62:
+    elif raw_confidence >= B_MIN and conf_score >= 68:
         trade_grade = "B"
-    elif raw_confidence >= C_MIN and conf_score >= 55:
+    elif raw_confidence >= C_MIN and conf_score >= 60:
         trade_grade = "C"
     else:
         trade_grade = "WAIT"
@@ -1500,18 +1566,21 @@ def generate_signal(df, current_price, pair_name, symbol,
     if strict_soft and penalty_total > 5 and trade_grade in ("A+", "A"):
         trade_grade = "B"
 
+    # ---- v2005.6: Execution — only A/A+ ----
     if signal == "WAIT":
-        execution_status, execution_reason = "WAIT", "الإشارة الأساسية WAIT"
+        execution_status, execution_reason = "WAIT", "Precision Mode — Signal Rejected"
     elif not all_passed:
         execution_status, execution_reason = "BLOCKED", f"Hard Gate: {block_reason}"
     elif news_block:
         execution_status, execution_reason = "WAIT", "خبر عالي التأثير"
-    elif effective_confidence < profile.get("confidence_threshold", 70):
-        execution_status, execution_reason = "WAIT", "الثقة أقل من حد الأصل"
-    elif conf_score < profile.get("confirmation_threshold", 62) and trade_grade not in ("A+", "A", "B"):
-        execution_status, execution_reason = "WAIT", "Confirmation غير كافٍ"
-    elif trade_grade in ("A+", "A", "B"):
-        execution_status, execution_reason = "EXECUTE", f"{trade_grade} — Hard Gates PASS"
+    elif effective_confidence < profile.get("confidence_threshold", 78):
+        execution_status, execution_reason = "WAIT", f"Precision: Confidence < {profile.get('confidence_threshold', 78)}"
+    elif conf_score < profile.get("confirmation_threshold", 70):
+        execution_status, execution_reason = "WAIT", f"Precision: Confirmation < {profile.get('confirmation_threshold', 70)}"
+    elif trade_grade in ("A+", "A"):
+        execution_status, execution_reason = "EXECUTE", f"{trade_grade} — Precision PASS"
+    elif trade_grade == "B":
+        execution_status, execution_reason = "WATCH", "B — مراقبة (لا يُنفَّذ)"
     elif trade_grade == "C":
         execution_status, execution_reason = "WATCH", "C — مراقبة فقط"
     else:
@@ -1587,6 +1656,8 @@ def quick_backtest(symbol, pair_name, lookback=200):
                 continue
             if result["signal"] == "WAIT" or result["levels"] is None:
                 continue
+            if result["execution_status"] != "EXECUTE":
+                continue
             sl = result["levels"]["stop_loss"]
             t1 = result["levels"]["target1"]
             direction = result["signal"]
@@ -1602,12 +1673,14 @@ def quick_backtest(symbol, pair_name, lookback=200):
             if hit_tp: wins += 1; total_r += result["levels"]["risk_reward_1"]
             elif hit_sl: losses += 1; total_r -= 1.0
         total = wins + losses
-        if total == 0: return None
+        if total == 0: return {"trades": 0, "wins": 0, "losses": 0,
+                                "win_rate": 0, "total_R": 0, "expectancy": 0,
+                                "profit_factor": 0}
         return {
             "trades": total, "wins": wins, "losses": losses,
             "win_rate": wins / total * 100, "total_R": total_r,
             "expectancy": total_r / total,
-            "profit_factor": (wins * 1.5) / max(losses, 1),
+            "profit_factor": (wins * MIN_RR_TP1) / max(losses, 1),
         }
     except Exception as e:
         return {"error": str(e)}
@@ -1637,6 +1710,7 @@ def get_all_signals_parallel():
                 "SELL": round(result["sell_score"], 1),
                 "MTF": result["mtf_bias"],
                 "Weekly": result["weekly_bias"],
+                "Regime": result["regime"],
                 "Confluence": round(result["weighted_confluence"], 0),
                 "Confirmation": round(result["confirmation_score"], 1),
                 "Grade": result.get("trade_grade", "WAIT"),
@@ -1709,7 +1783,6 @@ html, body, [class*="css"] {
 }
 body { background: #0a0d13; color: #e8edf5; }
 
-/* RTL on text elements only */
 .main-header, .main-title, .main-subtitle,
 .signal-card, .signal-meta, .signal-conf, .signal-grade,
 .metric-card, .metric-label, .metric-value, .metric-sub,
@@ -1722,7 +1795,6 @@ div[data-testid="stDataFrame"] td {
     direction: rtl;
 }
 
-/* Sidebar toggle button fix */
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapsedControl"],
 button[kind="header"] {
@@ -1789,6 +1861,13 @@ button[kind="header"]:hover {
     font-size: 0.75rem; font-weight: 600;
     border: 1px solid rgba(230,200,124,0.25);
     margin-left: 12px; letter-spacing: 1px;
+}
+.hero-badge-precision {
+    display: inline-block; padding: 4px 14px; border-radius: 40px;
+    background: rgba(124,212,160,0.12); color: #7cd4a0;
+    font-size: 0.75rem; font-weight: 700;
+    border: 1px solid rgba(124,212,160,0.35);
+    margin-left: 8px; letter-spacing: 1.5px;
 }
 
 .signal-card {
@@ -1885,9 +1964,7 @@ div[data-testid="stSelectbox"] > div > div {
     border-radius: 12px !important;
     min-height: 46px !important;
 }
-div[data-baseweb="select"] > div {
-    background: transparent !important;
-}
+div[data-baseweb="select"] > div { background: transparent !important; }
 div[data-baseweb="select"] input { color: #e8edf5 !important; }
 
 button[data-baseweb="tab"] {
@@ -1944,7 +2021,7 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 
 
 # ============================================================
-# HERO — With Logo
+# HERO
 # ============================================================
 
 _logo_b64 = load_logo_b64()
@@ -1958,6 +2035,7 @@ if _logo_b64:
         <div class="hero-sub">
             Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
             <span class="hero-badge">{APP_VERSION}</span>
+            <span class="hero-badge-precision">PRECISION MODE</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1968,13 +2046,14 @@ else:
         <div class="hero-sub">
             Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
             <span class="hero-badge">{APP_VERSION}</span>
+            <span class="hero-badge-precision">PRECISION MODE</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
 # ============================================================
-# SIDEBAR — Settings only
+# SIDEBAR
 # ============================================================
 
 with st.sidebar:
@@ -1982,6 +2061,15 @@ with st.sidebar:
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
 
+    st.markdown("**🎯 Precision Mode**")
+    st.caption(f"• Min Gap: {MIN_SIGNAL_GAP}")
+    st.caption(f"• Min RR: {MIN_RR_TP1}/{MIN_RR_TP2}/{MIN_RR_TP3}")
+    st.caption(f"• Execute: A / A+ only")
+    st.caption(f"• MTF Gate: {'ON' if REQUIRE_MTF_ALIGNMENT else 'OFF'}")
+    st.caption(f"• Regime Gate: {'ON' if REQUIRE_TREND_REGIME else 'OFF'}")
+    st.caption(f"• Candle Body: {'ON' if REQUIRE_CANDLE_BODY else 'OFF'}")
+
+    st.markdown("---")
     st.markdown("**🎛️ وضع الفلاتر**")
     strict_mode = st.checkbox(
         "🔒 Strict Filters",
@@ -1995,12 +2083,12 @@ with st.sidebar:
         st.cache_data.clear(); st.rerun()
 
     st.markdown("---")
-    st.caption("**Hard Gates:** HTF · News · Chaos Vol · Risk")
+    st.caption("**Hard Gates:** MTF · Regime · HTF · News · Candle Body")
     st.caption("**Advisories:** LTF · Session · OTE · Disp · KZ · MSS")
 
 
 # ============================================================
-# CONTROL BAR — Main Page
+# CONTROL BAR
 # ============================================================
 
 st.markdown('<div class="section-title">🎯 Analysis Control <span>اختر الأصل أو حلل الكل</span></div>',
@@ -2094,7 +2182,7 @@ confidence = result["confidence"]
 
 
 # ============================================================
-# MAIN GRID: SIGNAL + QUICK STATS
+# MAIN GRID
 # ============================================================
 
 col_signal, col_stats = st.columns([1.6, 1])
@@ -2164,7 +2252,7 @@ if soft_adv and soft_adv != "None":
 # ============================================================
 
 if signal in ("BUY", "SELL") and levels:
-    st.markdown('<div class="section-title">🎯 Trade Plan <span>Auto-calculated from structure + ATR</span></div>',
+    st.markdown('<div class="section-title">🎯 Trade Plan <span>Auto-calculated · Precision Mode</span></div>',
                 unsafe_allow_html=True)
     lc1, lc2, lc3, lc4, lc5 = st.columns(5)
     lc1.metric("Entry", fmt_price(levels["entry"], selected_pair))
@@ -2243,7 +2331,7 @@ with tab_overview:
 
 
 # ============================================================
-# TAB 2: TOOLS & INDICATORS
+# TAB 2: TOOLS
 # ============================================================
 
 with tab_tools:
@@ -2396,7 +2484,7 @@ with tab_tools:
             <div class="tool-value">{atr_val:.5f}</div>
             <div class="tool-desc">
                 ATR as % of price: <b>{atr_pct:.3f}%</b><br>
-                Used for stop-loss padding and level validation
+                SL multiplier: <b>{profile_for(selected_pair)['atr_sl']}x</b>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -2443,7 +2531,7 @@ with tab_tools:
 
 
 # ============================================================
-# TAB 3: SMC STRUCTURE
+# TAB 3: SMC
 # ============================================================
 
 with tab_smc:
@@ -2575,7 +2663,7 @@ with tab_smc:
 
 
 # ============================================================
-# TAB 4: MTF ANALYSIS
+# TAB 4: MTF
 # ============================================================
 
 with tab_mtf:
@@ -2602,7 +2690,7 @@ with tab_mtf:
     <div class="tool-card" style="margin-top:20px;">
         <div class="tool-name">🎯 MTF Consensus</div>
         <div class="tool-value">{final_icon} {final_mtf}</div>
-        <div class="tool-desc">Confidence: <b>{result['mtf_conf']:.1f}%</b> · Weighted across all timeframes</div>
+        <div class="tool-desc">Confidence: <b>{result['mtf_conf']:.1f}%</b> · Gate: {'ON' if REQUIRE_MTF_ALIGNMENT else 'OFF'}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2638,7 +2726,7 @@ with tab_mtf:
         <div class="tool-card">
             <div class="tool-name">📊 Market Regime</div>
             <div class="tool-value">{reg_icon} {reg}</div>
-            <div class="tool-desc">Trend vs Range vs Compression</div>
+            <div class="tool-desc">Gate: {'ON — Range/Compression rejected' if REQUIRE_TREND_REGIME else 'OFF'}</div>
         </div>
         """, unsafe_allow_html=True)
     with ctx3:
@@ -2682,12 +2770,14 @@ with tab_filters:
     if not result["all_filters_passed"]:
         st.error(f"🚫 **Hard Gate Block:** {result['filter_block_reason']}")
 
-    with st.expander("🔍 Diagnostic — لماذا WAIT؟"):
+    with st.expander("🔍 Diagnostic — لماذا WAIT؟", expanded=signal == "WAIT"):
         st.markdown(f"""
         - **BUY Score:** {result['buy_score']:.1f}
         - **SELL Score:** {result['sell_score']:.1f}
-        - **Gap:** {abs(result['buy_score'] - result['sell_score']):.1f} (min 8)
-        - **Confirmation:** {result['confirmation_score']:.1f}
+        - **Gap:** {abs(result['buy_score'] - result['sell_score']):.1f} (min {MIN_SIGNAL_GAP})
+        - **MTF:** {result['mtf_bias']} (gate: {'ON' if REQUIRE_MTF_ALIGNMENT else 'OFF'})
+        - **Regime:** {result['regime']} (gate: {'ON' if REQUIRE_TREND_REGIME else 'OFF'})
+        - **Confirmation:** {result['confirmation_score']:.1f} (min {MIN_CONFIRMATION_SCORE})
         - **Grade:** {result['trade_grade']}
         - **Raw → Effective:** {result['raw_confidence']:.1f} → {result['confidence']:.1f}
         - **Penalties:** {result['soft_penalties']:.1f}
@@ -2791,10 +2881,11 @@ with tab_calendar:
 # ============================================================
 
 with tab_backtest:
-    st.markdown('<div class="section-title">🔬 Quick Backtest <span>Last 200 candles · 4H</span></div>',
+    st.markdown('<div class="section-title">🔬 Quick Backtest <span>Precision Mode — A/A+ only</span></div>',
                 unsafe_allow_html=True)
 
-    st.caption("Note: External filters are skipped for speed. Uses historical simulation.")
+    st.caption("Note: External filters are skipped for speed. Uses historical simulation. "
+               "Only EXECUTE-status signals are counted.")
 
     if st.button("▶️ Run Backtest", width="stretch"):
         with st.spinner("Running..."):
@@ -2813,7 +2904,9 @@ with tab_backtest:
             bc4.metric("Expectancy", f"{bt['expectancy']:.2f}R")
             bc5.metric("Profit Factor", f"{bt['profit_factor']:.2f}")
 
-            if bt["expectancy"] >= 0.3 and bt["win_rate"] >= 45:
+            if bt["trades"] == 0:
+                st.warning("⚠️ لا توجد صفقات مطابقة لمعايير Precision Mode على هذا الأصل.")
+            elif bt["expectancy"] >= 0.3 and bt["win_rate"] >= 50:
                 st.success("✅ النظام يُظهر Edge إيجابي على هذا الأصل.")
             elif bt["expectancy"] > 0:
                 st.warning("⚠️ Edge ضعيف — يُفضل الحذر.")
@@ -2828,6 +2921,6 @@ with tab_backtest:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Institutional Analysis Terminal · Structure · MTF · SMC · Confirmation · Edge
+    Precision Mode · Structure · MTF · SMC · Confirmation · Edge
 </div>
 """, unsafe_allow_html=True)
