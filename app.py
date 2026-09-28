@@ -1,11 +1,12 @@
 # ============================================================
-# BLACK PYRAMID v2005.5.2
-# Institutional Analysis Terminal — Signals & Tools Showcase
+# BLACK PYRAMID v2005.5.3
+# Institutional Analysis Terminal — Main Page Controls
 #
-# v2005.5.2 CHANGELOG:
-#  - FIXED: Sidebar collapse button position (was floating in center)
-#  - FIXED: RTL applied to text elements only, not containers
-#  - Elegant fixed-position sidebar toggle button
+# v2005.5.3 CHANGELOG:
+#  - Asset selector moved to MAIN PAGE (was in sidebar)
+#  - Two prominent buttons: "Analyze Selected" + "Analyze All"
+#  - All-assets scan results shown inline under controls
+#  - Sidebar simplified to settings only
 # ============================================================
 
 import os
@@ -41,7 +42,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2005.5.2"
+APP_VERSION = "v2005.5.3"
 
 A_PLUS_MIN = 82.0
 A_MIN = 75.0
@@ -1684,7 +1685,7 @@ html, body, [class*="css"] {
 }
 body { background: #0a0d13; color: #e8edf5; }
 
-/* RTL — يطبق على النصوص فقط */
+/* RTL on text elements only */
 .main-header, .main-title, .main-subtitle,
 .signal-card, .signal-meta, .signal-conf, .signal-grade,
 .metric-card, .metric-label, .metric-value, .metric-sub,
@@ -1697,7 +1698,7 @@ div[data-testid="stDataFrame"] td {
     direction: rtl;
 }
 
-/* إصلاح زر إخفاء/إظهار الشريط الجانبي */
+/* Sidebar toggle button fix */
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapsedControl"],
 button[kind="header"] {
@@ -1724,13 +1725,8 @@ button[kind="header"]:hover {
     transform: scale(1.05) !important;
 }
 
-/* الشريط الجانبي — يحفظ RTL داخلياً */
-[data-testid="stSidebar"] {
-    direction: rtl;
-}
-[data-testid="stSidebar"] > div:first-child {
-    direction: rtl;
-}
+[data-testid="stSidebar"] { direction: rtl; }
+[data-testid="stSidebar"] > div:first-child { direction: rtl; }
 
 .hero {
     background: radial-gradient(circle at 20% 30%, rgba(230,200,124,0.08), transparent 60%),
@@ -1843,9 +1839,22 @@ div.stButton > button:hover {
     box-shadow: 0 10px 24px rgba(0,0,0,0.6);
 }
 
+/* Selectbox styling */
+div[data-testid="stSelectbox"] > label {
+    color: #e6c87c !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px !important;
+}
+div[data-testid="stSelectbox"] > div > div {
+    background: linear-gradient(145deg, #10141c, #0d1017) !important;
+    border: 1px solid rgba(230,200,124,0.25) !important;
+    border-radius: 12px !important;
+    min-height: 46px !important;
+}
 div[data-baseweb="select"] > div {
-    background: #10141c; border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 40px; padding: 0 16px;
+    background: transparent !important;
 }
 div[data-baseweb="select"] input { color: #e8edf5 !important; }
 
@@ -1918,22 +1927,14 @@ st.markdown(f"""
 
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR — Settings only
 # ============================================================
 
 with st.sidebar:
-    st.markdown("### ⚙️ Control Panel")
+    st.markdown("### ⚙️ Settings")
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
 
-    selected_pair = st.selectbox(
-        "الأصل", list(PAIRS.keys()),
-        index=list(PAIRS.keys()).index(st.session_state.selected_pair)
-        if st.session_state.selected_pair in PAIRS else 0)
-    st.session_state.selected_pair = selected_pair
-    symbol = PAIRS[selected_pair]
-
-    st.markdown("---")
     st.markdown("**🎛️ وضع الفلاتر**")
     strict_mode = st.checkbox(
         "🔒 Strict Filters",
@@ -1952,16 +1953,84 @@ with st.sidebar:
 
 
 # ============================================================
-# LOAD DATA
+# CONTROL BAR — Main Page
+# ============================================================
+
+st.markdown('<div class="section-title">🎯 Analysis Control <span>اختر الأصل أو حلل الكل</span></div>',
+            unsafe_allow_html=True)
+
+ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.2, 1, 1])
+
+with ctrl_col1:
+    selected_pair = st.selectbox(
+        "🎯 اختر الأصل للتحليل",
+        list(PAIRS.keys()),
+        index=list(PAIRS.keys()).index(st.session_state.selected_pair)
+        if st.session_state.selected_pair in PAIRS else 0,
+        key="main_pair_selector")
+    st.session_state.selected_pair = selected_pair
+    symbol = PAIRS[selected_pair]
+
+with ctrl_col2:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    analyze_this = st.button("🎯 تحليل الأصل المختار",
+                             width="stretch", key="btn_analyze_one")
+
+with ctrl_col3:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    analyze_all = st.button("🌐 تحليل كافة الأصول",
+                            width="stretch", key="btn_analyze_all")
+
+
+# Handle buttons
+if analyze_all:
+    with st.spinner("🌐 Scanning all assets in parallel..."):
+        start = time.time()
+        st.session_state.all_signals = get_all_signals_parallel()
+        st.session_state.analyzing_all = True
+        st.session_state.analysis_time = time.time() - start
+
+if analyze_this:
+    st.cache_data.clear()
+    st.rerun()
+
+
+# All-Assets results — shown inline under control bar
+if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
+    st.markdown('<div class="section-title">🌐 All Assets Scan Results</div>',
+                unsafe_allow_html=True)
+
+    res_col1, res_col2 = st.columns([4, 1])
+    with res_col1:
+        st.success(f"✅ تم تحليل {len(st.session_state.all_signals)} أصلاً "
+                   f"في {st.session_state.get('analysis_time', 0):.1f} ثانية.")
+    with res_col2:
+        if st.button("🗑️ مسح النتائج", width="stretch", key="clear_all_signals"):
+            st.session_state.all_signals = None
+            st.session_state.analyzing_all = False
+            st.session_state.analysis_time = None
+            st.rerun()
+
+    st.dataframe(
+        st.session_state.all_signals,
+        hide_index=True,
+        width="stretch",
+        height=440,
+    )
+    st.markdown("---")
+
+
+# ============================================================
+# LOAD SELECTED ASSET DATA
 # ============================================================
 
 current_price, change = get_spot_price(symbol)
 if current_price is None:
-    st.error("تعذر الحصول على السعر الحالي.")
+    st.error(f"تعذر الحصول على السعر الحالي لـ {selected_pair}.")
     st.stop()
 df_raw = get_historical_data(symbol, "3mo", "4h")
 if df_raw is None:
-    st.error("تعذر تحميل البيانات التاريخية.")
+    st.error(f"تعذر تحميل البيانات التاريخية لـ {selected_pair}.")
     st.stop()
 
 news_block, _ = news_time_block(
@@ -1992,7 +2061,7 @@ with col_signal:
                   else "#f5c87a" if result["execution_status"] in ("WATCH", "WAIT") else "#f57a7a")
     st.markdown(f"""
     <div class="signal-card">
-        <div class="signal-meta">BLACK PYRAMID SIGNAL</div>
+        <div class="signal-meta">BLACK PYRAMID SIGNAL · {selected_pair}</div>
         <div class="signal-value" style="color:{signal_color};">{signal}</div>
         <div class="signal-conf">Confidence: <b>{confidence:.1f}%</b></div>
         <div class="signal-grade">Grade: {result['trade_grade']}</div>
@@ -2080,7 +2149,7 @@ tab_overview, tab_tools, tab_smc, tab_mtf, tab_filters, tab_chart, tab_all, tab_
     "⏱️ MTF Analysis",
     "🎛️ Filters",
     "📈 Chart",
-    "🌐 All Assets",
+    "🌐 Calendar",
     "🔬 Backtest",
 ])
 
@@ -2133,7 +2202,7 @@ with tab_overview:
 
 
 # ============================================================
-# TAB 2: TOOLS & INDICATORS SHOWCASE
+# TAB 2: TOOLS & INDICATORS
 # ============================================================
 
 with tab_tools:
@@ -2217,8 +2286,6 @@ with tab_tools:
     rsi = safe_float(last.get("rsi"), 50)
     vrsi = safe_float(last.get("vrsi"), 50)
     mfi = safe_float(last.get("mfi"), 50)
-    macd = safe_float(last.get("macd"))
-    macd_sig = safe_float(last.get("macd_signal"))
     macd_hist = safe_float(last.get("macd_histogram"))
 
     if rsi >= 70: rsi_state = "Overbought"; rsi_icon = "🔴"
@@ -2631,12 +2698,8 @@ with tab_chart:
                               line=dict(color="#f5c87a")), row=3, col=1)
     colors = ["#7cd4a0" if v >= 0 else "#f57a7a" for v in df["macd_histogram"].fillna(0)]
     fig.add_trace(
-        go.Bar(
-            x=df.index,
-            y=df["macd_histogram"],
-            name="Histogram",
-            marker_color=colors,
-        ),
+        go.Bar(x=df.index, y=df["macd_histogram"], name="Histogram",
+               marker_color=colors),
         row=3, col=1,
     )
 
@@ -2660,44 +2723,14 @@ with tab_chart:
 
 
 # ============================================================
-# TAB 7: ALL ASSETS
+# TAB 7: CALENDAR
 # ============================================================
 
 with tab_all:
-    st.markdown('<div class="section-title">🌐 All Assets Scanner <span>Parallel signal analysis</span></div>',
+    st.markdown('<div class="section-title">📅 Economic Calendar <span>High-impact events</span></div>',
                 unsafe_allow_html=True)
+    st.info("💡 استخدم زر **🌐 تحليل كافة الأصول** في أعلى الصفحة لعرض جميع الإشارات.")
 
-    col_a, col_b, col_c = st.columns([1, 1, 1])
-    with col_a:
-        if st.button("🔍 Scan All Assets", width="stretch"):
-            with st.spinner("Scanning..."):
-                start = time.time()
-                st.session_state.all_signals = get_all_signals_parallel()
-                st.session_state.analyzing_all = True
-                st.session_state.analysis_time = time.time() - start
-            st.rerun()
-    with col_b:
-        if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-            if st.button("🗑️ Clear", width="stretch"):
-                st.session_state.all_signals = None
-                st.session_state.analyzing_all = False
-                st.session_state.analysis_time = None
-                st.rerun()
-    with col_c:
-        if st.session_state.get("analysis_time"):
-            st.metric("⏱️ Time", f"{st.session_state.analysis_time:.1f}s")
-
-    if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-        st.success(f"✅ Scanned {len(st.session_state.all_signals)} assets.")
-        st.dataframe(st.session_state.all_signals, hide_index=True,
-                     width="stretch", height=500)
-    elif st.session_state.analyzing_all:
-        st.warning("لا توجد نتائج.")
-    else:
-        st.info("اضغط 'Scan All Assets' لعرض الإشارات لجميع الأزواج.")
-
-    st.markdown('<div class="section-title">📅 Economic Calendar</div>',
-                unsafe_allow_html=True)
     if st.button("🔄 Update Calendar", width="stretch"):
         st.session_state.economic_events = get_fmp_economic_calendar()
 
