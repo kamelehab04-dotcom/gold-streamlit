@@ -1,5 +1,5 @@
 # ============================================================
-# BLACK PYRAMID v2005.8 — BALANCED MODE + REALISTIC TARGETS
+# BLACK PYRAMID v2005.9 — BALANCED MODE + REALISTIC TARGETS
 # Institutional Analysis Terminal
 #
 # v2005.8 CHANGELOG:
@@ -50,7 +50,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG — BALANCED MODE
 # ============================================================
 
-APP_VERSION = "v2005.8-Balanced"
+APP_VERSION = "v2005.9-Balanced"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -95,6 +95,13 @@ ASSET_PROFILES = {
         "atr_period": 14, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20,
         "mfi_period": 9, "bb_period": 20, "bb_std": 2.2,
         "atr_sl": 1.80, "atr_trail": 1.30, "swing_order": 3,
+        "structure_lookback": 175, "confidence_threshold": 74,
+        "min_rr": 1.80, "confirmation_threshold": 67,
+    },
+    "silver": {
+        "atr_period": 14, "rsi_period": 14, "rsi_ob": 78, "rsi_os": 22,
+        "mfi_period": 10, "bb_period": 20, "bb_std": 2.2,
+        "atr_sl": 1.90, "atr_trail": 1.35, "swing_order": 3,
         "structure_lookback": 175, "confidence_threshold": 74,
         "min_rr": 1.80, "confirmation_threshold": 67,
     },
@@ -238,8 +245,10 @@ def safe_bool(value):
 
 
 def asset_type_from_name(name: str) -> str:
-    n = name.lower()
-    if any(x in n for x in ["gold", "silver", "xau", "xag"]):
+    n = str(name).lower()
+    if any(x in n for x in ["silver", "xag"]):
+        return "silver"
+    if any(x in n for x in ["gold", "xau"]):
         return "gold"
     if any(x in n for x in ["bitcoin", "ethereum", "btc", "eth"]):
         return "crypto"
@@ -252,7 +261,9 @@ def profile_for(name: str):
 
 def get_asset_profile(pair_name):
     name = str(pair_name).upper()
-    if "XAU" in name or "GOLD" in name or "SILVER" in name or "XAG" in name:
+    if "XAG" in name or "SILVER" in name:
+        return "silver"
+    if "XAU" in name or "GOLD" in name:
         return "gold"
     if any(x in name for x in ("BTC", "ETH", "XRP", "SOL", "ADA")):
         return "crypto"
@@ -262,7 +273,7 @@ def get_asset_profile(pair_name):
 def fmt_price(value, pair_name):
     if value is None or not np.isfinite(safe_float(value)):
         return "N/A"
-    if asset_type_from_name(pair_name) in ("gold", "crypto"):
+    if asset_type_from_name(pair_name) in ("gold", "silver", "crypto"):
         return f"${float(value):,.2f}"
     return f"{float(value):.5f}"
 
@@ -538,12 +549,63 @@ def normalize_ohlcv(df, min_rows=50):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
+    """
+    Yahoo compatibility layer.
+
+    Yahoo/yfinance exposes 1h but not 4h as a native interval. For 4H
+    requests we fetch the most recent intraday window at 1H and resample
+    locally. This avoids passing an unsupported "4h" interval to Yahoo.
+    """
     try:
         safe_symbol = sanitize_yf_symbol(symbol)
-        df = yf.download(safe_symbol, period=period, interval=interval,
-                         auto_adjust=False, progress=False, threads=False)
+
+        if interval == "4h":
+            # Yahoo intraday data has a limited lookback window. Fetch the
+            # maximum practical recent window and build 4H candles locally.
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(days=59)
+            df = yf.download(
+                safe_symbol,
+                start=start,
+                end=end,
+                interval="1h",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+            df = normalize_ohlcv(df)
+            if df is None or df.empty:
+                return None
+
+            # Work in a consistent timezone when possible.
+            if isinstance(df.index, pd.DatetimeIndex):
+                try:
+                    if df.index.tz is not None:
+                        df.index = df.index.tz_convert("UTC").tz_localize(None)
+                except Exception:
+                    pass
+
+            out = df.resample("4h", label="right", closed="right").agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            }).dropna(subset=["open", "high", "low", "close"])
+
+            return normalize_ohlcv(out, min_rows=10)
+
+        df = yf.download(
+            safe_symbol,
+            period=period,
+            interval=interval,
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
         return normalize_ohlcv(df)
-    except Exception:
+    except Exception as exc:
+        logging.debug("get_yfinance(%s, %s, %s) failed: %s", symbol, period, interval, exc)
         return None
 
 
@@ -585,17 +647,35 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
 
 @st.cache_data(ttl=90, show_spinner=False)
 def get_historical_data(symbol, period="3mo", interval="4h"):
+    """
+    Historical data router.
+
+    For 4H, Twelve Data is preferred when a key exists because Yahoo's
+    intraday lookback is limited; otherwise Yahoo 1H → local 4H resampling
+    is used. This keeps the app functional without requiring a second API.
+    """
     candidates = YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol])
+
+    # Prefer the dedicated 4H provider when configured.
+    if interval == "4h" and TWELVE_API_KEY:
+        df = get_twelve_data(symbol, interval, 500)
+        if df is not None and len(df) >= 50:
+            return df
+
     for yf_sym in candidates:
         df = get_yfinance(yf_sym, period, interval)
         if df is not None and len(df) >= 50:
             return df
+
     df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
     if df is not None and len(df) >= 50:
         return df
+
     df = get_twelve_data(symbol, interval, 500)
     if df is not None and len(df) >= 50:
         return df
+
+    # Last fallback: shorter recent window.
     for yf_sym in candidates:
         df = get_yfinance(yf_sym, "1mo", interval)
         if df is not None and len(df) >= 30:
@@ -1282,23 +1362,40 @@ def in_kill_zone(asset_type):
 
 
 def ote_filter(df, direction):
+    """
+    OTE is evaluated on one coherent impulse leg.
+
+    BUY: the latest confirmed swing low must occur before the latest swing
+    high. SELL: the latest confirmed swing high must occur before the latest
+    swing low. This prevents combining unrelated swings from different legs.
+    """
     swings_h = get_last_two_swings(df, "high")
     swings_l = get_last_two_swings(df, "low")
     if not swings_h or not swings_l:
         return True, "OTE غير متاح — مسموح"
-    swing_h = swings_h[-1][1]
-    swing_l = swings_l[-1][1]
-    current = df["close"].iloc[-1]
-    leg = swing_h - swing_l
-    if leg <= 0: return True, "موجة غير صالحة"
+
+    latest_h_time, swing_h = swings_h[-1]
+    latest_l_time, swing_l = swings_l[-1]
+    current = float(df["close"].iloc[-1])
+    leg = float(swing_h - swing_l)
+
+    if leg <= 0:
+        return True, "موجة غير صالحة"
+
     if direction == "BUY":
+        if latest_l_time >= latest_h_time:
+            return True, "لا توجد موجة صاعدة مكتملة — OTE مسموح"
         retr = (swing_h - current) / leg
-        if 0.55 <= retr <= 0.85: return True, f"OTE صاعد {retr*100:.0f}% ✅"
+        if 0.55 <= retr <= 0.85:
+            return True, f"OTE صاعد {retr*100:.0f}% ✅"
         return False, f"خارج OTE ({retr*100:.0f}%)"
-    else:
-        retr = (current - swing_l) / leg
-        if 0.55 <= retr <= 0.85: return True, f"OTE هابط {retr*100:.0f}% ✅"
-        return False, f"خارج OTE ({retr*100:.0f}%)"
+
+    if latest_h_time >= latest_l_time:
+        return True, "لا توجد موجة هابطة مكتملة — OTE مسموح"
+    retr = (current - swing_l) / leg
+    if 0.55 <= retr <= 0.85:
+        return True, f"OTE هابط {retr*100:.0f}% ✅"
+    return False, f"خارج OTE ({retr*100:.0f}%)"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1778,6 +1875,21 @@ def calc_position_size(balance, risk_pct, entry, stop_loss, pair_name):
             "unit_label": "lots (100 oz)",
         }
 
+    if asset == "silver":
+        # Standard futures-style reference sizing: 5,000 oz contract.
+        # Brokers/CFDs may use a different contract size; the UI should be
+        # treated as a risk estimate unless the broker specification matches.
+        contract_size = 5000.0
+        risk_per_lot = sl_distance * contract_size
+        lots = risk_amount / risk_per_lot if risk_per_lot > 0 else 0
+        return {
+            "asset": asset, "risk_amount": round(risk_amount, 2),
+            "sl_distance": round(sl_distance, 4),
+            "lots": round(lots, 3),
+            "ounces": round(lots * contract_size, 2),
+            "unit_label": "lots (5,000 oz reference)",
+        }
+
     if asset == "crypto":
         units = risk_amount / sl_distance if sl_distance > 0 else 0
         return {
@@ -1872,7 +1984,17 @@ def generate_signal(df, current_price, pair_name, symbol,
     if signal == "SELL" and vrsi < profile["rsi_os"] and not safe_bool(last.get("mss_bearish")):
         sell = max(0, sell - 5)
 
-    confidence = clamp(50 + abs(buy - sell) * 0.75 + max(0, max(buy, sell) - 60) * 0.25, 50, 95)
+    # Re-evaluate the final signal after every score adjustment.
+    # Previously the initial gap could remain BUY/SELL even after a VRSI
+    # penalty reduced the gap below MIN_SIGNAL_GAP.
+    buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
+    gap = abs(buy - sell)
+    signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
+
+    confidence = clamp(
+        50 + gap * 0.75 + max(0, max(buy, sell) - 60) * 0.25,
+        50, 95
+    )
 
     soft_penalty_items = []
 
@@ -2002,7 +2124,7 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     raw_confidence = confidence
     penalty_total, applied_penalties = compute_soft_penalty(
-        soft_penalty_items, strict=True)
+        soft_penalty_items, strict=strict_soft)
     effective_confidence = clamp(raw_confidence - penalty_total, 0, 95)
 
     if raw_confidence >= A_PLUS_MIN and conf_score >= 78:
@@ -2114,17 +2236,14 @@ def quick_backtest(symbol, pair_name, lookback=200):
 
         profile = profile_for(pair_name)
 
+        # Load auxiliary history once, then slice it at each backtest bar.
+        # Never use a full-period DXY bias/correlation for an earlier bar.
         try:
             dxy_df = get_historical_data("DX-Y.NYB", "1y", "4h")
-            dxy_bias_full = _bias_from_slice(dxy_df, "DXY")[0] if dxy_df is not None else "NEUTRAL"
         except Exception:
-            dxy_bias_full = "NEUTRAL"
+            dxy_df = None
 
-        try:
-            gold_corr = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
-        except Exception:
-            gold_corr = None
-
+        is_gold = ("Gold" in pair_name or "XAU" in pair_name.upper())
         df = build_features(df_full, profile)
 
         wins = losses = 0
@@ -2144,9 +2263,41 @@ def quick_backtest(symbol, pair_name, lookback=200):
             mtf_bias, mtf_conf = _bias_from_slice(slice_df, pair_name)
             wk_bias = _weekly_bias_from_slice(slice_df, pair_name)
 
+            # Point-in-time DXY bias.
+            if dxy_df is not None and not dxy_df.empty:
+                try:
+                    ts = slice_df.index[-1]
+                    dxy_slice = dxy_df.loc[:ts]
+                    dxy_bias = _bias_from_slice(dxy_slice, "DXY")[0]
+                except Exception:
+                    dxy_bias = "NEUTRAL"
+            else:
+                dxy_bias = "NEUTRAL"
+
+            # Point-in-time Gold/DXY correlation.
+            gold_corr = None
+            if is_gold and dxy_df is not None and not dxy_df.empty:
+                try:
+                    ts = slice_df.index[-1]
+                    gold_slice = df_full.loc[:ts, ["close"]]
+                    dxy_slice = dxy_df.loc[:ts, ["close"]]
+                    aligned = pd.concat(
+                        [dxy_slice["close"].pct_change(),
+                         gold_slice["close"].pct_change()],
+                        axis=1, join="inner"
+                    ).dropna()
+                    if len(aligned) >= 30:
+                        gold_corr = float(
+                            aligned.iloc[:, 0].rolling(30).corr(
+                                aligned.iloc[:, 1]
+                            ).iloc[-1]
+                        )
+                except Exception:
+                    gold_corr = None
+
             precomputed = {
                 "mtf_bias": mtf_bias, "mtf_conf": mtf_conf, "mtf_details": {},
-                "weekly_bias": wk_bias, "dxy_bias": dxy_bias_full,
+                "weekly_bias": wk_bias, "dxy_bias": dxy_bias,
                 "gold_corr": gold_corr,
             }
 
@@ -3598,8 +3749,8 @@ with tab_journal:
 with tab_backtest:
     st.markdown('<div class="section-title">🔬 Quick Backtest <span>No Look-Ahead · A+/A/B</span></div>',
                 unsafe_allow_html=True)
-    st.caption("✅ MTF/Weekly/DXY تُحسب لكل نقطة زمنية من البيانات السابقة فقط — نتائج موثوقة.")
-    st.caption("External filters متجاهلة للسرعة.")
+    st.caption("✅ MTF/Weekly/DXY/Gold-DXY context are calculated point-in-time from data available up to each bar.")
+    st.caption("External live filters are skipped for speed; core historical signal logic is tested without future data.")
 
     if st.button("▶️ Run Backtest", width="stretch"):
         with st.spinner("Running bias-free backtest..."):
