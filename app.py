@@ -10,6 +10,8 @@
 #  - Stop Loss: 1.5x / 1.8x / 2.0x ATR
 #  - Kill Switch: 3 consecutive losses
 #  - Confirmation min: 65
+#  - Logo (top-left) + Info buttons (top-right) in same row
+#  - Added: Daily Calendar, Session, Market Status buttons
 # ============================================================
 
 import os
@@ -49,34 +51,28 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 APP_VERSION = "v2005.7-Balanced"
 
-# Grade thresholds (moderate)
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
 B_MIN = 70.0
 C_MIN = 62.0
 
-# Signal gates
-MIN_SIGNAL_GAP = 15              # between 8 (loose) and 25 (strict)
+MIN_SIGNAL_GAP = 15
 MIN_CONFIDENCE = 72.0
 MIN_CONFIRMATION_SCORE = 65.0
 
-# Soft penalty toggles (NOT hard gates)
-PENALTY_MTF_AGAINST = 12.0       # خصم عند MTF معاكس
-PENALTY_RANGE_REGIME = 10.0      # خصم في Range
-PENALTY_WEAK_CANDLE = 8.0        # خصم عند جسم شمعة ضعيف
-PENALTY_WEEKLY_AGAINST = 6.0     # خصم عند Weekly معاكس
+PENALTY_MTF_AGAINST = 12.0
+PENALTY_RANGE_REGIME = 10.0
+PENALTY_WEAK_CANDLE = 8.0
+PENALTY_WEEKLY_AGAINST = 6.0
 
-# RR minimums (realistic)
 MIN_RR_TP1 = 1.20
 MIN_RR_TP2 = 1.80
 MIN_RR_TP3 = 2.50
 
-# Soft filters strict mode
 STRICT_SOFT_FILTERS = False
 MAX_SOFT_PENALTY = 12.0
 SOFT_PENALTY_TOP_N = 4
 
-# Kill switch
 MAX_CONSECUTIVE_LOSSES = 3
 
 LOGO_CANDIDATES = [
@@ -204,6 +200,9 @@ def init_state():
         "analysis_time": None,
         "backtest_results": None,
         "strict_filters": False,
+        "show_calendar_today": False,
+        "show_session_info": False,
+        "show_market_status": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -288,6 +287,175 @@ def load_logo_b64():
             if b64:
                 return b64
     return None
+
+
+# ============================================================
+# SESSION & MARKET STATUS HELPERS
+# ============================================================
+
+def get_current_session_info():
+    """يرجع حالة الجلسة الحالية مع التفاصيل."""
+    now_utc = datetime.now(timezone.utc)
+    hour = now_utc.hour
+    minute = now_utc.minute
+    time_str = f"{hour:02d}:{minute:02d} UTC"
+
+    sessions = {
+        "Asian":       (0, 7,   "🌏", "طوكيو/سيدني — سيولة منخفضة"),
+        "London":      (7, 12,  "🇬🇧", "لندن — سيولة عالية"),
+        "Overlap":     (12, 16, "🔥", "London/NY Overlap — أعلى سيولة"),
+        "NY":          (16, 21, "🇺🇸", "نيويورك — سيولة عالية"),
+        "After-Hours": (21, 24, "🌙", "بعد الإغلاق — سيولة منخفضة"),
+    }
+
+    current = "After-Hours"
+    icon = "🌙"
+    desc = "بعد الإغلاق — سيولة منخفضة"
+    for name, (start, end, sicon, sdesc) in sessions.items():
+        if start <= hour < end:
+            current = name
+            icon = sicon
+            desc = sdesc
+            break
+
+    kz_msg = "خارج Kill Zones"
+    for kz_name, (start, end) in KILL_ZONES.items():
+        if start <= hour < end:
+            kz_msg = f"داخل {kz_name} ✅"
+            break
+
+    return {
+        "session": current,
+        "icon": icon,
+        "desc": desc,
+        "time_utc": time_str,
+        "kill_zone": kz_msg,
+        "hour": hour,
+    }
+
+
+def get_market_status_info(symbol, pair_name):
+    """يرجع وضع السوق الحالي: الاتجاه، التقلب، الحالة العامة."""
+    try:
+        df = get_historical_data(symbol, "3mo", "4h")
+        if df is None or len(df) < 60:
+            return None
+        profile = profile_for(pair_name)
+        x = build_features(df, profile)
+        last = x.iloc[-1]
+
+        regime, regime_strength = detect_regime(x)
+        vol_ok, vol_msg, vol_label = volatility_regime_filter(x)
+
+        atr_series = x["atr"].dropna()
+        atr_now = safe_float(atr_series.iloc[-1], 0)
+        atr_mean = safe_float(atr_series.rolling(100).mean().iloc[-1], 0)
+        atr_ratio = (atr_now / atr_mean) if atr_mean > 0 else 1.0
+
+        structure = structure_state(x)
+        struct_state = structure["state"]
+
+        ema20 = safe_float(last.get("ema20"))
+        ema50 = safe_float(last.get("ema50"))
+        ema200 = safe_float(last.get("ema200"))
+        if ema20 > ema50 > ema200:
+            trend_align = "متراصف صاعد (Strong Bullish)"
+            trend_icon_v = "🟢"
+        elif ema20 < ema50 < ema200:
+            trend_align = "متراصف هابط (Strong Bearish)"
+            trend_icon_v = "🔴"
+        elif ema20 > ema50:
+            trend_align = "صاعد قصير المدى"
+            trend_icon_v = "🟡"
+        else:
+            trend_align = "هابط قصير المدى"
+            trend_icon_v = "🟡"
+
+        if atr_ratio > 1.5:
+            vol_state = "مرتفع"
+            vol_icon = "🔥"
+        elif atr_ratio < 0.7:
+            vol_state = "منخفض"
+            vol_icon = "😴"
+        else:
+            vol_state = "طبيعي"
+            vol_icon = "🌊"
+
+        if regime in ("TREND_BULLISH", "TREND_BEARISH") and vol_label in ("NORMAL", "HIGH"):
+            overall = "مواتٍ للتداول ✅"
+            overall_icon = "✅"
+        elif regime == "RANGE":
+            overall = "تذبذب — يحتاج حذر ⚠️"
+            overall_icon = "⚠️"
+        elif regime == "COMPRESSION":
+            overall = "انضغاط — انتظر الاختراق 🔵"
+            overall_icon = "🔵"
+        elif vol_label == "CHAOS":
+            overall = "تقلب مفرط — لا تتداول 🛑"
+            overall_icon = "🛑"
+        else:
+            overall = "غير واضح — توخ الحذر ⚪"
+            overall_icon = "⚪"
+
+        return {
+            "regime": regime,
+            "regime_strength": regime_strength,
+            "volatility": vol_label,
+            "vol_msg": vol_msg,
+            "vol_state": vol_state,
+            "vol_icon": vol_icon,
+            "atr_ratio": atr_ratio,
+            "structure": struct_state,
+            "trend_align": trend_align,
+            "trend_icon": trend_icon_v,
+            "overall": overall,
+            "overall_icon": overall_icon,
+        }
+    except Exception:
+        return None
+
+
+def get_todays_events(events, pair_name):
+    """يرجع أحداث اليوم فقط للأزواج المرتبطة."""
+    if not events:
+        return []
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    name = str(pair_name).upper()
+    currencies = set()
+    if "/" in name:
+        parts = name.split("/")
+        currencies.add(parts[0].strip())
+        if len(parts) > 1:
+            currencies.add(parts[1].strip().split()[0])
+    else:
+        currencies.add("USD")
+
+    country_map = {"US": "USD", "EU": "EUR", "GB": "GBP", "JP": "JPY",
+                   "CH": "CHF", "AU": "AUD", "NZ": "NZD", "CA": "CAD"}
+
+    todays = []
+    for event in events:
+        try:
+            date_str = str(event.get("date", ""))
+            if not date_str.startswith(today_str):
+                continue
+            country = str(event.get("country", "")).strip().upper()
+            mapped = country_map.get(country, country)
+            if mapped not in currencies:
+                continue
+            todays.append({
+                "time": str(event.get("time", "")),
+                "country": country,
+                "event": str(event.get("event", "")),
+                "impact": str(event.get("impact", "")).strip().lower(),
+            })
+        except Exception:
+            continue
+
+    todays.sort(key=lambda e: e.get("time", ""))
+    return todays
 
 
 # ============================================================
@@ -1399,7 +1567,6 @@ def generate_signal(df, current_price, pair_name, symbol,
     elif wk_bias == "BEARISH": sell += 5; buy -= 3
     buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
 
-    # ---- Balanced Signal Gate (15) ----
     gap = abs(buy - sell)
     signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
 
@@ -1418,26 +1585,21 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     confidence = clamp(50 + abs(buy - sell) * 0.75 + max(0, max(buy, sell) - 60) * 0.25, 50, 95)
 
-    # ---- v2005.7: Soft penalties (NOT hard gates) ----
     soft_penalty_items = []
 
-    # MTF ضد الإشارة → خصم 12
     if signal in ("BUY", "SELL") and mtf_bias != "NEUTRAL":
         if (signal == "BUY" and mtf_bias != "BULLISH") or \
            (signal == "SELL" and mtf_bias != "BEARISH"):
             soft_penalty_items.append(("MTF ضد الاتجاه", PENALTY_MTF_AGAINST))
 
-    # Weekly ضد الإشارة → خصم 6
     if signal in ("BUY", "SELL") and wk_bias != "NEUTRAL":
         if (signal == "BUY" and wk_bias != "BULLISH") or \
            (signal == "SELL" and wk_bias != "BEARISH"):
             soft_penalty_items.append(("Weekly ضد الاتجاه", PENALTY_WEEKLY_AGAINST))
 
-    # Regime Range/Compression → خصم 10
     if signal in ("BUY", "SELL") and scores["regime"] in ("RANGE", "COMPRESSION"):
         soft_penalty_items.append((f"Regime {scores['regime']}", PENALTY_RANGE_REGIME))
 
-    # Candle body ضعيف → خصم 8
     if signal in ("BUY", "SELL"):
         atr_now = safe_float(last.get("atr"), 0)
         if atr_now > 0:
@@ -1449,7 +1611,6 @@ def generate_signal(df, current_price, pair_name, symbol,
             elif signal == "SELL" and last["close"] > last["open"]:
                 soft_penalty_items.append(("شمعة ضد الاتجاه", PENALTY_WEAK_CANDLE))
 
-    # MSS معاكس → خصم 10
     if mss_conflict and signal in ("BUY", "SELL"):
         soft_penalty_items.append(("MSS Conflict", 10))
 
@@ -1535,10 +1696,9 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     raw_confidence = confidence
     penalty_total, applied_penalties = compute_soft_penalty(
-        soft_penalty_items, strict=True)   # Balanced: penalties always applied (dampened)
+        soft_penalty_items, strict=True)
     effective_confidence = clamp(raw_confidence - penalty_total, 0, 95)
 
-    # ---- v2005.7: Balanced Grade thresholds ----
     if raw_confidence >= A_PLUS_MIN and conf_score >= 78:
         trade_grade = "A+"
     elif raw_confidence >= A_MIN and conf_score >= 72:
@@ -1550,7 +1710,6 @@ def generate_signal(df, current_price, pair_name, symbol,
     else:
         trade_grade = "WAIT"
 
-    # ---- v2005.7: Execution — A/A+/B allowed ----
     if signal == "WAIT":
         execution_status, execution_reason = "WAIT", "Signal WAIT"
     elif not all_passed:
@@ -1813,46 +1972,48 @@ button[kind="header"]:hover {
     background: radial-gradient(circle at 20% 30%, rgba(230,200,124,0.08), transparent 60%),
                 radial-gradient(circle at 80% 70%, rgba(124,212,160,0.06), transparent 60%),
                 linear-gradient(145deg, #10141c, #0d1017);
-    padding: 32px 40px; border-radius: 28px; margin-bottom: 26px;
+    padding: 18px 26px; border-radius: 20px;
     border: 1px solid rgba(230,200,124,0.12);
-    box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.55);
     position: relative; overflow: hidden;
-    text-align: center;
 }
 .hero::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
     background: linear-gradient(90deg, transparent, #e6c87c, #7cd4a0, #e6c87c, transparent);
 }
-.hero-logo {
-    max-width: 480px;
-    width: 100%;
-    height: auto;
-    display: block;
-    margin: 0 auto 12px auto;
-    filter: drop-shadow(0 8px 32px rgba(230,200,124,0.25));
-}
 .hero-title {
-    font-size: 3rem; font-weight: 800; color: #e6c87c;
+    font-size: 2rem; font-weight: 800; color: #e6c87c;
     letter-spacing: 3px; margin: 0; line-height: 1.1;
-    text-shadow: 0 0 40px rgba(230,200,124,0.35);
+    text-shadow: 0 0 30px rgba(230,200,124,0.35);
 }
 .hero-sub {
-    color: #8b95a8; margin-top: 12px; font-size: 1.05rem;
-    font-weight: 300; letter-spacing: 0.5px;
+    color: #8b95a8; margin-top: 8px; font-size: 0.82rem;
+    font-weight: 300; letter-spacing: 0.3px; line-height: 1.4;
 }
 .hero-badge {
-    display: inline-block; padding: 4px 14px; border-radius: 40px;
+    display: inline-block; padding: 3px 12px; border-radius: 40px;
     background: rgba(230,200,124,0.1); color: #e6c87c;
-    font-size: 0.75rem; font-weight: 600;
+    font-size: 0.7rem; font-weight: 600;
     border: 1px solid rgba(230,200,124,0.25);
-    margin-left: 12px; letter-spacing: 1px;
+    margin-left: 6px; letter-spacing: 1px;
 }
 .hero-badge-balanced {
-    display: inline-block; padding: 4px 14px; border-radius: 40px;
+    display: inline-block; padding: 3px 12px; border-radius: 40px;
     background: rgba(124,212,160,0.12); color: #7cd4a0;
-    font-size: 0.75rem; font-weight: 700;
+    font-size: 0.7rem; font-weight: 700;
     border: 1px solid rgba(124,212,160,0.35);
-    margin-left: 8px; letter-spacing: 1.5px;
+    margin-left: 6px; letter-spacing: 1.5px;
+}
+
+/* Top-row info buttons — aligned with logo */
+div[data-testid="stHorizontalBlock"] > div > div > div[data-testid="stButton"] {
+    margin-top: 0 !important;
+}
+div[data-testid="stHorizontalBlock"] > div > div > div[data-testid="stButton"] > button {
+    padding: 0.55rem 0.8rem !important;
+    font-size: 0.85rem !important;
+    white-space: nowrap !important;
+    min-height: 42px !important;
 }
 
 .signal-card {
@@ -2006,35 +2167,180 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 
 
 # ============================================================
-# HERO
+# HERO ROW — Logo (Left) + Info Buttons (Right)
 # ============================================================
 
 _logo_b64 = load_logo_b64()
 
-if _logo_b64:
-    st.markdown(f"""
-    <div class="hero">
-        <img src="data:image/png;base64,{_logo_b64}"
-             alt="BLACK PYRAMID"
-             class="hero-logo">
-        <div class="hero-sub">
-            Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
-            <span class="hero-badge">{APP_VERSION}</span>
-            <span class="hero-badge-balanced">BALANCED</span>
+hero_left, hero_right = st.columns([1.15, 1.6])
+
+with hero_left:
+    if _logo_b64:
+        st.markdown(f"""
+        <div class="hero">
+            <img src="data:image/png;base64,{_logo_b64}"
+                 alt="BLACK PYRAMID"
+                 style="width: 190px; max-width: 100%; height: auto; display: block;
+                        filter: drop-shadow(0 6px 20px rgba(230,200,124,0.3));">
+            <div class="hero-sub" style="margin-top: 8px;">
+                Institutional Analysis Terminal
+                <span class="hero-badge">{APP_VERSION}</span>
+                <span class="hero-badge-balanced">BALANCED</span>
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown(f"""
-    <div class="hero">
-        <div class="hero-title">▲ BLACK PYRAMID</div>
-        <div class="hero-sub">
-            Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
-            <span class="hero-badge">{APP_VERSION}</span>
-            <span class="hero-badge-balanced">BALANCED</span>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="hero">
+            <div class="hero-title">▲ BLACK PYRAMID</div>
+            <div class="hero-sub" style="margin-top: 8px;">
+                Institutional Analysis Terminal
+                <span class="hero-badge">{APP_VERSION}</span>
+                <span class="hero-badge-balanced">BALANCED</span>
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+with hero_right:
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
+
+    with b1:
+        if st.button("📅 التقويم", width="stretch", key="btn_info_cal"):
+            st.session_state.show_calendar_today = not st.session_state.show_calendar_today
+            st.session_state.show_session_info = False
+            st.session_state.show_market_status = False
+
+    with b2:
+        if st.button("🕐 الجلسة", width="stretch", key="btn_info_session"):
+            st.session_state.show_session_info = not st.session_state.show_session_info
+            st.session_state.show_calendar_today = False
+            st.session_state.show_market_status = False
+
+    with b3:
+        if st.button("📊 السوق", width="stretch", key="btn_info_market"):
+            st.session_state.show_market_status = not st.session_state.show_market_status
+            st.session_state.show_calendar_today = False
+            st.session_state.show_session_info = False
+
+    with b4:
+        if st.button("🔄 تحديث", width="stretch", key="btn_info_refresh"):
+            st.session_state.economic_events = get_fmp_economic_calendar()
+            st.toast("✅ تم تحديث التقويم الاقتصادي")
+
+
+# --- Expanded info panels below the top row ---
+
+if st.session_state.show_calendar_today:
+    st.markdown("### 📅 أحداث اليوم")
+    if not st.session_state.economic_events:
+        st.info("لا توجد بيانات تقويم. اضغط '🔄 تحديث' أولاً.")
+    else:
+        todays = get_todays_events(st.session_state.economic_events, st.session_state.selected_pair)
+        if not todays:
+            st.success(f"✅ لا توجد أحداث عالية التأثير اليوم لـ {st.session_state.selected_pair}.")
+        else:
+            high_impact = [e for e in todays if e["impact"] in ("high", "3", "high impact")]
+            if high_impact:
+                st.warning(f"⚠️ يوجد {len(high_impact)} حدث عالي التأثير اليوم")
+
+            cal_cols = st.columns(3)
+            for idx, ev in enumerate(todays[:9]):
+                impact = ev["impact"]
+                if impact in ("high", "3", "high impact"):
+                    icon = "🔴"
+                    color = "#f57a7a"
+                elif impact in ("medium", "2"):
+                    icon = "🟡"
+                    color = "#f5c87a"
+                else:
+                    icon = "🟢"
+                    color = "#7cd4a0"
+
+                with cal_cols[idx % 3]:
+                    st.markdown(f"""
+                    <div class="tool-card" style="margin-bottom:12px;">
+                        <div class="tool-name">{icon} {ev['time']} · {ev['country']}</div>
+                        <div class="tool-value" style="font-size:0.95rem; color:{color};">
+                            {ev['event'][:50]}
+                        </div>
+                        <div class="tool-desc">التأثير: <b>{ev['impact'].upper()}</b></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+
+if st.session_state.show_session_info:
+    st.markdown("### 🕐 الجلسة الحالية")
+    sess = get_current_session_info()
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        st.markdown(f"""
+        <div class="tool-card">
+            <div class="tool-name">🌍 الجلسة النشطة</div>
+            <div class="tool-value">{sess['icon']} {sess['session']}</div>
+            <div class="tool-desc">{sess['desc']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with sc2:
+        st.markdown(f"""
+        <div class="tool-card">
+            <div class="tool-name">⏰ التوقيت الحالي</div>
+            <div class="tool-value">{sess['time_utc']}</div>
+            <div class="tool-desc">UTC — توقيت عالمي موحّد</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with sc3:
+        kz_icon = "✅" if "داخل" in sess["kill_zone"] else "⚪"
+        st.markdown(f"""
+        <div class="tool-card">
+            <div class="tool-name">🎯 Kill Zone</div>
+            <div class="tool-value">{kz_icon}</div>
+            <div class="tool-desc">{sess['kill_zone']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+if st.session_state.show_market_status:
+    st.markdown("### 📊 وضع السوق الحالي")
+    _symbol_for_mkt = PAIRS.get(st.session_state.selected_pair, "GC=F")
+    mstat = get_market_status_info(_symbol_for_mkt, st.session_state.selected_pair)
+    if mstat is None:
+        st.warning("تعذر تحميل بيانات وضع السوق.")
+    else:
+        ms1, ms2, ms3, ms4 = st.columns(4)
+        with ms1:
+            st.markdown(f"""
+            <div class="tool-card">
+                <div class="tool-name">📈 الاتجاه العام</div>
+                <div class="tool-value">{mstat['trend_icon']}</div>
+                <div class="tool-desc">{mstat['trend_align']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with ms2:
+            st.markdown(f"""
+            <div class="tool-card">
+                <div class="tool-name">🌊 التقلب</div>
+                <div class="tool-value">{mstat['vol_icon']} {mstat['vol_state']}</div>
+                <div class="tool-desc">ATR ratio: <b>{mstat['atr_ratio']:.2f}×</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+        with ms3:
+            reg_icon = trend_icon(mstat["regime"])
+            st.markdown(f"""
+            <div class="tool-card">
+                <div class="tool-name">🎯 النظام</div>
+                <div class="tool-value">{reg_icon} {mstat['regime']}</div>
+                <div class="tool-desc">الهيكل: <b>{mstat['structure']}</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+        with ms4:
+            st.markdown(f"""
+            <div class="tool-card">
+                <div class="tool-name">⚖️ الحالة العامة</div>
+                <div class="tool-value">{mstat['overall_icon']}</div>
+                <div class="tool-desc">{mstat['overall']}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ============================================================
