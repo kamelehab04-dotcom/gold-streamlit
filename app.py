@@ -1,26 +1,18 @@
 # ============================================================
-# BLACK PYRAMID v2005.3
-# Hierarchical Intelligence Engine — Full Institutional Filters
-# Structure → Regime → Setup → Confirmation → Context → Risk → Edge
-# 13 Institutional Filters Integrated
+# BLACK PYRAMID v2005.4
+# Hierarchical Intelligence Engine — Institutional Filters
+# Structure → Regime → Setup → Confirmation → Context → Edge
 #
-# CHANGELOG v2005.3:
-#  - Vectorized SMC (swings, sweeps, FVG, OB, BOS) → ~50x faster
-#  - has_high_impact_event now respects time window (was blocking whole day)
-#  - session_filter: 'strict' now meaningful for gold & forex
-#  - can_open_trade: confidence optional
-#  - weighted_confluence: clamps inputs safely
-#  - generate_signal & directional_score accept precomputed context
-#  - quick_backtest: precomputes MTF/Weekly/DXY/GoldCorr once → very fast
-#  - quick_backtest now passes correct symbol (was pair_name)
-#  - 13 filters properly surfaced (Kill Switch, Weekly, Weighted Confluence added)
-#  - MSS Conflict filter handled in skip_external mode
-#  - pnl_multiplier documented for gold contract size
+# v2005.4 CHANGELOG:
+#  - Soft Filters became ADVISORIES by default (no penalty)
+#  - Optional Strict Mode: max 8 pts, top 3 filters, diminishing returns
+#  - Grade A+/A/B/C based on RAW confidence + confirmation
+#  - Removed all risk/balance/position-sizing from UI
+#  - Focus: signals + trade logging only
 # ============================================================
 
 import os
 import json
-import math
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import concurrent.futures
@@ -39,11 +31,9 @@ from plotly.subplots import make_subplots
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2005.3"
-TRADES_FILE = Path("trades_data_v2005_3.json")
+APP_VERSION = "v2005.4"
+TRADES_FILE = Path("trades_data_v2005_4.json")
 
-DEFAULT_BALANCE = 100000.0
-DEFAULT_RISK_PERCENT = 1.0
 MAX_DAILY_TRADES = 4
 LOW_CONF_DAILY_LIMIT = 2
 MAX_CONSECUTIVE_LOSSES = 3
@@ -54,7 +44,12 @@ A_PLUS_MIN = 82.0
 A_MIN = 75.0
 B_MIN = 68.0
 C_MIN = 62.0
-MAX_SOFT_PENALTY = 18.0
+
+# v2005.4: Soft filters — أدوات تنبيه لا إجبار
+STRICT_SOFT_FILTERS = False
+MAX_SOFT_PENALTY = 8.0
+SOFT_PENALTY_TOP_N = 3
+
 MIN_RR_TP1 = 1.00
 MIN_RR_TP2 = 1.50
 MIN_RR_TP3 = 2.00
@@ -165,8 +160,6 @@ def get_secret(name: str, default: str = "") -> str:
 
 TWELVE_API_KEY = get_secret("TWELVE_API_KEY")
 FMP_API_KEY = get_secret("FMP_API_KEY")
-TELEGRAM_BOT_TOKEN = get_secret("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = get_secret("TELEGRAM_CHAT_ID")
 
 
 # ============================================================
@@ -184,7 +177,7 @@ def init_state():
         "analyzing_all": False,
         "analysis_time": None,
         "backtest_results": None,
-        "backtest_running": False,
+        "strict_filters": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -254,7 +247,6 @@ def reset_daily_counter():
 
 
 def can_open_trade(confidence=None):
-    """v2005.3: confidence أصبح اختيارياً."""
     reset_daily_counter()
     count = st.session_state.daily_trade_count
     if count >= MAX_DAILY_TRADES:
@@ -495,11 +487,10 @@ def calc_ichimoku(df, tenkan=9, kijun=26, senkou=52):
 
 
 # ============================================================
-# SWING / STRUCTURE  (VECTORIZED)
+# SWING / STRUCTURE (VECTORIZED)
 # ============================================================
 
 def find_confirmed_swings(df, order=3):
-    """v2005.3: متجهي بالكامل باستخدام rolling(center=True)."""
     out = df.copy()
     window = 2 * order + 1
     if len(out) < window:
@@ -540,7 +531,6 @@ def structure_state(df):
 
 
 def detect_bos_mss(df):
-    """v2005.3: أسرع ~30x — تتبع تزايدي بدل .loc داخل كل دورة."""
     out = df.copy()
     n = len(out)
     bos_bull = np.zeros(n, dtype=bool)
@@ -578,13 +568,13 @@ def detect_bos_mss(df):
             if state == "BEARISH":
                 mss_bull[i] = True
             state = "BULLISH"
-            last_high = np.nan  # consumed
+            last_high = np.nan
         elif np.isfinite(last_low) and c < last_low:
             bos_bear[i] = True
             if state == "BULLISH":
                 mss_bear[i] = True
             state = "BEARISH"
-            last_low = np.nan  # consumed
+            last_low = np.nan
 
     out["bos_bullish"] = bos_bull
     out["bos_bearish"] = bos_bear
@@ -594,11 +584,10 @@ def detect_bos_mss(df):
 
 
 # ============================================================
-# LIQUIDITY / FVG / OB  (VECTORIZED)
+# LIQUIDITY / FVG / OB (VECTORIZED)
 # ============================================================
 
 def detect_liquidity_sweeps(df, tolerance_atr=0.10):
-    """v2005.3: متجهي."""
     out = df.copy()
     tol = out["atr"] * tolerance_atr
     prev_high = out["high"].rolling(3).max().shift(1)
@@ -611,7 +600,6 @@ def detect_liquidity_sweeps(df, tolerance_atr=0.10):
 
 
 def detect_fvg(df):
-    """v2005.3: متجهي."""
     out = df.copy()
     bull_fvg = out["low"] > out["high"].shift(2)
     bear_fvg = out["high"] < out["low"].shift(2)
@@ -627,7 +615,6 @@ def detect_fvg(df):
 
 
 def detect_order_blocks(df):
-    """v2005.3: متجهي."""
     out = df.copy()
     body = (out["close"] - out["open"]).abs()
     strong = body >= 1.20 * out["atr"]
@@ -863,7 +850,6 @@ def detect_regime(df):
 # INSTITUTIONAL FILTERS
 # ============================================================
 
-# ---------- FILTER 1: HTF Zone ----------
 @st.cache_data(ttl=180, show_spinner=False)
 def htf_zone_filter(symbol, direction, profile_key):
     try:
@@ -888,7 +874,6 @@ def htf_zone_filter(symbol, direction, profile_key):
         return True, "HTF فشل التحميل", "UNKNOWN"
 
 
-# ---------- FILTER 2: LTF Trigger ----------
 @st.cache_data(ttl=180, show_spinner=False)
 def ltf_entry_trigger(symbol, direction, profile_key):
     try:
@@ -922,9 +907,7 @@ def ltf_entry_trigger(symbol, direction, profile_key):
         return True, "LTF فشل — مسموح"
 
 
-# ---------- FILTER 3: Session  (FIXED strict) ----------
 def session_filter(pair_name, strict=True):
-    """v2005.3: 'strict' صار فعّالاً للأصول كلها، بما فيها الذهب."""
     now_utc = datetime.now(timezone.utc).hour
     london_open = 7 <= now_utc <= 16
     ny_open = 12 <= now_utc <= 21
@@ -957,7 +940,6 @@ def session_filter(pair_name, strict=True):
     return True, "خارج الجلسات (غير مشدّد)", "OFF_HOURS"
 
 
-# ---------- FILTER 4: Volatility ----------
 def volatility_regime_filter(df):
     atr = df["atr"].dropna() if "atr" in df.columns else pd.Series()
     if len(atr) < 100:
@@ -979,7 +961,6 @@ def volatility_regime_filter(df):
     return True, f"تقلب طبيعي (Z={z:.1f})", "NORMAL"
 
 
-# ---------- FILTER 5: Weighted Confluence  (FIXED clamp) ----------
 def weighted_confluence(pillar_data, direction):
     weights = {"structure": 30, "trend": 20, "context": 20,
                "momentum": 15, "volume": 15}
@@ -993,7 +974,28 @@ def weighted_confluence(pillar_data, direction):
     return clamp(total, 0, 100)
 
 
-# ---------- FILTER 6: Correlation Guard ----------
+# ---------- v2005.4: Soft Penalty Engine ----------
+def compute_soft_penalty(penalty_items, strict=False):
+    """
+    penalty_items: list of (name, points) tuples
+    strict=False → 0 penalty (advisories only)
+    strict=True  → top N penalties with diminishing returns
+    """
+    if not penalty_items:
+        return 0.0, []
+    if not strict:
+        return 0.0, []
+
+    sorted_items = sorted(
+        [item for item in penalty_items if item[1] > 0],
+        key=lambda x: x[1], reverse=True
+    )[:SOFT_PENALTY_TOP_N]
+
+    weights = [1.0, 0.5, 0.25]
+    total = sum(p * w for (_, p), w in zip(sorted_items, weights))
+    return min(total, MAX_SOFT_PENALTY), sorted_items
+
+
 def correlation_guard(new_symbol, direction, open_trades):
     for group, symbols in CORRELATION_GROUPS.items():
         if new_symbol not in symbols:
@@ -1005,7 +1007,6 @@ def correlation_guard(new_symbol, direction, open_trades):
     return True, "لا تعارض ارتباطي"
 
 
-# ---------- FILTER 7: News Window ----------
 def news_time_block(events, pair_name, window_minutes=45):
     if not events:
         return False, ""
@@ -1043,7 +1044,6 @@ def news_time_block(events, pair_name, window_minutes=45):
     return False, ""
 
 
-# ---------- FILTER 8: Displacement ----------
 def displacement_check(df, direction):
     if len(df) < 2:
         return False, "بيانات غير كافية"
@@ -1061,7 +1061,6 @@ def displacement_check(df, direction):
     return True, f"Displacement {body/atr:.1f}x ATR ✅"
 
 
-# ---------- FILTER 9: Kill Zone ----------
 def in_kill_zone(asset_type):
     hour = datetime.now(timezone.utc).hour
     if asset_type == "crypto":
@@ -1072,7 +1071,6 @@ def in_kill_zone(asset_type):
     return False, "خارج Kill Zones"
 
 
-# ---------- FILTER 10: OTE ----------
 def ote_filter(df, direction):
     swings_h = get_last_two_swings(df, "high")
     swings_l = get_last_two_swings(df, "low")
@@ -1096,7 +1094,6 @@ def ote_filter(df, direction):
         return False, f"خارج OTE ({retr*100:.0f}%)"
 
 
-# ---------- FILTER 12: Kill Switch ----------
 def kill_switch_check(closed_trades, max_consecutive=MAX_CONSECUTIVE_LOSSES,
                       max_daily_r=MAX_DAILY_DRAWDOWN_R):
     if not closed_trades:
@@ -1112,21 +1109,9 @@ def kill_switch_check(closed_trades, max_consecutive=MAX_CONSECUTIVE_LOSSES,
                 return False, f"🛑 Kill Switch: {consecutive} خسائر متتالية"
         else:
             break
-    daily_r = 0.0
-    for t in today_trades:
-        entry = safe_float(t.get("entry"), 0)
-        sl = safe_float(t.get("stop_loss"), 0)
-        risk = abs(entry - sl)
-        if risk <= 0:
-            continue
-        pnl = float(t.get("pnl", 0))
-        daily_r += (pnl / risk) if risk > 0 else 0
-    if daily_r <= -max_daily_r:
-        return False, f"🛑 Kill Switch: Drawdown {daily_r:.1f}R"
     return True, ""
 
 
-# ---------- FILTER 13: Weekly Bias ----------
 @st.cache_data(ttl=600, show_spinner=False)
 def weekly_bias(symbol, pair_name):
     df = get_historical_data(symbol, "2y", "1wk")
@@ -1154,7 +1139,7 @@ def weekly_bias(symbol, pair_name):
 
 
 # ============================================================
-# 5-PILLAR SCORING  (accepts precomputed DXY / GoldCorr)
+# 5-PILLAR SCORING
 # ============================================================
 
 PILLAR_WEIGHTS = {"structure": 0.30, "trend": 0.20, "momentum": 0.15,
@@ -1211,7 +1196,6 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None):
         if last["close"] > last["open"]: scores["BUY"]["volume"] += 20
         elif last["close"] < last["open"]: scores["SELL"]["volume"] += 20
 
-    # Context — with precomputed values
     if dxy_bias is None:
         dxy_bias, _, _ = get_dxy_context()
     usd_impact, usd_msg = get_pair_usd_context(pair_name, dxy_bias=dxy_bias)
@@ -1317,7 +1301,7 @@ def execution_permission(raw_confidence, confirmation_score,
 
 
 # ============================================================
-# RISK ENGINE
+# RISK ENGINE (internal — no UI exposure)
 # ============================================================
 
 def latest_structure_levels(df):
@@ -1389,41 +1373,18 @@ def validate_levels(signal, levels, profile):
     return True, ""
 
 
-def calculate_position_size(pair_name, entry, stop, balance, risk_percent):
-    risk_money = balance * (risk_percent / 100.0)
-    distance = abs(entry - stop)
-    if distance <= 0 or risk_money <= 0: return 0.0
-    asset = asset_type_from_name(pair_name)
-    if asset == "forex":
-        pip_size = 0.01 if "JPY" in pair_name else 0.0001
-        contract_size = 100000.0
-        quote_is_usd = pair_name.endswith("/USD")
-        loss_per_lot = (distance / pip_size * (pip_size * contract_size)
-                        if quote_is_usd else distance * contract_size)
-    elif asset == "gold":
-        loss_per_lot = distance * 100.0
-    else:
-        loss_per_lot = distance * 1.0
-    if loss_per_lot <= 0: return 0.0
-    lots = risk_money / loss_per_lot
-    if asset == "forex": return round(clamp(lots, 0.01, 100.0), 2)
-    if asset == "gold": return round(clamp(lots, 0.01, 100.0), 2)
-    return round(clamp(lots, 0.0001, 100.0), 4)
-
-
 # ============================================================
-# FINAL SIGNAL ENGINE  (accepts precomputed context)
+# FINAL SIGNAL ENGINE (v2005.4)
 # ============================================================
 
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, daily_allowed=True,
                     open_trades=None, skip_external_filters=False,
-                    precomputed=None):
+                    precomputed=None, strict_soft=False):
     profile = profile_for(pair_name)
     profile_key = get_asset_profile(pair_name)
     df = build_features(df, profile)
 
-    # -------- Context: precomputed OR fetch --------
     if precomputed is None:
         mtf_bias, mtf_conf, mtf_details = get_mtf_analysis(symbol, pair_name)
         wk_bias, _ = weekly_bias(symbol, pair_name)
@@ -1483,12 +1444,14 @@ def generate_signal(df, current_price, pair_name, symbol,
         df, candidate, pillars, scores["regime"], mtf_bias, mtf_conf, profile, wk_bias)
 
     filter_results = {}
-    soft_penalties = 10 if mss_conflict and signal in ("BUY", "SELL") else 0
+    soft_penalty_items = []  # v2005.4
 
-    # --- MSS Conflict filter (always computed, but only penalizes, never blocks) ---
+    if mss_conflict and signal in ("BUY", "SELL"):
+        soft_penalty_items.append(("MSS Conflict", 10))
+
     filter_results["MSS Conflict"] = {
         "pass": not mss_conflict,
-        "msg": "MSS معاكس — خصم جودة" if mss_conflict else "MSS متوافق"
+        "msg": "MSS معاكس — تنبيه" if mss_conflict else "MSS متوافق"
     }
 
     all_passed = True
@@ -1501,7 +1464,6 @@ def generate_signal(df, current_price, pair_name, symbol,
     if skip_external_filters:
         for _name in external_filter_names:
             filter_results[_name] = {"pass": True, "msg": "Backtest — skipped"}
-        # external filters skipped → no hard block from them
         ntw_block = False
     else:
         htf_ok, htf_msg, htf_zone = htf_zone_filter(symbol, candidate, profile_key)
@@ -1512,12 +1474,14 @@ def generate_signal(df, current_price, pair_name, symbol,
 
         ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
         filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
-        if not ltf_ok: soft_penalties += 6
+        if not ltf_ok:
+            soft_penalty_items.append(("LTF Trigger", 6))
 
         sess_ok, sess_msg, sess_label = session_filter(
             pair_name, strict=(profile_key != "crypto"))
         filter_results["Session"] = {"pass": sess_ok, "msg": sess_msg, "label": sess_label}
-        if not sess_ok: soft_penalties += 5
+        if not sess_ok:
+            soft_penalty_items.append(("Session", 5))
 
         vol_ok, vol_msg, vol_label = volatility_regime_filter(df)
         filter_results["Volatility"] = {"pass": vol_ok, "msg": vol_msg, "label": vol_label}
@@ -1526,19 +1490,22 @@ def generate_signal(df, current_price, pair_name, symbol,
                 all_passed = False
                 block_reason = block_reason or vol_msg
             else:
-                soft_penalties += 8
+                soft_penalty_items.append(("Volatility", 8))
 
         kz_ok, kz_msg = in_kill_zone(asset_type_from_name(pair_name))
         filter_results["Kill Zone"] = {"pass": kz_ok, "msg": kz_msg}
-        if not kz_ok: soft_penalties += 3
+        if not kz_ok:
+            soft_penalty_items.append(("Kill Zone", 3))
 
         ote_ok, ote_msg = ote_filter(df, candidate)
         filter_results["OTE"] = {"pass": ote_ok, "msg": ote_msg}
-        if not ote_ok: soft_penalties += 5
+        if not ote_ok:
+            soft_penalty_items.append(("OTE", 5))
 
         disp_ok, disp_msg = displacement_check(df, candidate)
         filter_results["Displacement"] = {"pass": disp_ok, "msg": disp_msg}
-        if not disp_ok: soft_penalties += 5
+        if not disp_ok:
+            soft_penalty_items.append(("Displacement", 5))
 
         corr_ok, corr_msg = correlation_guard(symbol, candidate, open_trades or [])
         filter_results["Correlation"] = {"pass": corr_ok, "msg": corr_msg}
@@ -1555,10 +1522,7 @@ def generate_signal(df, current_price, pair_name, symbol,
             all_passed = False
             block_reason = block_reason or ntw_msg
 
-    # v2005.3: Add 3 more filters to reach the 13-filter set
-    ks_ok_now, ks_msg_now = kill_switch_check(
-        [])
-    # we don't have closed_trades here; leave as informational "pass"
+    # Additional informational filters (13 total)
     filter_results["Kill Switch"] = {
         "pass": True, "msg": "يعمل على مستوى الواجهة"
     }
@@ -1576,19 +1540,25 @@ def generate_signal(df, current_price, pair_name, symbol,
         "msg": f"Confluence: {w_confluence:.0f}/100"
     }
 
-    soft_penalties = min(float(soft_penalties), MAX_SOFT_PENALTY)
-    effective_confidence = clamp(confidence - soft_penalties, 50, 95)
+    # ---- v2005.4: Penalty & Grade ----
+    raw_confidence = confidence
+    penalty_total, applied_penalties = compute_soft_penalty(
+        soft_penalty_items, strict=strict_soft)
+    effective_confidence = clamp(raw_confidence - penalty_total, 50, 95)
 
-    if effective_confidence >= A_PLUS_MIN and conf_score >= 78:
+    if raw_confidence >= A_PLUS_MIN and conf_score >= 78:
         trade_grade = "A+"
-    elif effective_confidence >= A_MIN and conf_score >= 70:
+    elif raw_confidence >= A_MIN and conf_score >= 70:
         trade_grade = "A"
-    elif effective_confidence >= B_MIN and conf_score >= 62:
+    elif raw_confidence >= B_MIN and conf_score >= 62:
         trade_grade = "B"
-    elif effective_confidence >= C_MIN and conf_score >= 55:
+    elif raw_confidence >= C_MIN and conf_score >= 55:
         trade_grade = "C"
     else:
         trade_grade = "WAIT"
+
+    if strict_soft and penalty_total > 5 and trade_grade in ("A+", "A"):
+        trade_grade = "B"
 
     execution_status, execution_reason = execution_permission(
         effective_confidence, conf_score, news_block, risk_ok, daily_allowed,
@@ -1612,6 +1582,8 @@ def generate_signal(df, current_price, pair_name, symbol,
         execution_status = "WAIT"
         execution_reason = "Confirmation Gate لم يجتز"
 
+    advisories_str = ", ".join(f"{n}({p})" for n, p in soft_penalty_items) or "None"
+
     details = {
         "BUY Score": round(buy, 1), "SELL Score": round(sell, 1),
         "MTF": mtf_bias, "MTF Confidence": round(mtf_conf, 1),
@@ -1622,12 +1594,17 @@ def generate_signal(df, current_price, pair_name, symbol,
         "Risk Gate": "PASS" if risk_ok else risk_msg,
         "Confirmation Score": round(conf_score, 1),
         "Confirmation Gate": "PASS" if conf_ok else "SOFT-FAIL" if trade_grade in ("A+", "A", "B") else "FAIL",
-        "Trade Grade": trade_grade, "Soft Penalties": soft_penalties,
+        "Trade Grade": trade_grade,
+        "Raw Confidence": round(raw_confidence, 1),
+        "Soft Penalties": round(penalty_total, 1),
+        "Soft Advisories": advisories_str,
+        "Strict Mode": "ON" if strict_soft else "OFF",
         "Execution": execution_status, "Execution Note": execution_reason,
     }
 
     return {
         "signal": signal, "confidence": confidence,
+        "raw_confidence": raw_confidence,
         "buy_score": buy, "sell_score": sell, "net_score": buy - sell,
         "confluence": confluence, "weighted_confluence": w_confluence,
         "details": details, "reasons": scores["reasons"] + conf_reasons,
@@ -1637,26 +1614,25 @@ def generate_signal(df, current_price, pair_name, symbol,
         "confirmation_ok": conf_ok, "confirmation_score": conf_score,
         "confirmation_reasons": conf_reasons, "confirmation_blockers": conf_blockers,
         "execution_status": execution_status, "execution_reason": execution_reason,
-        "trade_grade": trade_grade, "soft_penalties": soft_penalties,
+        "trade_grade": trade_grade, "soft_penalties": penalty_total,
+        "soft_advisories": advisories_str,
         "filter_results": filter_results, "all_filters_passed": all_passed,
         "filter_block_reason": block_reason,
     }
 
 
 # ============================================================
-# BACKTEST ENGINE  (v2005.3 — precomputed context)
+# BACKTEST
 # ============================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
 def quick_backtest(symbol, pair_name, lookback=200):
-    """v2005.3: يُحسب MTF/Weekly/DXY/GoldCorr مرة واحدة خارج الحلقة."""
     try:
         df = get_historical_data(symbol, "1y", "4h")
         if df is None or len(df) < lookback + 50:
             return None
         profile = profile_for(pair_name)
 
-        # ---- Precompute context ONCE ----
         try:
             mtf_bias, mtf_conf, mtf_details = get_mtf_analysis(symbol, pair_name)
         except Exception:
@@ -1696,7 +1672,6 @@ def quick_backtest(symbol, pair_name, lookback=200):
                 continue
             if result["signal"] == "WAIT" or result["levels"] is None:
                 continue
-            entry = result["levels"]["entry"]
             sl = result["levels"]["stop_loss"]
             t1 = result["levels"]["target1"]
             direction = result["signal"]
@@ -1731,20 +1706,6 @@ def quick_backtest(symbol, pair_name, lookback=200):
 # ============================================================
 # TRADE MANAGER
 # ============================================================
-
-def pnl_multiplier(pair_name):
-    """
-    Contract-size multiplier for P&L calculation (units per 1.0 lot).
-    - Forex : 1 standard lot = 100,000 base units.
-    - Gold  : 1 lot = 100 oz (common XAU/USD CFD spec).
-              ⚠️ عدّلها حسب وسيطك (بعض الوسطاء 10 أو 1000 أونصة).
-    - Crypto: 1 unit.
-    """
-    asset = asset_type_from_name(pair_name)
-    if asset == "forex": return 100000.0
-    if asset == "gold": return 100.0
-    return 1.0
-
 
 class TradeManager:
     def __init__(self, path=TRADES_FILE):
@@ -1791,19 +1752,25 @@ class TradeManager:
         for trade in list(self.open_trades):
             if trade["id"] != tid: continue
             entry = float(trade["entry"])
-            lots = float(trade["lots"])
-            mult = pnl_multiplier(trade.get("pair_name", ""))
-            pnl = ((current_price - entry) * lots * mult if trade["direction"] == "BUY"
-                   else (entry - current_price) * lots * mult)
+            direction = trade["direction"]
+            # حفظ نتيجة الإغلاق بدون P&L نقدي (لأننا حذفنا حجم المخاطرة)
+            r_multiple = 0.0
+            sl = safe_float(trade.get("stop_loss"), np.nan)
+            risk = abs(entry - sl) if np.isfinite(sl) else 0
+            if risk > 0:
+                if direction == "BUY":
+                    r_multiple = (current_price - entry) / risk
+                else:
+                    r_multiple = (entry - current_price) / risk
             trade["status"] = "closed"
             trade["close_price"] = current_price
             trade["close_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             trade["close_reason"] = reason
-            trade["pnl"] = pnl
+            trade["r_multiple"] = r_multiple
             self.closed_trades.append(trade)
             self.open_trades.remove(trade)
             self.save()
-            return pnl
+            return r_multiple
         return None
 
     def monitor_trade(self, tid, current_price, atr=None):
@@ -1903,7 +1870,7 @@ def get_all_signals_parallel():
 
 
 # ============================================================
-# NEWS / CALENDAR
+# NEWS
 # ============================================================
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1922,7 +1889,6 @@ def get_fmp_economic_calendar():
 
 
 def has_high_impact_event(events, pair_name, window_minutes=45):
-    """v2005.3: يحترم النافذة الزمنية (كان سابقًا يحظر اليوم بأكمله)."""
     return news_time_block(events, pair_name, window_minutes=window_minutes)[0]
 
 
@@ -2001,14 +1967,14 @@ st.markdown(f"""
 <div class="main-header">
     <div class="main-title">▲ BLACK PYRAMID {APP_VERSION} ▲</div>
     <div class="main-subtitle">
-        Institutional Intelligence • Hard Gates + Quality Filters • Structure • MTF • SMC • Confirmation • Risk • Edge
+        Institutional Intelligence • Hard Gates + Quality Filters • Structure • MTF • SMC • Confirmation • Edge
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 
 # ============================================================
-# MAIN CONTROLS
+# SIDEBAR — v2005.4: بدون رصيد ولا مخاطرة
 # ============================================================
 
 with st.sidebar:
@@ -2020,16 +1986,25 @@ with st.sidebar:
         if st.session_state.selected_pair in PAIRS else 0)
     st.session_state.selected_pair = selected_pair
     symbol = PAIRS[selected_pair]
-    balance = st.number_input("رصيد الحساب", min_value=100.0,
-                              value=DEFAULT_BALANCE, step=100.0)
-    risk_percent = st.number_input("المخاطرة %", min_value=0.1, max_value=5.0,
-                                   value=DEFAULT_RISK_PERCENT, step=0.1)
+
+    st.markdown("---")
+    st.markdown("### 🎛️ وضع الفلاتر الثانوية")
+    strict_mode = st.checkbox(
+        "🔒 تشديد الفلاتر الثانوية (Strict)",
+        value=st.session_state.get("strict_filters", False),
+        help="عند التفعيل: أقصى 8 نقاط خصم لأهم 3 فلاتر (Diminishing Returns).\n"
+             "عند الإيقاف: الفلاتر الثانوية تُظهر تنبيهات فقط."
+    )
+    st.session_state.strict_filters = strict_mode
+
     if st.button("🔄 مسح الكاش", width="stretch"):
         st.cache_data.clear(); st.rerun()
+
     st.metric("صفقات اليوم", f"{st.session_state.daily_trade_count}/{MAX_DAILY_TRADES}")
+
     st.markdown("---")
-    st.caption("Hard Gates: Risk • News • HTF • Correlation • Chaos")
-    st.caption("Soft Quality: LTF • Session • OTE • Displacement • Kill Zone")
+    st.caption("**Hard Gates:** Risk • News • HTF • Correlation • Chaos")
+    st.caption("**Soft Advisories:** LTF • Session • OTE • Displacement • Kill Zone • MSS")
 
 
 # ============================================================
@@ -2105,22 +2080,25 @@ if df_raw is None:
 news_block, _ = news_time_block(
     st.session_state.economic_events or [], selected_pair)
 
-daily_allowed, daily_msg = can_open_trade()   # v2005.3: no fake confidence
+daily_allowed, daily_msg = can_open_trade()
 ks_ok, _ = kill_switch_check(_manager_temp.closed_trades)
 if not ks_ok:
     daily_allowed = False
 
+strict_soft = st.session_state.get("strict_filters", False)
+
 result = generate_signal(
     df_raw, current_price, selected_pair, symbol,
     news_block=news_block, daily_allowed=daily_allowed,
-    open_trades=_manager_temp.open_trades)
+    open_trades=_manager_temp.open_trades,
+    strict_soft=strict_soft)
 
 df = result["df"]; levels = result["levels"]
 signal = result["signal"]; confidence = result["confidence"]
 
 
 # ============================================================
-# PRICE
+# PRICE BAR
 # ============================================================
 
 c1, c2, c3, c4 = st.columns(4)
@@ -2148,10 +2126,30 @@ st.markdown(f"""
 
 
 # ============================================================
-# 13 FILTERS STATUS  (v2005.3 — كل الفلاتر ظاهرة)
+# v2005.4: SOFT ADVISORIES BANNER
 # ============================================================
 
-st.markdown("### 🎛️ الفلاتر المؤسسية (13) + جودة الإشارة")
+soft_adv = result.get("soft_advisories", "None")
+strict_now = st.session_state.get("strict_filters", False)
+
+if soft_adv and soft_adv != "None":
+    if not strict_now:
+        st.info(
+            f"💡 **تنبيهات فلاتر ثانوية (لا تؤثر على التنفيذ):** {soft_adv}\n\n"
+            f"فعّل **🔒 تشديد الفلاتر الثانوية** من الشريط الجانبي لتطبيقها كعقوبات "
+            f"(أقصى {MAX_SOFT_PENALTY:.0f} نقاط لأهم {SOFT_PENALTY_TOP_N} فلاتر)."
+        )
+    else:
+        st.warning(
+            f"⚠️ **Strict Mode — عقوبات مطبَّقة ({result['soft_penalties']:.1f} نقطة):** {soft_adv}"
+        )
+
+
+# ============================================================
+# 13 FILTERS
+# ============================================================
+
+st.markdown("### 🎛️ الفلاتر المؤسسية (13)")
 
 filters = result["filter_results"]
 filter_items = list(filters.items())
@@ -2172,7 +2170,7 @@ for row_start in range(0, len(filter_items), 4):
         """, unsafe_allow_html=True)
 
 if not result["all_filters_passed"]:
-    st.error(f"🚫 **مانع التنفيذ:** {result['filter_block_reason']}")
+    st.error(f"🚫 **مانع التنفيذ (Hard Gate):** {result['filter_block_reason']}")
 
 
 # ============================================================
@@ -2198,7 +2196,7 @@ gc1, gc2, gc3, gc4 = st.columns(4)
 gc1.metric("Confirmation Score", f"{result['confirmation_score']:.1f}/100")
 gc2.metric("Gate", "✅ PASS" if result["confirmation_ok"] else "⚠️ SOFT" if result.get("trade_grade") in ("A+", "A", "B") else "❌ FAIL")
 gc3.metric("Grade", result.get("trade_grade", "WAIT"))
-gc4.metric("Execution", result["execution_status"])
+gc4.metric("Raw / Effective", f"{result['raw_confidence']:.1f} / {result['confidence']:.1f}")
 
 with st.expander("تفاصيل التأكيد والموانع", expanded=False):
     for r in result["confirmation_reasons"]:
@@ -2226,6 +2224,30 @@ st.caption(result["details"].get("USD Context", ""))
 
 
 # ============================================================
+# DIAGNOSTICS
+# ============================================================
+
+with st.expander("🔍 لماذا الإشارة WAIT؟ (تشخيص)", expanded=False):
+    diag = []
+    diag.append(f"**BUY Score:** {result['buy_score']:.1f}")
+    diag.append(f"**SELL Score:** {result['sell_score']:.1f}")
+    diag.append(f"**Gap:** {abs(result['buy_score'] - result['sell_score']):.1f} (min 8)")
+    diag.append(f"**Confirmation:** {result['confirmation_score']:.1f}")
+    diag.append(f"**Confirmation Blockers:** {result['confirmation_blockers']}")
+    diag.append(f"**Trade Grade:** {result['trade_grade']}")
+    diag.append(f"**Raw Confidence:** {result['raw_confidence']:.1f}")
+    diag.append(f"**Effective Confidence:** {result['confidence']:.1f}")
+    diag.append(f"**Soft Penalties:** {result['soft_penalties']:.1f}")
+    diag.append(f"**Soft Advisories:** {result['soft_advisories']}")
+    diag.append(f"**Strict Mode:** {result['details'].get('Strict Mode', 'OFF')}")
+    diag.append(f"**Execution Status:** {result['execution_status']}")
+    diag.append(f"**Reason:** {result['execution_reason']}")
+    diag.append(f"**Filters Blocked:** {result['filter_block_reason'] or 'None'}")
+    for d in diag:
+        st.markdown(f"- {d}")
+
+
+# ============================================================
 # DECISION REASONS
 # ============================================================
 
@@ -2233,12 +2255,10 @@ st.markdown("### 📝 أسباب القرار")
 if result["reasons"]:
     for reason in result["reasons"][:12]:
         st.markdown(f"- {reason}")
-for k, v in result["details"].items():
-    st.markdown(f"**{k}:** {v}")
 
 
 # ============================================================
-# TRADE PLAN
+# TRADE PLAN (بدون حجم/رصيد)
 # ============================================================
 
 st.markdown("### 🎯 خطة الصفقة")
@@ -2253,10 +2273,6 @@ if signal in ("BUY", "SELL") and levels:
     r2.metric("RR TP2", f"1:{levels['risk_reward_2']:.2f}")
     r3.metric("RR TP3", f"1:{levels['risk_reward_3']:.2f}")
 
-    lots = calculate_position_size(selected_pair, levels["entry"],
-                                    levels["stop_loss"], balance, risk_percent)
-    st.success(f"الحجم: **{lots}** — مخاطرة {risk_percent:.2f}%")
-
     allowed, reason = can_open_trade(confidence)
     if not ks_ok:
         st.error("🛑 Kill Switch مُفعّل — لا يُسمح بصفقات جديدة")
@@ -2265,14 +2281,17 @@ if signal in ("BUY", "SELL") and levels:
     elif not allowed:
         st.warning(reason)
     else:
-        if st.button("➕ إضافة الصفقة إلى Paper Trade", width="stretch"):
+        if st.button("➕ تسجيل الصفقة", width="stretch"):
             manager = TradeManager()
             trade = {
                 "symbol": symbol, "pair_name": selected_pair,
-                "direction": signal, "entry": levels["entry"], "lots": lots,
-                "stop_loss": levels["stop_loss"], "target1": levels["target1"],
-                "target2": levels["target2"], "target3": levels["target3"],
-                "take_profit": levels["target2"], "confidence": confidence,
+                "direction": signal, "entry": levels["entry"],
+                "stop_loss": levels["stop_loss"],
+                "target1": levels["target1"],
+                "target2": levels["target2"],
+                "target3": levels["target3"],
+                "confidence": confidence,
+                "raw_confidence": result["raw_confidence"],
                 "confluence": result["confluence"],
                 "weighted_confluence": result["weighted_confluence"],
                 "risk_reward": levels["risk_reward_3"],
@@ -2323,7 +2342,7 @@ if st.session_state.backtest_results:
 
 
 # ============================================================
-# OPEN TRADES
+# OPEN TRADES (بدون P&L نقدي — فقط R-multiple)
 # ============================================================
 
 st.markdown("### 💼 الصفقات المفتوحة")
@@ -2331,7 +2350,8 @@ manager = TradeManager()
 if manager.open_trades:
     for trade in manager.open_trades:
         with st.container(border=True):
-            st.markdown(f"**{trade['id']} — {trade['pair_name']} — {trade['direction']}**")
+            st.markdown(f"**{trade['id']} — {trade['pair_name']} — {trade['direction']}** "
+                        f"({trade.get('trade_grade', '?')})")
             a, b, c, d = st.columns(4)
             a.metric("Entry", fmt_price(trade["entry"], trade["pair_name"]))
             b.metric("SL", fmt_price(trade["stop_loss"], trade["pair_name"]))
@@ -2346,11 +2366,43 @@ if manager.open_trades:
             close_col, _ = st.columns([1, 2])
             if close_col.button(f"❌ إغلاق {trade['id']}",
                                 key=f"close_{trade['id']}", width="stretch"):
-                pnl = manager.close_trade(trade["id"], current_price, "manual")
-                st.success(f"تم الإغلاق. P&L: {pnl:.2f}")
+                r_val = manager.close_trade(trade["id"], current_price, "manual")
+                if r_val is not None:
+                    st.success(f"تم الإغلاق. R-multiple: {r_val:+.2f}R")
                 st.rerun()
 else:
     st.info("لا توجد صفقات مفتوحة.")
+
+
+# ============================================================
+# CLOSED TRADES SUMMARY
+# ============================================================
+
+if manager.closed_trades:
+    with st.expander(f"📊 سجل الصفقات المُغلقة ({len(manager.closed_trades)})"):
+        rows = []
+        for t in manager.closed_trades[-30:]:
+            rows.append({
+                "ID": t.get("id", ""),
+                "الزوج": t.get("pair_name", ""),
+                "الاتجاه": t.get("direction", ""),
+                "Grade": t.get("trade_grade", ""),
+                "Entry": t.get("entry", ""),
+                "Close": t.get("close_price", ""),
+                "R": round(t.get("r_multiple", 0), 2),
+                "السبب": t.get("close_reason", ""),
+                "التاريخ": t.get("close_time", ""),
+            })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            total_r = sum(t.get("r_multiple", 0) for t in manager.closed_trades)
+            wins = sum(1 for t in manager.closed_trades if t.get("r_multiple", 0) > 0)
+            losses = sum(1 for t in manager.closed_trades if t.get("r_multiple", 0) < 0)
+            cc1, cc2, cc3, cc4 = st.columns(4)
+            cc1.metric("عدد الصفقات", len(manager.closed_trades))
+            cc2.metric("رابحة", wins)
+            cc3.metric("خاسرة", losses)
+            cc4.metric("إجمالي R", f"{total_r:+.2f}R")
 
 
 # ============================================================
@@ -2363,16 +2415,21 @@ if st.button("فتح نموذج الصفقة اليدوية", width="stretch"):
     st.session_state.show_manual = not st.session_state.show_manual
 
 if st.session_state.show_manual:
-    with st.form("manual_trade_v2005"):
+    with st.form("manual_trade_v2005_4"):
         direction = st.selectbox("الاتجاه", ["BUY", "SELL"])
         entry = st.number_input("Entry", value=float(current_price), min_value=0.000001)
         stop = st.number_input("Stop Loss",
             value=float(current_price * 0.99 if direction == "BUY" else current_price * 1.01),
             min_value=0.000001)
-        t1 = st.number_input("TP1", value=float(current_price * (1.01 if direction == "BUY" else 0.99)), min_value=0.000001)
-        t2 = st.number_input("TP2", value=float(current_price * (1.02 if direction == "BUY" else 0.98)), min_value=0.000001)
-        t3 = st.number_input("TP3", value=float(current_price * (1.03 if direction == "BUY" else 0.97)), min_value=0.000001)
-        manual_lots = st.number_input("Lots (0 = auto)", min_value=0.0, value=0.0, step=0.01)
+        t1 = st.number_input("TP1",
+            value=float(current_price * (1.01 if direction == "BUY" else 0.99)),
+            min_value=0.000001)
+        t2 = st.number_input("TP2",
+            value=float(current_price * (1.02 if direction == "BUY" else 0.98)),
+            min_value=0.000001)
+        t3 = st.number_input("TP3",
+            value=float(current_price * (1.03 if direction == "BUY" else 0.97)),
+            min_value=0.000001)
         submitted = st.form_submit_button("إضافة")
         if submitted:
             valid = ((direction == "BUY" and stop < entry < t1 < t2 < t3)
@@ -2385,24 +2442,20 @@ if st.session_state.show_manual:
             elif not allowed_m:
                 st.warning(reason_m)
             else:
-                lots = manual_lots if manual_lots > 0 else calculate_position_size(
-                    selected_pair, entry, stop, balance, risk_percent)
-                if lots <= 0:
-                    st.error("تعذر حساب الحجم.")
-                else:
-                    mgr = TradeManager()
-                    tid = mgr.add_trade({
-                        "symbol": symbol, "pair_name": selected_pair,
-                        "direction": direction, "entry": entry, "lots": lots,
-                        "stop_loss": stop, "target1": t1, "target2": t2, "target3": t3,
-                        "take_profit": t2, "confidence": 0, "confluence": 0,
-                        "risk_reward": abs(t3 - entry) / max(abs(entry - stop), 1e-12),
-                        "notes": "Manual",
-                    })
-                    st.success(f"تمت إضافة {tid}.")
-                    st.session_state.daily_trade_count += 1
-                    st.session_state.show_manual = False
-                    st.rerun()
+                mgr = TradeManager()
+                tid = mgr.add_trade({
+                    "symbol": symbol, "pair_name": selected_pair,
+                    "direction": direction, "entry": entry,
+                    "stop_loss": stop,
+                    "target1": t1, "target2": t2, "target3": t3,
+                    "confidence": 0, "confluence": 0,
+                    "risk_reward": abs(t3 - entry) / max(abs(entry - stop), 1e-12),
+                    "notes": "Manual",
+                })
+                st.success(f"تمت إضافة {tid}.")
+                st.session_state.daily_trade_count += 1
+                st.session_state.show_manual = False
+                st.rerun()
 
 
 # ============================================================
@@ -2459,6 +2512,6 @@ if st.session_state.economic_events:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Hard Gates + Quality Filters • Structure • Trend • Momentum • Volume • Context • Confirmation • Risk • Edge
+    Hard Gates + Quality Advisories • Structure • Trend • Momentum • Volume • Context • Confirmation • Edge
 </div>
 """, unsafe_allow_html=True)
