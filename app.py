@@ -1,16 +1,18 @@
 # ============================================================
-# BLACK PYRAMID v2005.5
+# BLACK PYRAMID v2005.5.1
 # Institutional Analysis Terminal — Signals & Tools Showcase
 #
-# v2005.5 CHANGELOG:
-#  - REMOVED: Trade Manager, Trade recording, Manual trades
-#  - REMOVED: Balance, Position sizing, P&L tracking
-#  - REDESIGNED: Elegant analysis-only interface
-#  - ADDED: Tools & Indicators showcase library
-#  - ADDED: Beautiful tabbed navigation
+# v2005.5.1 CHANGELOG (hotfix):
+#  - FIXED: fig.add_bar syntax error → fig.add_trace(go.Bar(...), row, col)
+#  - FIXED: USD/CHF, BTC/USD fail → sanitize_yf_symbol()
+#  - FIXED: DXY fetch → DX=F priority
+#  - ADDED: yfinance logging suppression
+#  - ADDED: better spot price fallbacks
 # ============================================================
 
 import os
+import logging
+import warnings
 from datetime import datetime, timedelta, timezone
 import concurrent.futures
 import time
@@ -25,10 +27,23 @@ from plotly.subplots import make_subplots
 
 
 # ============================================================
+# LOGGING SUPPRESSION (must be before yfinance calls)
+# ============================================================
+
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+logging.getLogger("peewee").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*possibly delisted.*")
+warnings.filterwarnings("ignore", message=".*No data found.*")
+warnings.filterwarnings("ignore", message=".*Expecting value.*")
+
+
+# ============================================================
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2005.5"
+APP_VERSION = "v2005.5.1"
 
 A_PLUS_MIN = 82.0
 A_MIN = 75.0
@@ -105,7 +120,7 @@ PAIRS = {
 YF_SYMBOL_ALTERNATIVES = {
     "GC=F": ["GC=F", "XAUUSD=X", "GLD"],
     "SI=F": ["SI=F", "XAGUSD=X", "SLV"],
-    "DX-Y.NYB": ["DX-Y.NYB", "DX=F", "UUP"],
+    "DX-Y.NYB": ["DX=F", "DX-Y.NYB", "UUP"],   # DX=F أولاً — أوثق
     "BTC-USD": ["BTC-USD", "BTC=F"],
     "ETH-USD": ["ETH-USD", "ETH=F"],
     "EURUSD=X": ["EURUSD=X", "EUR=F"],
@@ -225,14 +240,26 @@ def fmt_price(value, pair_name):
 def trend_icon(state):
     if state in ("BULLISH", "TREND_BULLISH"): return "🟢"
     if state in ("BEARISH", "TREND_BEARISH"): return "🔴"
-    if state == "NEUTRAL" or state == "RANGE": return "🟡"
+    if state in ("NEUTRAL", "RANGE"): return "🟡"
     if state == "COMPRESSION": return "🔵"
     return "⚪"
 
 
 # ============================================================
-# DATA LAYER
+# DATA LAYER (HARDENED)
 # ============================================================
+
+def sanitize_yf_symbol(sym: str) -> str:
+    """يحوّل 'USD/CHF' → 'USDCHF=X', 'BTC/USD' → 'BTC-USD'."""
+    s = str(sym).strip().replace("(", "").replace(")", "")
+    if "/" in s and s.count("/") == 1:
+        parts = s.split("/")
+        a, b = parts[0].strip(), parts[1].strip()
+        if a.upper() in ("BTC", "ETH", "SOL", "XRP", "ADA"):
+            return f"{a.upper()}-{b.upper()}"
+        return f"{a.upper()}{b.upper()}=X"
+    return s
+
 
 def normalize_ohlcv(df, min_rows=50):
     if df is None or df.empty:
@@ -265,7 +292,8 @@ def normalize_ohlcv(df, min_rows=50):
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
     try:
-        df = yf.download(symbol, period=period, interval=interval,
+        safe_symbol = sanitize_yf_symbol(symbol)
+        df = yf.download(safe_symbol, period=period, interval=interval,
                          auto_adjust=False, progress=False, threads=False)
         return normalize_ohlcv(df)
     except Exception:
@@ -289,7 +317,7 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
         "NZDCAD=X": "NZD/CAD", "CADJPY=X": "CAD/JPY", "CADCHF=X": "CAD/CHF",
         "BTC-USD": "BTC/USD", "ETH-USD": "ETH/USD",
     }
-    td_symbol = mapping.get(symbol, symbol)
+    td_symbol = mapping.get(symbol, sanitize_yf_symbol(symbol))
     interval_map = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1day"}
     url = "https://api.twelvedata.com/time_series"
     params = {"symbol": td_symbol,
@@ -315,9 +343,15 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
         df = get_yfinance(yf_sym, period, interval)
         if df is not None and len(df) >= 50:
             return df
+    # Fallback: sanitized symbol
+    df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
+    if df is not None and len(df) >= 50:
+        return df
+    # Fallback: Twelve Data
     df = get_twelve_data(symbol, interval, 500)
     if df is not None and len(df) >= 50:
         return df
+    # Final fallback: shorter period
     for yf_sym in candidates:
         df = get_yfinance(yf_sym, "1mo", interval)
         if df is not None and len(df) >= 30:
@@ -329,9 +363,11 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
 def get_spot_price(symbol):
     candidates = YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol])
     for yf_sym in candidates:
-        for period, interval in [("1d", "5m"), ("5d", "1h"), ("1mo", "1d")]:
+        # Note: skipped 5m for period=1d — يسبب أخطاء DX-Y.NYB
+        for period, interval in [("5d", "1h"), ("1mo", "1d")]:
             try:
-                df = yf.download(yf_sym, period=period, interval=interval,
+                df = yf.download(sanitize_yf_symbol(yf_sym),
+                                 period=period, interval=interval,
                                  auto_adjust=False, progress=False, threads=False)
                 df = normalize_ohlcv(df, min_rows=1)
                 if df is not None and not df.empty:
@@ -343,6 +379,12 @@ def get_spot_price(symbol):
                 continue
     try:
         df = get_twelve_data(symbol, "1h", 5)
+        if df is not None and not df.empty:
+            return float(df["close"].iloc[-1]), 0.0
+    except Exception:
+        pass
+    try:
+        df = get_historical_data(symbol, "3mo", "4h")
         if df is not None and not df.empty:
             return float(df["close"].iloc[-1]), 0.0
     except Exception:
@@ -950,10 +992,6 @@ def compute_soft_penalty(penalty_items, strict=False):
     return min(total, MAX_SOFT_PENALTY), sorted_items
 
 
-def correlation_guard(new_symbol, direction, open_trades=None):
-    return True, "لا تعارض ارتباطي"
-
-
 def news_time_block(events, pair_name, window_minutes=45):
     if not events:
         return False, ""
@@ -1444,7 +1482,6 @@ def generate_signal(df, current_price, pair_name, symbol,
     if strict_soft and penalty_total > 5 and trade_grade in ("A+", "A"):
         trade_grade = "B"
 
-    # Execution decision
     if signal == "WAIT":
         execution_status, execution_reason = "WAIT", "الإشارة الأساسية WAIT"
     elif not all_passed:
@@ -1655,7 +1692,6 @@ html, body, [class*="css"] {
 }
 body { background: #0a0d13; color: #e8edf5; }
 
-/* HERO */
 .hero {
     background: radial-gradient(circle at 20% 30%, rgba(230,200,124,0.08), transparent 60%),
                 radial-gradient(circle at 80% 70%, rgba(124,212,160,0.06), transparent 60%),
@@ -1686,7 +1722,6 @@ body { background: #0a0d13; color: #e8edf5; }
     margin-left: 12px; letter-spacing: 1px;
 }
 
-/* SIGNAL CARD */
 .signal-card {
     background: linear-gradient(145deg, #10141c, #0d1017);
     padding: 40px 24px; border-radius: 28px; text-align: center;
@@ -1707,7 +1742,6 @@ body { background: #0a0d13; color: #e8edf5; }
     letter-spacing: 2px; margin-top: 10px;
 }
 
-/* METRIC CARD */
 .metric-card {
     background: linear-gradient(145deg, #10141c, #0d1017);
     padding: 18px 20px; border-radius: 18px;
@@ -1724,7 +1758,6 @@ body { background: #0a0d13; color: #e8edf5; }
 .metric-value { color: #e8edf5; font-size: 1.5rem; font-weight: 700; margin-top: 6px; }
 .metric-sub { color: #a0aab8; font-size: 0.82rem; margin-top: 4px; }
 
-/* TOOL CARD */
 .tool-card {
     background: linear-gradient(145deg, #10141c, #0d1017);
     padding: 20px; border-radius: 16px;
@@ -1741,21 +1774,19 @@ body { background: #0a0d13; color: #e8edf5; }
 .tool-name {
     color: #e6c87c; font-size: 0.85rem;
     font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
 }
 .tool-value { color: #e8edf5; font-size: 1.3rem; font-weight: 700; }
 .tool-desc { color: #8892a5; font-size: 0.82rem; margin-top: 8px; line-height: 1.5; }
 
-/* SECTION TITLE */
 .section-title {
     font-size: 1.4rem; font-weight: 700; color: #e6c87c;
-    margin: 32px 0 18px 0; display: flex; align-items: center; gap: 12px;
+    margin: 32px 0 18px 0;
     padding-bottom: 12px;
     border-bottom: 1px solid rgba(230,200,124,0.15);
 }
 .section-title span { color: #6b7488; font-size: 0.85rem; font-weight: 400; }
 
-/* BUTTON */
 div.stButton > button {
     background: linear-gradient(145deg, #1a2130, #131821);
     color: #e8edf5; border: 1px solid rgba(230,200,124,0.2);
@@ -1772,14 +1803,12 @@ div.stButton > button:hover {
     box-shadow: 0 10px 24px rgba(0,0,0,0.6);
 }
 
-/* SELECT */
 div[data-baseweb="select"] > div {
     background: #10141c; border: 1px solid rgba(255,255,255,0.08);
     border-radius: 40px; padding: 0 16px;
 }
 div[data-baseweb="select"] input { color: #e8edf5 !important; }
 
-/* TABS */
 button[data-baseweb="tab"] {
     background: transparent; color: #8892a5;
     border-radius: 12px 12px 0 0;
@@ -1791,7 +1820,6 @@ button[data-baseweb="tab"][aria-selected="true"] {
     border-bottom: 2px solid #e6c87c;
 }
 
-/* DATAFRAME */
 div[data-testid="stDataFrame"] {
     background: #0d1017; border-radius: 16px;
     border: 1px solid rgba(255,255,255,0.05);
@@ -1805,7 +1833,6 @@ div[data-testid="stDataFrame"] td {
     background: #0d1017 !important; color: #ced6e6 !important;
 }
 
-/* STREAMLIT METRIC */
 div[data-testid="stMetric"] {
     background: linear-gradient(145deg, #10141c, #0d1017);
     padding: 16px 18px; border-radius: 16px;
@@ -1819,18 +1846,6 @@ div[data-testid="stMetric"] .stMetricValue {
     color: #e8edf5 !important; font-weight: 700 !important;
 }
 
-/* FILTER CHIP */
-.filter-chip {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 10px 16px; border-radius: 40px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-    font-size: 0.85rem; color: #a0aab8;
-    margin: 4px;
-}
-.filter-chip.pass { border-color: rgba(124,212,160,0.35); color: #7cd4a0; }
-.filter-chip.fail { border-color: rgba(245,122,122,0.35); color: #f57a7a; }
-
 hr { border: none; height: 1px;
     background: linear-gradient(90deg, transparent, rgba(230,200,124,0.15), transparent);
     margin: 30px 0; }
@@ -1841,7 +1856,6 @@ hr { border: none; height: 1px;
     margin-top: 40px; font-size: 0.85rem; letter-spacing: 0.5px;
 }
 
-/* EXPANDER */
 details { background: #0d1017 !important; border-radius: 16px !important;
     border: 1px solid rgba(255,255,255,0.05) !important; }
 </style>
@@ -2085,7 +2099,6 @@ with tab_overview:
 with tab_tools:
     last = df.iloc[-1]
 
-    # ---- Trend Tools ----
     st.markdown('<div class="section-title">📈 Trend Tools <span>EMA · Ichimoku · VWAP</span></div>',
                 unsafe_allow_html=True)
 
@@ -2158,7 +2171,6 @@ with tab_tools:
         </div>
         """, unsafe_allow_html=True)
 
-    # ---- Momentum Tools ----
     st.markdown('<div class="section-title">⚡ Momentum Tools <span>RSI · VRSI · MACD · MFI</span></div>',
                 unsafe_allow_html=True)
 
@@ -2215,7 +2227,6 @@ with tab_tools:
         </div>
         """, unsafe_allow_html=True)
 
-    # ---- Volatility Tools ----
     st.markdown('<div class="section-title">🌊 Volatility Tools <span>ATR · Bollinger Bands</span></div>',
                 unsafe_allow_html=True)
 
@@ -2254,7 +2265,6 @@ with tab_tools:
         </div>
         """, unsafe_allow_html=True)
 
-    # ---- Volume & Flow ----
     st.markdown('<div class="section-title">💧 Volume & Flow <span>Chaikin Money Flow · Volume Analysis</span></div>',
                 unsafe_allow_html=True)
 
@@ -2294,7 +2304,6 @@ with tab_smc:
     st.markdown('<div class="section-title">🏛️ Smart Money Concepts <span>Structure · Liquidity · Imbalance</span></div>',
                 unsafe_allow_html=True)
 
-    # Structure State
     struct = structure_state(df)
     struct_icon = trend_icon(struct["state"])
     st.markdown(f"""
@@ -2305,7 +2314,6 @@ with tab_smc:
     </div>
     """, unsafe_allow_html=True)
 
-    # SMC signals
     s1, s2, s3, s4 = st.columns(4)
 
     bos_bull = safe_bool(last.get("bos_bullish"))
@@ -2392,9 +2400,9 @@ with tab_smc:
         bsl_val = safe_float(last.get("bsl"))
         st.markdown(f"""
         <div class="tool-card">
-            <div class="tool-name">⬆️ BSL (Buy-Side Liq.)</div>
+            <div class="tool-name">⬆️ BSL</div>
             <div class="tool-value">{fmt_price(bsl_val, selected_pair)}</div>
-            <div class="tool-desc">Last swing high</div>
+            <div class="tool-desc">Buy-Side Liquidity (last swing high)</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2402,13 +2410,12 @@ with tab_smc:
         ssl_val = safe_float(last.get("ssl"))
         st.markdown(f"""
         <div class="tool-card">
-            <div class="tool-name">⬇️ SSL (Sell-Side Liq.)</div>
+            <div class="tool-name">⬇️ SSL</div>
             <div class="tool-value">{fmt_price(ssl_val, selected_pair)}</div>
-            <div class="tool-desc">Last swing low</div>
+            <div class="tool-desc">Sell-Side Liquidity (last swing low)</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # SMC Quality Score
     smc_score, smc_reasons = smc_quality(df)
     st.markdown(f"""
     <div class="tool-card" style="margin-top:20px;">
@@ -2451,7 +2458,6 @@ with tab_mtf:
     </div>
     """, unsafe_allow_html=True)
 
-    # Weekly Bias
     st.markdown('<div class="section-title">📅 Higher Timeframe <span>Weekly Bias</span></div>',
                 unsafe_allow_html=True)
     wk = result["weekly_bias"]
@@ -2464,7 +2470,6 @@ with tab_mtf:
     </div>
     """, unsafe_allow_html=True)
 
-    # Context
     st.markdown('<div class="section-title">🌍 Macro Context <span>DXY · Regime · Divergence</span></div>',
                 unsafe_allow_html=True)
     ctx1, ctx2, ctx3 = st.columns(3)
@@ -2516,7 +2521,6 @@ with tab_filters:
         cols = st.columns(4)
         for idx, (name, info) in enumerate(row):
             passed = info.get("pass", True)
-            cls = "pass" if passed else "fail"
             icon = "✅" if passed else "❌"
             with cols[idx]:
                 st.markdown(f"""
@@ -2530,7 +2534,6 @@ with tab_filters:
     if not result["all_filters_passed"]:
         st.error(f"🚫 **Hard Gate Block:** {result['filter_block_reason']}")
 
-    # Diagnostic
     with st.expander("🔍 Diagnostic — لماذا WAIT؟"):
         st.markdown(f"""
         - **BUY Score:** {result['buy_score']:.1f}
@@ -2587,8 +2590,15 @@ with tab_chart:
     fig.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Signal",
                               line=dict(color="#f5c87a")), row=3, col=1)
     colors = ["#7cd4a0" if v >= 0 else "#f57a7a" for v in df["macd_histogram"].fillna(0)]
-    fig.add_bar(x=df.index, y=df["macd_histogram"], name="Histogram",
-                marker_color=colors), row=3, col=1)
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["macd_histogram"],
+            name="Histogram",
+            marker_color=colors,
+        ),
+        row=3, col=1,
+    )
 
     if levels:
         for lvl, color in [("stop_loss", "#f57a7a"), ("target1", "#7cd4a0"),
@@ -2646,7 +2656,6 @@ with tab_all:
     else:
         st.info("اضغط 'Scan All Assets' لعرض الإشارات لجميع الأزواج.")
 
-    # Economic Calendar
     st.markdown('<div class="section-title">📅 Economic Calendar</div>',
                 unsafe_allow_html=True)
     if st.button("🔄 Update Calendar", width="stretch"):
