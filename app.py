@@ -1,5 +1,5 @@
 # ============================================================
-# BLACK PYRAMID v2005.9 — BALANCED MODE + REALISTIC TARGETS
+# BLACK PYRAMID v2006 — CONFIRMED ENTRY — BALANCED MODE + REALISTIC TARGETS
 # Institutional Analysis Terminal
 #
 # v2005.8 CHANGELOG:
@@ -50,16 +50,20 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG — BALANCED MODE
 # ============================================================
 
-APP_VERSION = "v2005.9-Balanced"
+APP_VERSION = "v2006-Confirmed Entry"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
 B_MIN = 70.0
 C_MIN = 62.0
 
-MIN_SIGNAL_GAP = 15
-MIN_CONFIDENCE = 72.0
-MIN_CONFIRMATION_SCORE = 65.0
+MIN_SIGNAL_GAP = 20
+MIN_CONFIDENCE = 80.0
+MIN_CONFIRMATION_SCORE = 75.0
+MIN_CONFLUENCE_CONFIRMED = 70.0
+MIN_MTF_CONFIRMED = 75.0
+MIN_RR_CONFIRMED = 1.50
+REQUIRED_STABLE_ANALYSES = 2
 
 PENALTY_MTF_AGAINST = 12.0
 PENALTY_RANGE_REGIME = 10.0
@@ -213,6 +217,7 @@ def init_state():
         "show_market_status": False,
         "recent_results": [],       # سجل نتائج آخر الصفقات (WIN/LOSS)
         "trade_journal": [],        # كل الصفقات المُنفّذة
+        "confirmation_state": {"direction": None, "count": 0},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -1940,6 +1945,94 @@ def build_trade_management(signal, levels, profile):
 # SIGNAL ENGINE — BALANCED MODE + GUARDS
 # ============================================================
 
+# ============================================================
+# CONFIRMED ENTRY — LIVE STABILITY
+# ============================================================
+
+def update_confirmation_stability(direction, enabled=True):
+    """Requires the same BUY/SELL direction on consecutive live analyses."""
+    if not enabled or direction not in ("BUY", "SELL"):
+        if enabled:
+            st.session_state["confirmation_state"] = {"direction": None, "count": 0}
+        return 0
+
+    state = st.session_state.get(
+        "confirmation_state", {"direction": None, "count": 0}
+    )
+    if state.get("direction") == direction:
+        count = int(state.get("count", 0)) + 1
+    else:
+        count = 1
+
+    st.session_state["confirmation_state"] = {
+        "direction": direction,
+        "count": count,
+    }
+    return count
+
+
+def confirmed_entry_gate(
+    signal, confidence, conf_score, w_confluence,
+    mtf_bias, mtf_conf, wk_bias, filter_results,
+    levels, trade_grade, df, candidate,
+    effective_penalty=0.0, stability_count=0,
+    require_stability=True,
+):
+    """Strict pre-entry gate. EXECUTE is allowed only after all confirmations pass."""
+    blockers = []
+    checks = {}
+
+    aligned_mtf = (
+        (candidate == "BUY" and mtf_bias == "BULLISH")
+        or (candidate == "SELL" and mtf_bias == "BEARISH")
+    )
+    weekly_ok = (
+        wk_bias == "NEUTRAL"
+        or (candidate == "BUY" and wk_bias == "BULLISH")
+        or (candidate == "SELL" and wk_bias == "BEARISH")
+    )
+
+    checks["Signal"] = signal == candidate and signal in ("BUY", "SELL")
+    checks["Confidence"] = confidence >= MIN_CONFIDENCE
+    checks["Confirmation Score"] = conf_score >= MIN_CONFIRMATION_SCORE
+    checks["Confluence"] = w_confluence >= MIN_CONFLUENCE_CONFIRMED
+    checks["MTF"] = aligned_mtf and mtf_conf >= MIN_MTF_CONFIRMED
+    checks["Weekly"] = weekly_ok
+    checks["HTF Zone"] = filter_results.get("HTF Zone", {}).get("pass", False)
+    checks["LTF Trigger"] = filter_results.get("LTF Trigger", {}).get("pass", False)
+    checks["OTE"] = filter_results.get("OTE", {}).get("pass", False)
+    checks["Displacement"] = filter_results.get("Displacement", {}).get("pass", False)
+    checks["News Clear"] = filter_results.get("News Window", {}).get("pass", False)
+    checks["Volatility"] = filter_results.get("Volatility", {}).get("pass", False)
+    checks["Market Open"] = filter_results.get("Market Open", {}).get("pass", False)
+    checks["Kill Switch"] = filter_results.get("Kill Switch", {}).get("pass", False)
+
+    # Use the last CLOSED candle for the final candle confirmation.
+    closed_df = df.iloc[:-1] if len(df) > 2 else df
+    checks["Candle"] = candle_confirmation(closed_df, candidate)
+
+    rr1 = safe_float(levels.get("risk_reward_1"), 0) if levels else 0
+    checks["RR1"] = rr1 >= MIN_RR_CONFIRMED
+    checks["Grade"] = trade_grade == "A+"
+
+    # If Strict Filters are enabled, every penalty must be cleared.
+    # With normal mode the penalty engine remains advisory, preserving
+    # the existing UI behavior while the hard confirmation gate stays active.
+    checks["No Soft Penalty"] = effective_penalty <= 0.0
+
+    checks["Stable Signal"] = (
+        (not require_stability)
+        or stability_count >= REQUIRED_STABLE_ANALYSES
+    )
+
+    for name, passed in checks.items():
+        if not passed:
+            blockers.append(name)
+
+    return len(blockers) == 0, checks, blockers, rr1
+
+
+
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
@@ -2138,24 +2231,56 @@ def generate_signal(df, current_price, pair_name, symbol,
     else:
         trade_grade = "WAIT"
 
+    # ---- CONFIRMED ENTRY GATE ----
+    stability_count = update_confirmation_stability(
+        signal, enabled=not skip_external_filters
+    )
+
+    confirmed_ok, confirmed_checks, confirmed_blockers, confirmed_rr = (
+        confirmed_entry_gate(
+            signal=signal,
+            confidence=effective_confidence,
+            conf_score=conf_score,
+            w_confluence=w_confluence,
+            mtf_bias=mtf_bias,
+            mtf_conf=mtf_conf,
+            wk_bias=wk_bias,
+            filter_results=filter_results,
+            levels=levels,
+            trade_grade=trade_grade,
+            df=df,
+            candidate=candidate,
+            effective_penalty=penalty_total,
+            stability_count=stability_count,
+            require_stability=not skip_external_filters,
+        )
+    )
+
     if signal == "WAIT":
-        execution_status, execution_reason = "WAIT", "Signal WAIT"
+        execution_status, execution_reason = (
+            "WAIT", "Signal WAIT — no confirmed direction"
+        )
     elif not all_passed:
-        execution_status, execution_reason = "BLOCKED", f"Hard Gate: {block_reason}"
+        execution_status, execution_reason = (
+            "BLOCKED", f"Hard Gate: {block_reason}"
+        )
     elif news_block:
-        execution_status, execution_reason = "WAIT", "خبر عالي التأثير"
-    elif effective_confidence < profile.get("confidence_threshold", 72):
-        execution_status, execution_reason = "WAIT", f"Confidence < {profile.get('confidence_threshold', 72)}"
-    elif conf_score < profile.get("confirmation_threshold", 65):
-        execution_status, execution_reason = "WAIT", f"Confirmation < {profile.get('confirmation_threshold', 65)}"
-    elif trade_grade in ("A+", "A"):
-        execution_status, execution_reason = "EXECUTE", f"{trade_grade} — Balanced PASS"
-    elif trade_grade == "B":
-        execution_status, execution_reason = "EXECUTE", "B — Balanced PASS (moderate confidence)"
-    elif trade_grade == "C":
-        execution_status, execution_reason = "WATCH", "C — مراقبة فقط"
+        execution_status, execution_reason = (
+            "WAIT", "High-impact news window"
+        )
+    elif not confirmed_ok:
+        preview = ", ".join(confirmed_blockers[:4])
+        if len(confirmed_blockers) > 4:
+            preview += f" +{len(confirmed_blockers) - 4} more"
+        execution_status, execution_reason = (
+            "WAIT", f"CONFIRMATION PENDING — {preview}"
+        )
     else:
-        execution_status, execution_reason = "WAIT", "لا اجتياز"
+        execution_status, execution_reason = (
+            "EXECUTE",
+            f"CONFIRMED ENTRY — A+ | RR1 {confirmed_rr:.2f} | "
+            f"{REQUIRED_STABLE_ANALYSES} consecutive confirmations",
+        )
 
     confidence = effective_confidence
     advisories_str = ", ".join(f"{n}({p})" for n, p in soft_penalty_items) or "None"
@@ -2171,6 +2296,11 @@ def generate_signal(df, current_price, pair_name, symbol,
         "confirmation_ok": conf_ok, "confirmation_score": conf_score,
         "confirmation_reasons": conf_reasons, "confirmation_blockers": conf_blockers,
         "execution_status": execution_status, "execution_reason": execution_reason,
+        "confirmed_entry": confirmed_ok,
+        "confirmation_checks": confirmed_checks,
+        "confirmation_blockers_final": confirmed_blockers,
+        "confirmation_stability": stability_count,
+        "confirmed_rr1": confirmed_rr,
         "trade_grade": trade_grade, "soft_penalties": penalty_total,
         "soft_advisories": advisories_str,
         "filter_results": filter_results, "all_filters_passed": all_passed,
