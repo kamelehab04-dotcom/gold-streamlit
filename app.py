@@ -1,13 +1,11 @@
 # ============================================================
-# BLACK PYRAMID v2005.5.1
+# BLACK PYRAMID v2005.5.2
 # Institutional Analysis Terminal — Signals & Tools Showcase
 #
-# v2005.5.1 CHANGELOG (hotfix):
-#  - FIXED: fig.add_bar syntax error → fig.add_trace(go.Bar(...), row, col)
-#  - FIXED: USD/CHF, BTC/USD fail → sanitize_yf_symbol()
-#  - FIXED: DXY fetch → DX=F priority
-#  - ADDED: yfinance logging suppression
-#  - ADDED: better spot price fallbacks
+# v2005.5.2 CHANGELOG:
+#  - FIXED: Sidebar collapse button position (was floating in center)
+#  - FIXED: RTL applied to text elements only, not containers
+#  - Elegant fixed-position sidebar toggle button
 # ============================================================
 
 import os
@@ -27,7 +25,7 @@ from plotly.subplots import make_subplots
 
 
 # ============================================================
-# LOGGING SUPPRESSION (must be before yfinance calls)
+# LOGGING SUPPRESSION
 # ============================================================
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -43,7 +41,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2005.5.1"
+APP_VERSION = "v2005.5.2"
 
 A_PLUS_MIN = 82.0
 A_MIN = 75.0
@@ -120,7 +118,7 @@ PAIRS = {
 YF_SYMBOL_ALTERNATIVES = {
     "GC=F": ["GC=F", "XAUUSD=X", "GLD"],
     "SI=F": ["SI=F", "XAGUSD=X", "SLV"],
-    "DX-Y.NYB": ["DX=F", "DX-Y.NYB", "UUP"],   # DX=F أولاً — أوثق
+    "DX-Y.NYB": ["DX=F", "DX-Y.NYB", "UUP"],
     "BTC-USD": ["BTC-USD", "BTC=F"],
     "ETH-USD": ["ETH-USD", "ETH=F"],
     "EURUSD=X": ["EURUSD=X", "EUR=F"],
@@ -246,11 +244,10 @@ def trend_icon(state):
 
 
 # ============================================================
-# DATA LAYER (HARDENED)
+# DATA LAYER
 # ============================================================
 
 def sanitize_yf_symbol(sym: str) -> str:
-    """يحوّل 'USD/CHF' → 'USDCHF=X', 'BTC/USD' → 'BTC-USD'."""
     s = str(sym).strip().replace("(", "").replace(")", "")
     if "/" in s and s.count("/") == 1:
         parts = s.split("/")
@@ -343,15 +340,12 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
         df = get_yfinance(yf_sym, period, interval)
         if df is not None and len(df) >= 50:
             return df
-    # Fallback: sanitized symbol
     df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
     if df is not None and len(df) >= 50:
         return df
-    # Fallback: Twelve Data
     df = get_twelve_data(symbol, interval, 500)
     if df is not None and len(df) >= 50:
         return df
-    # Final fallback: shorter period
     for yf_sym in candidates:
         df = get_yfinance(yf_sym, "1mo", interval)
         if df is not None and len(df) >= 30:
@@ -363,7 +357,6 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
 def get_spot_price(symbol):
     candidates = YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol])
     for yf_sym in candidates:
-        # Note: skipped 5m for period=1d — يسبب أخطاء DX-Y.NYB
         for period, interval in [("5d", "1h"), ("1mo", "1d")]:
             try:
                 df = yf.download(sanitize_yf_symbol(yf_sym),
@@ -1688,9 +1681,56 @@ st.markdown("""
 
 html, body, [class*="css"] {
     font-family: 'Inter', 'Segoe UI', 'Tahoma', sans-serif;
-    direction: rtl;
 }
 body { background: #0a0d13; color: #e8edf5; }
+
+/* RTL — يطبق على النصوص فقط */
+.main-header, .main-title, .main-subtitle,
+.signal-card, .signal-meta, .signal-conf, .signal-grade,
+.metric-card, .metric-label, .metric-value, .metric-sub,
+.tool-card, .tool-name, .tool-value, .tool-desc,
+.section-title, .footer-style,
+div[data-testid="stMetric"] label,
+div[data-testid="stMetric"] .stMetricValue,
+div[data-testid="stDataFrame"] th,
+div[data-testid="stDataFrame"] td {
+    direction: rtl;
+}
+
+/* إصلاح زر إخفاء/إظهار الشريط الجانبي */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[kind="header"] {
+    position: fixed !important;
+    left: 12px !important;
+    right: auto !important;
+    top: 14px !important;
+    z-index: 999999 !important;
+    background: rgba(230,200,124,0.08) !important;
+    border: 1px solid rgba(230,200,124,0.25) !important;
+    border-radius: 50% !important;
+    width: 40px !important;
+    height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.25s ease !important;
+}
+[data-testid="collapsedControl"]:hover,
+[data-testid="stSidebarCollapsedControl"]:hover,
+button[kind="header"]:hover {
+    background: rgba(230,200,124,0.2) !important;
+    border-color: rgba(230,200,124,0.6) !important;
+    transform: scale(1.05) !important;
+}
+
+/* الشريط الجانبي — يحفظ RTL داخلياً */
+[data-testid="stSidebar"] {
+    direction: rtl;
+}
+[data-testid="stSidebar"] > div:first-child {
+    direction: rtl;
+}
 
 .hero {
     background: radial-gradient(circle at 20% 30%, rgba(230,200,124,0.08), transparent 60%),
