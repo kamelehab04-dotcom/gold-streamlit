@@ -1,17 +1,17 @@
 # ============================================================
-# BLACK PYRAMID v2005.5.3
-# Institutional Analysis Terminal — Main Page Controls
+# BLACK PYRAMID v2005.5.4
+# Institutional Analysis Terminal — With Logo Hero
 #
-# v2005.5.3 CHANGELOG:
-#  - Asset selector moved to MAIN PAGE (was in sidebar)
-#  - Two prominent buttons: "Analyze Selected" + "Analyze All"
-#  - All-assets scan results shown inline under controls
-#  - Sidebar simplified to settings only
+# v2005.5.4 CHANGELOG:
+#  - Logo image embedded in hero (Base64)
+#  - Fallback to text if logo missing
 # ============================================================
 
 import os
+import base64
 import logging
 import warnings
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import concurrent.futures
 import time
@@ -42,7 +42,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2005.5.3"
+APP_VERSION = "v2005.5.4"
 
 A_PLUS_MIN = 82.0
 A_MIN = 75.0
@@ -56,6 +56,13 @@ SOFT_PENALTY_TOP_N = 3
 MIN_RR_TP1 = 1.00
 MIN_RR_TP2 = 1.50
 MIN_RR_TP3 = 2.00
+
+LOGO_CANDIDATES = [
+    "file_000000005cb4824697f509df31f2168a.png",
+    "logo.png",
+    "assets/logo.png",
+    "static/logo.png",
+]
 
 ASSET_PROFILES = {
     "forex": {
@@ -242,6 +249,23 @@ def trend_icon(state):
     if state in ("NEUTRAL", "RANGE"): return "🟡"
     if state == "COMPRESSION": return "🔵"
     return "⚪"
+
+
+def img_to_base64(path):
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+
+
+def load_logo_b64():
+    for p in LOGO_CANDIDATES:
+        if Path(p).exists():
+            b64 = img_to_base64(p)
+            if b64:
+                return b64
+    return None
 
 
 # ============================================================
@@ -1732,14 +1756,23 @@ button[kind="header"]:hover {
     background: radial-gradient(circle at 20% 30%, rgba(230,200,124,0.08), transparent 60%),
                 radial-gradient(circle at 80% 70%, rgba(124,212,160,0.06), transparent 60%),
                 linear-gradient(145deg, #10141c, #0d1017);
-    padding: 44px 40px; border-radius: 28px; margin-bottom: 26px;
+    padding: 32px 40px; border-radius: 28px; margin-bottom: 26px;
     border: 1px solid rgba(230,200,124,0.12);
     box-shadow: 0 20px 50px rgba(0,0,0,0.7);
     position: relative; overflow: hidden;
+    text-align: center;
 }
 .hero::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
     background: linear-gradient(90deg, transparent, #e6c87c, #7cd4a0, #e6c87c, transparent);
+}
+.hero-logo {
+    max-width: 480px;
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto 12px auto;
+    filter: drop-shadow(0 8px 32px rgba(230,200,124,0.25));
 }
 .hero-title {
     font-size: 3rem; font-weight: 800; color: #e6c87c;
@@ -1839,7 +1872,6 @@ div.stButton > button:hover {
     box-shadow: 0 10px 24px rgba(0,0,0,0.6);
 }
 
-/* Selectbox styling */
 div[data-testid="stSelectbox"] > label {
     color: #e6c87c !important;
     font-weight: 600 !important;
@@ -1912,18 +1944,33 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 
 
 # ============================================================
-# HERO
+# HERO — With Logo
 # ============================================================
 
-st.markdown(f"""
-<div class="hero">
-    <div class="hero-title">▲ BLACK PYRAMID</div>
-    <div class="hero-sub">
-        Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
-        <span class="hero-badge">{APP_VERSION}</span>
+_logo_b64 = load_logo_b64()
+
+if _logo_b64:
+    st.markdown(f"""
+    <div class="hero">
+        <img src="data:image/png;base64,{_logo_b64}"
+             alt="BLACK PYRAMID"
+             class="hero-logo">
+        <div class="hero-sub">
+            Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
+            <span class="hero-badge">{APP_VERSION}</span>
+        </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+else:
+    st.markdown(f"""
+    <div class="hero">
+        <div class="hero-title">▲ BLACK PYRAMID</div>
+        <div class="hero-sub">
+            Institutional Analysis Terminal &nbsp;·&nbsp; Structure · MTF · SMC · Confirmation
+            <span class="hero-badge">{APP_VERSION}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1982,7 +2029,6 @@ with ctrl_col3:
                             width="stretch", key="btn_analyze_all")
 
 
-# Handle buttons
 if analyze_all:
     with st.spinner("🌐 Scanning all assets in parallel..."):
         start = time.time()
@@ -1995,7 +2041,6 @@ if analyze_this:
     st.rerun()
 
 
-# All-Assets results — shown inline under control bar
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
     st.markdown('<div class="section-title">🌐 All Assets Scan Results</div>',
                 unsafe_allow_html=True)
@@ -2106,10 +2151,6 @@ with col_stats:
     """, unsafe_allow_html=True)
 
 
-# ============================================================
-# SOFT ADVISORIES BANNER
-# ============================================================
-
 soft_adv = result.get("soft_advisories", "None")
 if soft_adv and soft_adv != "None":
     if not strict_soft:
@@ -2142,14 +2183,14 @@ if signal in ("BUY", "SELL") and levels:
 # TABS
 # ============================================================
 
-tab_overview, tab_tools, tab_smc, tab_mtf, tab_filters, tab_chart, tab_all, tab_backtest = st.tabs([
+tab_overview, tab_tools, tab_smc, tab_mtf, tab_filters, tab_chart, tab_calendar, tab_backtest = st.tabs([
     "📊 Overview",
     "🧰 Tools & Indicators",
     "🏛️ SMC Structure",
     "⏱️ MTF Analysis",
     "🎛️ Filters",
     "📈 Chart",
-    "🌐 Calendar",
+    "📅 Calendar",
     "🔬 Backtest",
 ])
 
@@ -2726,10 +2767,9 @@ with tab_chart:
 # TAB 7: CALENDAR
 # ============================================================
 
-with tab_all:
+with tab_calendar:
     st.markdown('<div class="section-title">📅 Economic Calendar <span>High-impact events</span></div>',
                 unsafe_allow_html=True)
-    st.info("💡 استخدم زر **🌐 تحليل كافة الأصول** في أعلى الصفحة لعرض جميع الإشارات.")
 
     if st.button("🔄 Update Calendar", width="stretch"):
         st.session_state.economic_events = get_fmp_economic_calendar()
@@ -2742,6 +2782,8 @@ with tab_all:
                 for e in st.session_state.economic_events[:20]]
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    else:
+        st.info("اضغط 'Update Calendar' لعرض الأحداث الاقتصادية.")
 
 
 # ============================================================
