@@ -50,7 +50,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG — BALANCED MODE
 # ============================================================
 
-APP_VERSION = "v2007-Intraday Precision"
+APP_VERSION = "v2008-No News Intraday Precision"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -71,6 +71,7 @@ REQUIRED_STABLE_ANALYSES = 2
 # The entry must be near a fresh SMC zone. The engine rejects
 # price-chasing, oversized SLs and targets that are too far away.
 INTRADAY_MODE = True
+NEWS_FILTER_ENABLED = False  # News is excluded from trade decisions.
 MIN_ENTRY_ZONE_QUALITY = 75.0
 MAX_ENTRY_DISTANCE_ATR = 0.30
 MAX_SL_ATR = 1.00
@@ -2245,7 +2246,7 @@ def confirmed_entry_gate(
     checks["LTF Trigger"] = filter_results.get("LTF Trigger", {}).get("pass", False)
     checks["OTE"] = filter_results.get("OTE", {}).get("pass", False)
     checks["Displacement"] = filter_results.get("Displacement", {}).get("pass", False)
-    checks["News Clear"] = filter_results.get("News Window", {}).get("pass", False)
+    checks["News Clear"] = True  # News filter disabled for trading decisions.
     checks["Volatility"] = filter_results.get("Volatility", {}).get("pass", False)
     checks["Market Open"] = filter_results.get("Market Open", {}).get("pass", False)
     checks["Kill Switch"] = filter_results.get("Kill Switch", {}).get("pass", False)
@@ -2575,7 +2576,7 @@ def generate_signal(df, current_price, pair_name, symbol,
         execution_status, execution_reason = (
             "BLOCKED", f"Hard Gate: {block_reason}"
         )
-    elif news_block:
+    elif False:  # News filter disabled
         signal = "WAIT"
         execution_status, execution_reason = (
             "WAIT", "WAIT — High-impact news window"
