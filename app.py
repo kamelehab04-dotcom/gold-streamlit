@@ -50,7 +50,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG — BALANCED MODE
 # ============================================================
 
-APP_VERSION = "v2006-Confirmed Entry"
+APP_VERSION = "v2007-Intraday Precision"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -64,6 +64,26 @@ MIN_CONFLUENCE_CONFIRMED = 70.0
 MIN_MTF_CONFIRMED = 75.0
 MIN_RR_CONFIRMED = 1.50
 REQUIRED_STABLE_ANALYSES = 2
+
+# ============================================================
+# INTRADAY PRECISION ENGINE
+# ============================================================
+# The entry must be near a fresh SMC zone. The engine rejects
+# price-chasing, oversized SLs and targets that are too far away.
+INTRADAY_MODE = True
+MIN_ENTRY_ZONE_QUALITY = 75.0
+MAX_ENTRY_DISTANCE_ATR = 0.30
+MAX_SL_ATR = 1.00
+MIN_SL_ATR = 0.45
+SL_BUFFER_ATR = 0.12
+MAX_TP1_ATR = 1.80
+MAX_TP2_ATR = 2.70
+MIN_TP1_ROOM_R = 1.20
+MIN_INTRADAY_RR1 = 1.30
+MAX_ZONE_AGE_BARS = 35
+ZONE_LOOKBACK_BARS = 45
+MAX_HOLD_HOURS = 8
+
 
 PENALTY_MTF_AGAINST = 12.0
 PENALTY_RANGE_REGIME = 10.0
@@ -1667,150 +1687,349 @@ def collect_sr_levels(df, lookback=200):
     return sorted({l for l in levels if np.isfinite(l) and l > 0})
 
 
+def _recent_smc_zone(df, signal, atr):
+    """Build a fresh SMC entry zone from OB/FVG, sweep and displacement evidence."""
+    if df is None or len(df) < 10 or atr <= 0:
+        return None
+
+    work = df.iloc[-ZONE_LOOKBACK_BARS:].copy()
+    direction = signal
+    candidates = []
+
+    if direction == "BUY":
+        ob_col, fvg_col, sweep_col = (
+            "order_block_bullish", "fvg_bullish", "liquidity_sweep_bullish"
+        )
+    else:
+        ob_col, fvg_col, sweep_col = (
+            "order_block_bearish", "fvg_bearish", "liquidity_sweep_bearish"
+        )
+
+    # Fresh order blocks
+    if ob_col in work.columns:
+        idxs = list(work.index[work[ob_col].fillna(False)])
+        for idx in idxs[-4:]:
+            pos = work.index.get_loc(idx)
+            if direction == "BUY":
+                lo = safe_float(work.loc[idx, "ob_low"], np.nan)
+                hi = safe_float(work.loc[idx, "ob_high"], np.nan)
+            else:
+                lo = safe_float(work.loc[idx, "ob_low"], np.nan)
+                hi = safe_float(work.loc[idx, "ob_high"], np.nan)
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                age = len(work) - 1 - pos
+                if age <= MAX_ZONE_AGE_BARS:
+                    candidates.append({
+                        "kind": "ORDER BLOCK",
+                        "low": float(lo), "high": float(hi),
+                        "age": age, "weight": 32.0,
+                        "source": idx,
+                    })
+
+    # Fresh fair-value gaps
+    if fvg_col in work.columns:
+        idxs = list(work.index[work[fvg_col].fillna(False)])
+        for idx in idxs[-5:]:
+            pos = work.index.get_loc(idx)
+            if direction == "BUY":
+                lo = safe_float(work.loc[idx, "fvg_bull_low"], np.nan)
+                hi = safe_float(work.loc[idx, "fvg_bull_high"], np.nan)
+            else:
+                lo = safe_float(work.loc[idx, "fvg_bear_low"], np.nan)
+                hi = safe_float(work.loc[idx, "fvg_bear_high"], np.nan)
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                age = len(work) - 1 - pos
+                if age <= MAX_ZONE_AGE_BARS:
+                    candidates.append({
+                        "kind": "FVG",
+                        "low": float(lo), "high": float(hi),
+                        "age": age, "weight": 27.0,
+                        "source": idx,
+                    })
+
+    if not candidates:
+        return None
+
+    current = float(df["close"].iloc[-1])
+
+    # Prefer a zone that is close to price. For BUY price should not be
+    # materially above the zone; for SELL price should not be materially below.
+    def distance(c):
+        if current < c["low"]:
+            return c["low"] - current
+        if current > c["high"]:
+            return current - c["high"]
+        return 0.0
+
+    candidates.sort(key=lambda c: (distance(c), c["age"]))
+    best = candidates[0]
+
+    # Try to merge an overlapping/nearby OB + FVG into one stronger zone.
+    for other in candidates[1:]:
+        overlap_low = max(best["low"], other["low"])
+        overlap_high = min(best["high"], other["high"])
+        near = max(best["low"], other["low"]) <= min(best["high"], other["high"]) + 0.20 * atr
+        if near:
+            best = {
+                **best,
+                "low": min(best["low"], other["low"]),
+                "high": max(best["high"], other["high"]),
+                "kind": f"{best['kind']} + {other['kind']}",
+                "weight": best["weight"] + other["weight"] * 0.55,
+                "age": min(best["age"], other["age"]),
+            }
+            break
+
+    zone_low, zone_high = best["low"], best["high"]
+    if zone_high <= zone_low:
+        return None
+
+    # Evidence around the zone: sweep, displacement, BOS/MSS.
+    zone_score = 0.0
+    recent = work.tail(min(12, len(work)))
+    sweep = bool(recent[sweep_col].fillna(False).any()) if sweep_col in recent.columns else False
+    if sweep:
+        zone_score += 22.0
+
+    bos_col = "bos_bullish" if direction == "BUY" else "bos_bearish"
+    mss_col = "mss_bullish" if direction == "BUY" else "mss_bearish"
+    bos = bool(recent[bos_col].fillna(False).any()) if bos_col in recent.columns else False
+    mss = bool(recent[mss_col].fillna(False).any()) if mss_col in recent.columns else False
+    if bos:
+        zone_score += 14.0
+    if mss:
+        zone_score += 10.0
+
+    # Displacement: strong candle in the intended direction.
+    body = (recent["close"] - recent["open"]).abs()
+    atr_s = recent["atr"].replace(0, np.nan) if "atr" in recent.columns else pd.Series(index=recent.index)
+    disp_buy = ((recent["close"] > recent["open"]) & (body >= 1.25 * atr_s)).fillna(False)
+    disp_sell = ((recent["close"] < recent["open"]) & (body >= 1.25 * atr_s)).fillna(False)
+    displacement = bool((disp_buy if direction == "BUY" else disp_sell).any())
+    if displacement:
+        zone_score += 14.0
+
+    # OTE overlap is a quality bonus, not a substitute for the zone.
+    ote_ok, _ = ote_filter(df, direction)
+    if ote_ok:
+        zone_score += 8.0
+
+    # HTF-style premium/discount alignment from the working timeframe.
+    last = df.iloc[-1]
+    if direction == "BUY" and safe_bool(last.get("in_discount")):
+        zone_score += 7.0
+    elif direction == "SELL" and safe_bool(last.get("in_premium")):
+        zone_score += 7.0
+
+    freshness = max(0.0, 8.0 * (1.0 - best["age"] / max(MAX_ZONE_AGE_BARS, 1)))
+    zone_score += freshness
+    zone_score += min(best["weight"], 55.0)
+
+    zone_score = clamp(zone_score, 0.0, 100.0)
+    center = (zone_low + zone_high) / 2.0
+    dist_atr = distance(best) / atr if atr > 0 else np.inf
+
+    return {
+        "low": float(zone_low),
+        "high": float(zone_high),
+        "center": float(center),
+        "quality": float(zone_score),
+        "distance": float(distance(best)),
+        "distance_atr": float(dist_atr),
+        "age": int(best["age"]),
+        "kind": best["kind"],
+        "sweep": sweep,
+        "bos": bos,
+        "mss": mss,
+        "displacement": displacement,
+        "ote": bool(ote_ok),
+    }
+
+
+def _nearest_intraday_liquidity(df, signal, entry, max_distance):
+    """Nearest opposing liquidity/structure within a bounded intraday range."""
+    candidates = []
+    work = df.iloc[-60:] if len(df) > 60 else df
+
+    if signal == "BUY":
+        for col in ("swing_high",):
+            if col in work.columns:
+                for idx in work.index[work[col].fillna(False)]:
+                    v = safe_float(work.loc[idx, "high"], np.nan)
+                    if np.isfinite(v) and v > entry:
+                        candidates.append(("Swing High", v))
+        if len(work):
+            for n, label in ((8, "8-bar High"), (20, "20-bar High")):
+                if len(work) >= n:
+                    v = float(work["high"].iloc[-n:].max())
+                    if v > entry:
+                        candidates.append((label, v))
+        candidates = [(n, v) for n, v in candidates if v - entry <= max_distance]
+        return min(candidates, key=lambda x: x[1], default=(None, np.nan))
+
+    for col in ("swing_low",):
+        if col in work.columns:
+            for idx in work.index[work[col].fillna(False)]:
+                v = safe_float(work.loc[idx, "low"], np.nan)
+                if np.isfinite(v) and v < entry:
+                    candidates.append(("Swing Low", v))
+    if len(work):
+        for n, label in ((8, "8-bar Low"), (20, "20-bar Low")):
+            if len(work) >= n:
+                v = float(work["low"].iloc[-n:].min())
+                if v < entry:
+                    candidates.append((label, v))
+    candidates = [(n, v) for n, v in candidates if entry - v <= max_distance]
+    return max(candidates, key=lambda x: x[1], default=(None, np.nan))
+
+
 def calculate_trade_levels(df, signal, current_price, profile):
-    """ATR-buffered structural SL + Fibonacci / Pivot / S&R targets."""
+    """
+    Intraday Precision levels:
+      1) entry must be inside/near a fresh OB/FVG zone,
+      2) SL sits just beyond that zone,
+      3) TP1 uses nearby liquidity first,
+      4) TP distances are capped to avoid unrealistic same-day targets.
+    """
     atr = safe_float(df["atr"].iloc[-1], np.nan)
     if not np.isfinite(atr) or atr <= 0:
         return None
 
-    impulse   = find_impulse_leg(df, signal, lookback=120)
-    fibs      = fib_levels_from_impulse(impulse)
-    pivots    = calc_pivot_points(df)
-    sr_levels = collect_sr_levels(df, lookback=200)
-    swing_low, swing_high = latest_structure_levels(df)
-    recent_low  = float(df["low"].iloc[-20:].min())
-    recent_high = float(df["high"].iloc[-20:].max())
-    ssl = safe_float(df["ssl"].iloc[-1], np.nan)
-    bsl = safe_float(df["bsl"].iloc[-1], np.nan)
+    zone = _recent_smc_zone(df, signal, atr)
+    if zone is None:
+        return None
+
+    entry = float(current_price)
+    max_entry_distance = MAX_ENTRY_DISTANCE_ATR * atr
+
+    # Never chase price. Price can be inside the zone or just outside it.
+    entry_distance = zone["distance"]
+    entry_near = entry_distance <= max_entry_distance
 
     if signal == "BUY":
-        entry = float(current_price)
-        stop_cands = []
-        for lvl in (swing_low, recent_low, ssl):
-            if np.isfinite(lvl) and lvl < entry - 0.15 * atr:
-                stop_cands.append(lvl)
-        if fibs:
-            for k in ("0.786", "0.618"):
-                lvl = fibs["retracement"].get(k)
-                if lvl and lvl < entry - 0.15 * atr:
-                    stop_cands.append(lvl)
-        if pivots:
-            for k in ("s1", "s2", "fib_s1", "fib_s2"):
-                lvl = pivots.get(k)
-                if lvl and lvl < entry - 0.3 * atr:
-                    stop_cands.append(lvl)
+        # Prefer live price when it is in/near the zone; otherwise no entry.
+        if not entry_near:
+            return {
+                "entry": entry, "stop_loss": np.nan,
+                "target1": np.nan, "target2": np.nan, "target3": np.nan,
+                "risk": np.nan, "risk_reward_1": 0.0,
+                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
+                "sources": {"tp1": "NO ENTRY — price too far from zone",
+                            "tp2": "", "tp3": ""},
+                "entry_zone": zone, "intraday_valid": False,
+                "entry_zone_quality": zone["quality"],
+                "entry_distance_atr": zone["distance_atr"],
+            }
 
-        structural = max(stop_cands) if stop_cands else entry - 1.5 * atr
-        structural = max(structural, entry - 3.0 * atr)
-        structural = min(structural, entry - 1.0 * atr)
-        stop_loss  = structural - 0.25 * atr
+        # If price is slightly above the zone, use current price. If it is
+        # inside the zone, current price is the executable entry.
+        zone_floor = zone["low"]
+        stop_base = min(zone_floor, entry)
+        stop_loss = stop_base - SL_BUFFER_ATR * atr
         risk = entry - stop_loss
-        if risk <= 0: return None
 
-        min_t1 = entry + risk * MIN_RR_TP1
-        min_t2 = entry + risk * MIN_RR_TP2
-        min_t3 = entry + risk * MIN_RR_TP3
+        # Keep the structural stop tight. Do not widen it just to manufacture RR.
+        if risk < MIN_SL_ATR * atr:
+            stop_loss = entry - MIN_SL_ATR * atr
+            risk = MIN_SL_ATR * atr
 
-        cands = []
-        if fibs:
-            for k, v in fibs["extension"].items():
-                if v > entry + 0.3 * atr: cands.append({"name": f"Fib ext {k}", "level": v})
-            for k, v in fibs["retracement"].items():
-                if v > entry + 0.3 * atr: cands.append({"name": f"Fib retr {k}", "level": v})
-        if pivots:
-            for key, nm in (("r1", "Pivot R1"), ("r2", "Pivot R2"), ("r3", "Pivot R3"),
-                            ("fib_r1", "FibPivot R1"), ("fib_r2", "FibPivot R2"),
-                            ("fib_r3", "FibPivot R3")):
-                lvl = pivots.get(key)
-                if lvl and lvl > entry + 0.3 * atr: cands.append({"name": nm, "level": lvl})
-        for lvl, nm in ((bsl, "BSL"), (swing_high, "Swing High"), (recent_high, "20-bar High")):
-            if np.isfinite(lvl) and lvl > entry + 0.3 * atr: cands.append({"name": nm, "level": lvl})
-        for lvl in sr_levels:
-            if lvl > entry + 0.5 * atr: cands.append({"name": "S/R", "level": lvl})
-        cands.sort(key=lambda x: x["level"])
+        if risk > MAX_SL_ATR * atr:
+            return {
+                "entry": entry, "stop_loss": stop_loss,
+                "target1": np.nan, "target2": np.nan, "target3": np.nan,
+                "risk": risk, "risk_reward_1": 0.0,
+                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
+                "sources": {"tp1": "NO ENTRY — SL too wide", "tp2": "", "tp3": ""},
+                "entry_zone": zone, "intraday_valid": False,
+                "entry_zone_quality": zone["quality"],
+                "entry_distance_atr": zone["distance_atr"],
+            }
 
-        def pick(min_p, prev, fallback, fb_name):
-            valid = [c for c in cands if c["level"] >= min_p
-                     and (prev is None or c["level"] >= prev + 0.5 * atr)]
-            if valid: return valid[0]["level"], valid[0]["name"]
-            return fallback, fb_name
+        min_t1 = entry + max(risk * MIN_INTRADAY_RR1, risk * MIN_TP1_ROOM_R)
+        max_t1 = entry + MAX_TP1_ATR * atr
+        liq_name, liq = _nearest_intraday_liquidity(df, signal, entry, MAX_TP1_ATR * atr)
+        if np.isfinite(liq) and liq >= min_t1:
+            t1 = liq
+            t1_src = liq_name
+        else:
+            t1 = min_t1
+            t1_src = "Intraday RR fallback"
 
-        fb1 = fibs["extension"]["1.000"] if fibs else min_t1
-        fb2 = fibs["extension"]["1.618"] if fibs else min_t2
-        fb3 = fibs["extension"]["2.618"] if fibs else min_t3
-        fb1 = max(fb1, min_t1)
-        fb2 = max(fb2, min_t2, fb1 + 0.5 * atr)
-        fb3 = max(fb3, min_t3, fb2 + 0.5 * atr)
+        # If the closest valid liquidity is too far, do not manufacture a
+        # distant target. This keeps the setup intraday.
+        if t1 > max_t1:
+            return {
+                "entry": entry, "stop_loss": stop_loss,
+                "target1": t1, "target2": np.nan, "target3": np.nan,
+                "risk": risk, "risk_reward_1": (t1-entry)/risk,
+                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
+                "sources": {"tp1": "NO ENTRY — TP1 too far", "tp2": "", "tp3": ""},
+                "entry_zone": zone, "intraday_valid": False,
+                "entry_zone_quality": zone["quality"],
+                "entry_distance_atr": zone["distance_atr"],
+            }
 
-        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000")
-        t1 = max(t1, min_t1)
-        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618")
-        t2 = max(t2, min_t2, t1 + 0.5 * atr)
-        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618")
-        t3 = max(t3, min_t3, t2 + 0.5 * atr)
-
+        t2 = min(entry + MAX_TP2_ATR * atr, max(t1 + 0.35 * atr, t1 + risk * 0.60))
+        t3 = min(entry + (MAX_TP2_ATR + 0.45) * atr, t2 + risk * 0.60)
     else:
-        entry = float(current_price)
-        stop_cands = []
-        for lvl in (swing_high, recent_high, bsl):
-            if np.isfinite(lvl) and lvl > entry + 0.15 * atr: stop_cands.append(lvl)
-        if fibs:
-            for k in ("0.786", "0.618"):
-                lvl = fibs["retracement"].get(k)
-                if lvl and lvl > entry + 0.15 * atr: stop_cands.append(lvl)
-        if pivots:
-            for k in ("r1", "r2", "fib_r1", "fib_r2"):
-                lvl = pivots.get(k)
-                if lvl and lvl > entry + 0.3 * atr: stop_cands.append(lvl)
+        if not entry_near:
+            return {
+                "entry": entry, "stop_loss": np.nan,
+                "target1": np.nan, "target2": np.nan, "target3": np.nan,
+                "risk": np.nan, "risk_reward_1": 0.0,
+                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
+                "sources": {"tp1": "NO ENTRY — price too far from zone",
+                            "tp2": "", "tp3": ""},
+                "entry_zone": zone, "intraday_valid": False,
+                "entry_zone_quality": zone["quality"],
+                "entry_distance_atr": zone["distance_atr"],
+            }
 
-        structural = min(stop_cands) if stop_cands else entry + 1.5 * atr
-        structural = min(structural, entry + 3.0 * atr)
-        structural = max(structural, entry + 1.0 * atr)
-        stop_loss  = structural + 0.25 * atr
+        zone_ceiling = zone["high"]
+        stop_base = max(zone_ceiling, entry)
+        stop_loss = stop_base + SL_BUFFER_ATR * atr
         risk = stop_loss - entry
-        if risk <= 0: return None
 
-        min_t1 = entry - risk * MIN_RR_TP1
-        min_t2 = entry - risk * MIN_RR_TP2
-        min_t3 = entry - risk * MIN_RR_TP3
+        if risk < MIN_SL_ATR * atr:
+            stop_loss = entry + MIN_SL_ATR * atr
+            risk = MIN_SL_ATR * atr
 
-        cands = []
-        if fibs:
-            for k, v in fibs["extension"].items():
-                if v < entry - 0.3 * atr: cands.append({"name": f"Fib ext {k}", "level": v})
-            for k, v in fibs["retracement"].items():
-                if v < entry - 0.3 * atr: cands.append({"name": f"Fib retr {k}", "level": v})
-        if pivots:
-            for key, nm in (("s1", "Pivot S1"), ("s2", "Pivot S2"), ("s3", "Pivot S3"),
-                            ("fib_s1", "FibPivot S1"), ("fib_s2", "FibPivot S2"),
-                            ("fib_s3", "FibPivot S3")):
-                lvl = pivots.get(key)
-                if lvl and lvl < entry - 0.3 * atr: cands.append({"name": nm, "level": lvl})
-        for lvl, nm in ((ssl, "SSL"), (swing_low, "Swing Low"), (recent_low, "20-bar Low")):
-            if np.isfinite(lvl) and lvl < entry - 0.3 * atr: cands.append({"name": nm, "level": lvl})
-        for lvl in sr_levels:
-            if lvl < entry - 0.5 * atr: cands.append({"name": "S/R", "level": lvl})
-        cands.sort(key=lambda x: x["level"], reverse=True)
+        if risk > MAX_SL_ATR * atr:
+            return {
+                "entry": entry, "stop_loss": stop_loss,
+                "target1": np.nan, "target2": np.nan, "target3": np.nan,
+                "risk": risk, "risk_reward_1": 0.0,
+                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
+                "sources": {"tp1": "NO ENTRY — SL too wide", "tp2": "", "tp3": ""},
+                "entry_zone": zone, "intraday_valid": False,
+                "entry_zone_quality": zone["quality"],
+                "entry_distance_atr": zone["distance_atr"],
+            }
 
-        def pick(min_p, prev, fallback, fb_name):
-            valid = [c for c in cands if c["level"] <= min_p
-                     and (prev is None or c["level"] <= prev - 0.5 * atr)]
-            if valid: return valid[0]["level"], valid[0]["name"]
-            return fallback, fb_name
+        min_t1 = entry - max(risk * MIN_INTRADAY_RR1, risk * MIN_TP1_ROOM_R)
+        max_t1 = entry - MAX_TP1_ATR * atr
+        liq_name, liq = _nearest_intraday_liquidity(df, signal, entry, MAX_TP1_ATR * atr)
+        if np.isfinite(liq) and liq <= min_t1:
+            t1 = liq
+            t1_src = liq_name
+        else:
+            t1 = min_t1
+            t1_src = "Intraday RR fallback"
 
-        fb1 = fibs["extension"]["1.000"] if fibs else min_t1
-        fb2 = fibs["extension"]["1.618"] if fibs else min_t2
-        fb3 = fibs["extension"]["2.618"] if fibs else min_t3
-        fb1 = min(fb1, min_t1)
-        fb2 = min(fb2, min_t2, fb1 - 0.5 * atr)
-        fb3 = min(fb3, min_t3, fb2 - 0.5 * atr)
+        if t1 < max_t1:
+            return {
+                "entry": entry, "stop_loss": stop_loss,
+                "target1": t1, "target2": np.nan, "target3": np.nan,
+                "risk": risk, "risk_reward_1": (entry-t1)/risk,
+                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
+                "sources": {"tp1": "NO ENTRY — TP1 too far", "tp2": "", "tp3": ""},
+                "entry_zone": zone, "intraday_valid": False,
+                "entry_zone_quality": zone["quality"],
+                "entry_distance_atr": zone["distance_atr"],
+            }
 
-        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000")
-        t1 = min(t1, min_t1)
-        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618")
-        t2 = min(t2, min_t2, t1 - 0.5 * atr)
-        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618")
-        t3 = min(t3, min_t3, t2 - 0.5 * atr)
+        t2 = max(entry - MAX_TP2_ATR * atr, min(t1 - 0.35 * atr, t1 - risk * 0.60))
+        t3 = max(entry - (MAX_TP2_ATR + 0.45) * atr, t2 - risk * 0.60)
 
     rr1 = abs(t1 - entry) / risk
     rr2 = abs(t2 - entry) / risk
@@ -1820,25 +2039,49 @@ def calculate_trade_levels(df, signal, current_price, profile):
         "entry": float(entry), "stop_loss": float(stop_loss),
         "target1": float(t1), "target2": float(t2), "target3": float(t3),
         "risk": float(risk),
-        "risk_reward_1": float(rr1), "risk_reward_2": float(rr2), "risk_reward_3": float(rr3),
-        "sources": {"tp1": s1src, "tp2": s2src, "tp3": s3src},
-        "fibs": fibs, "pivots": pivots, "impulse": impulse,
+        "risk_reward_1": float(rr1), "risk_reward_2": float(rr2),
+        "risk_reward_3": float(rr3),
+        "sources": {"tp1": t1_src, "tp2": "Intraday liquidity extension",
+                    "tp3": "Intraday extension"},
+        "fibs": None, "pivots": None, "impulse": None,
+        "entry_zone": zone,
+        "intraday_valid": True,
+        "entry_zone_quality": float(zone["quality"]),
+        "entry_distance_atr": float(zone["distance_atr"]),
+        "sl_distance_atr": float(risk / atr),
+        "tp1_distance_atr": float(abs(t1 - entry) / atr),
+        "max_hold_hours": MAX_HOLD_HOURS,
     }
-
-
 def validate_levels(signal, levels, profile):
-    if not levels: return False, "تعذر بناء المستويات"
+    if not levels:
+        return False, "تعذر بناء المستويات"
+
+    if not levels.get("intraday_valid", False):
+        return False, levels.get("sources", {}).get("tp1", "Intraday setup invalid")
+
     if signal == "BUY":
         if not levels["stop_loss"] < levels["entry"] < levels["target1"]:
             return False, "ترتيب BUY غير صالح"
     else:
         if not levels["target1"] < levels["entry"] < levels["stop_loss"]:
             return False, "ترتيب SELL غير صالح"
-    if levels["risk_reward_1"] < MIN_RR_TP1: return False, "TP1 RR منخفض"
-    if levels["risk_reward_2"] < MIN_RR_TP2: return False, "TP2 RR منخفض"
-    if levels["risk_reward_3"] < MIN_RR_TP3: return False, "TP3 RR منخفض"
-    return True, ""
 
+    if levels.get("entry_zone_quality", 0) < MIN_ENTRY_ZONE_QUALITY:
+        return False, "Entry zone quality منخفضة"
+
+    if levels.get("entry_distance_atr", 999) > MAX_ENTRY_DISTANCE_ATR:
+        return False, "السعر بعيد عن Entry Zone"
+
+    if levels.get("sl_distance_atr", 999) > MAX_SL_ATR:
+        return False, "Stop Loss واسع"
+
+    if levels.get("tp1_distance_atr", 999) > MAX_TP1_ATR:
+        return False, "TP1 بعيد للتداول اليومي"
+
+    if levels["risk_reward_1"] < MIN_INTRADAY_RR1:
+        return False, "TP1 RR منخفض للـIntraday"
+
+    return True, ""
 
 # ============================================================
 # POSITION SIZE CALCULATOR
@@ -2033,6 +2276,46 @@ def confirmed_entry_gate(
 
 
 
+
+def intraday_precision_gate(levels, signal, df):
+    """Hard gate for entry location, SL width and intraday target room."""
+    checks = {}
+    blockers = []
+
+    zone = levels.get("entry_zone", {}) if levels else {}
+    checks["Entry Zone"] = bool(zone)
+    checks["Zone Quality"] = (
+        safe_float(levels.get("entry_zone_quality"), 0) >= MIN_ENTRY_ZONE_QUALITY
+        if levels else False
+    )
+    checks["Entry Distance"] = (
+        safe_float(levels.get("entry_distance_atr"), 999) <= MAX_ENTRY_DISTANCE_ATR
+        if levels else False
+    )
+    checks["SL Distance"] = (
+        safe_float(levels.get("sl_distance_atr"), 999) <= MAX_SL_ATR
+        if levels else False
+    )
+    checks["TP1 Distance"] = (
+        safe_float(levels.get("tp1_distance_atr"), 999) <= MAX_TP1_ATR
+        if levels else False
+    )
+    checks["TP1 RR"] = (
+        safe_float(levels.get("risk_reward_1"), 0) >= MIN_INTRADAY_RR1
+        if levels else False
+    )
+
+    checks["Liquidity Sweep"] = bool(zone.get("sweep", False))
+    checks["BOS/MSS"] = bool(zone.get("bos", False) or zone.get("mss", False))
+    checks["Displacement"] = bool(zone.get("displacement", False))
+    checks["OTE Alignment"] = bool(zone.get("ote", False))
+
+    for name, passed in checks.items():
+        if not passed:
+            blockers.append(name)
+
+    return len(blockers) == 0, checks, blockers
+
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
@@ -2122,7 +2405,9 @@ def generate_signal(df, current_price, pair_name, symbol,
     levels = calculate_trade_levels(df, candidate, current_price, profile)
     risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "تعذر")
     if signal in ("BUY", "SELL") and not risk_ok:
-        signal = "WAIT"; confidence = 0
+        # Preserve the directional analysis, but block execution because the
+        # entry/SL/TP geometry is not suitable for an intraday trade.
+        confidence = min(confidence, 69.0)
 
     pillars = scores["pillars"]
     w_confluence = weighted_confluence(pillars, candidate)
@@ -2236,6 +2521,10 @@ def generate_signal(df, current_price, pair_name, symbol,
         signal, enabled=not skip_external_filters
     )
 
+    precision_ok, precision_checks, precision_blockers = intraday_precision_gate(
+        levels, signal, df
+    )
+
     confirmed_ok, confirmed_checks, confirmed_blockers, confirmed_rr = (
         confirmed_entry_gate(
             signal=signal,
@@ -2255,6 +2544,15 @@ def generate_signal(df, current_price, pair_name, symbol,
             require_stability=not skip_external_filters,
         )
     )
+
+    confirmed_ok = confirmed_ok and precision_ok
+    if not precision_ok:
+        confirmed_blockers = confirmed_blockers + [
+            f"Precision: {b}" for b in precision_blockers
+        ]
+        confirmed_checks.update({
+            f"Precision / {k}": v for k, v in precision_checks.items()
+        })
 
     if signal == "WAIT":
         execution_status, execution_reason = (
@@ -2301,6 +2599,15 @@ def generate_signal(df, current_price, pair_name, symbol,
         "confirmation_blockers_final": confirmed_blockers,
         "confirmation_stability": stability_count,
         "confirmed_rr1": confirmed_rr,
+        "precision_ok": precision_ok,
+        "precision_checks": precision_checks,
+        "precision_blockers": precision_blockers,
+        "entry_zone": (levels or {}).get("entry_zone"),
+        "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
+        "entry_distance_atr": (levels or {}).get("entry_distance_atr", 0),
+        "sl_distance_atr": (levels or {}).get("sl_distance_atr", 0),
+        "tp1_distance_atr": (levels or {}).get("tp1_distance_atr", 0),
+        "max_hold_hours": (levels or {}).get("max_hold_hours", MAX_HOLD_HOURS),
         "trade_grade": trade_grade, "soft_penalties": penalty_total,
         "soft_advisories": advisories_str,
         "filter_results": filter_results, "all_filters_passed": all_passed,
@@ -3926,6 +4233,6 @@ with tab_backtest:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Balanced Mode · Fibonacci · SMC · MTF · Position Sizing · Edge
+    Intraday Precision · SMC Entry Zones · Tight SL · Near Liquidity TP · MTF
 </div>
 """, unsafe_allow_html=True)
