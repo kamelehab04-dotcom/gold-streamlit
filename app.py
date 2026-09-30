@@ -1099,29 +1099,43 @@ def build_features(df, profile):
 # ============================================================
 
 def timeframe_bias(df, pair_name=None):
-    if df is None or len(df) < 80: return "NEUTRAL", 0
-    x = build_features(df, profile_for(pair_name or ""))
+    """Lean directional bias: EMA50/200 + structure + BOS/MSS.
+    MACD/MFI/Ichimoku/Bollinger are intentionally excluded from execution bias.
+    """
+    if df is None or len(df) < 80:
+        return "NEUTRAL", 0
+    x = df.copy()
+    x["ema50"] = x["close"].ewm(span=50, adjust=False).mean()
+    x["ema200"] = x["close"].ewm(span=200, adjust=False).mean()
+    try:
+        # SMC columns may already exist; calculate them only if missing.
+        if "bos_bullish" not in x.columns or "mss_bullish" not in x.columns:
+            x = build_features(x, profile_for(pair_name or ""))
+    except Exception:
+        pass
     last = x.iloc[-1]
-    bull = bear = 0.0
-    if last["ema20"] > last["ema50"]: bull += 1
-    elif last["ema20"] < last["ema50"]: bear += 1
-    if last["ema50"] > last["ema200"]: bull += 1
-    elif last["ema50"] < last["ema200"]: bear += 1
-    if last["macd_histogram"] > 0: bull += 1
-    elif last["macd_histogram"] < 0: bear += 1
-    vrsi = safe_float(last.get("vrsi"), 50)
-    if vrsi >= 55: bull += 1
-    elif vrsi <= 45: bear += 1
+    bull = bear = 0
+    ema_bull = safe_float(last.get("ema50"), np.nan) > safe_float(last.get("ema200"), np.nan)
+    ema_bear = safe_float(last.get("ema50"), np.nan) < safe_float(last.get("ema200"), np.nan)
     structure = structure_state(x)
-    if structure["bullish"]: bull += 2
-    elif structure["bearish"]: bear += 2
-    if safe_bool(last.get("bos_bullish")) or safe_bool(last.get("mss_bullish")): bull += 1
-    if safe_bool(last.get("bos_bearish")) or safe_bool(last.get("mss_bearish")): bear += 1
-    if bull > bear + 0.75:
-        return "BULLISH", int(round(min(10, 10 * bull / max(bull + bear, 1))))
-    if bear > bull + 0.75:
-        return "BEARISH", int(round(min(10, 10 * bear / max(bull + bear, 1))))
-    return "NEUTRAL", 0
+    bos_bull = bool(x.tail(12).get("bos_bullish", pd.Series(False, index=x.tail(12).index)).fillna(False).any())
+    bos_bear = bool(x.tail(12).get("bos_bearish", pd.Series(False, index=x.tail(12).index)).fillna(False).any())
+    mss_bull = bool(x.tail(12).get("mss_bullish", pd.Series(False, index=x.tail(12).index)).fillna(False).any())
+    mss_bear = bool(x.tail(12).get("mss_bearish", pd.Series(False, index=x.tail(12).index)).fillna(False).any())
+
+    evidence = {
+        "EMA50/200": "BULLISH" if ema_bull else "BEARISH" if ema_bear else "NEUTRAL",
+        "Structure": "BULLISH" if structure.get("bullish") else "BEARISH" if structure.get("bearish") else "NEUTRAL",
+        "BOS/MSS": "BULLISH" if (bos_bull or mss_bull) else "BEARISH" if (bos_bear or mss_bear) else "NEUTRAL",
+    }
+    for v in evidence.values():
+        if v == "BULLISH": bull += 1
+        elif v == "BEARISH": bear += 1
+    if bull >= 2 and bull > bear:
+        return "BULLISH", int(55 + 15 * bull)
+    if bear >= 2 and bear > bull:
+        return "BEARISH", int(55 + 15 * bear)
+    return "NEUTRAL", 50
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -2319,54 +2333,70 @@ def intraday_precision_gate(levels, signal, df):
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
-    """Hierarchical trade engine.
+    """LEAN HIERARCHICAL ENGINE.
 
-    Direction is NOT created by a score.  A trade is promoted through ordered
-    gates: Market -> Regime -> HTF -> Structure -> Liquidity -> Displacement
-    -> Entry Zone -> LTF Trigger -> Risk Geometry -> Confirmation.
+    Decision indicators are intentionally limited to:
+      1) EMA50/EMA200 -> directional context
+      2) SMC structure -> BOS/MSS
+      3) Liquidity sweep -> institutional event
+      4) Order Block / FVG -> entry zone
+      5) RSI -> supporting momentum only
+      6) ATR -> realistic SL/TP geometry
+      7) Closed-candle displacement -> entry trigger
+      8) MTF 4H/1H/15M -> context alignment
 
-    BUY/SELL is returned only when the final execution gate passes.
-    Everything else is WAIT with an explicit blocker.
+    MACD, Bollinger, MFI, Ichimoku and news NEVER decide or block execution.
+    BUY/SELL is shown only after the complete execution gate passes.
     """
     profile = profile_for(pair_name)
     profile_key = get_asset_profile(pair_name)
     df = build_features(df, profile)
 
-    # ------------------------------------------------------------
-    # 0) DATA / MARKET SAFETY
-    # ------------------------------------------------------------
-    if df is None or len(df) < 80 or current_price is None:
+    def wait_result(reason, stage="DATA", candidate="NONE", levels=None,
+                    hierarchy=None, precision_checks=None, precision_blockers=None,
+                    quality=0.0, mtf_bias="NEUTRAL", mtf_conf=0.0,
+                    mtf_details=None, wk_bias="NEUTRAL", regime="UNKNOWN",
+                    regime_conf=0.0, dxy_bias="NEUTRAL", usd_msg=""):
+        h = hierarchy or []
         return {
-            "signal": "WAIT", "confidence": 0.0, "raw_confidence": 0.0,
-            "buy_score": 0.0, "sell_score": 0.0, "weighted_confluence": 0.0,
-            "pillars": {"BUY": {p: 0 for p in PILLAR_WEIGHTS},
-                        "SELL": {p: 0 for p in PILLAR_WEIGHTS}},
-            "mtf_bias": "NEUTRAL", "mtf_conf": 0.0, "mtf_details": {},
-            "weekly_bias": "NEUTRAL", "levels": None, "df": df,
-            "confirmation_ok": False, "confirmation_score": 0.0,
-            "confirmation_reasons": [], "confirmation_blockers": ["Insufficient data"],
-            "execution_status": "WAIT", "execution_reason": "Insufficient market data",
-            "confirmed_entry": False, "confirmation_checks": {},
-            "confirmation_blockers_final": ["Insufficient data"],
-            "confirmation_stability": 0, "confirmed_rr1": 0.0,
-            "precision_ok": False, "precision_checks": {},
-            "precision_blockers": ["Insufficient data"], "entry_zone": None,
-            "entry_zone_quality": 0, "entry_distance_atr": 999,
-            "sl_distance_atr": 999, "tp1_distance_atr": 999,
-            "max_hold_hours": MAX_HOLD_HOURS, "trade_grade": "WAIT",
-            "soft_penalties": 0.0, "soft_advisories": "None",
-            "filter_results": {}, "all_filters_passed": False,
-            "filter_block_reason": "Insufficient market data",
-            "regime": "UNKNOWN", "dxy_bias": "NEUTRAL", "usd_msg": "",
-            "divergence": None, "reasons": ["Insufficient market data"],
-            "setup_direction": "NONE", "hierarchy_stage": "DATA",
+            "signal": "WAIT", "setup_direction": candidate,
+            "hierarchy_stage": stage, "confidence": min(float(quality), 69.0),
+            "raw_confidence": float(quality), "buy_score": 0.0, "sell_score": 0.0,
+            "weighted_confluence": float(quality),
+            "pillars": {"BUY": {p: 0 for p in PILLAR_WEIGHTS}, "SELL": {p: 0 for p in PILLAR_WEIGHTS}},
+            "mtf_bias": mtf_bias, "mtf_conf": mtf_conf, "mtf_details": mtf_details or {},
+            "weekly_bias": wk_bias, "levels": levels, "df": df,
+            "confirmation_ok": False, "confirmation_score": float(quality),
+            "confirmation_reasons": [m for _, ok, m in h if ok],
+            "confirmation_blockers": [m for _, ok, m in h if not ok],
+            "execution_status": "WAIT", "execution_reason": f"WAIT — {reason}",
+            "confirmed_entry": False,
+            "confirmation_checks": {st: ok for st, ok, _ in h},
+            "confirmation_blockers_final": [reason], "confirmation_stability": 0,
+            "confirmed_rr1": safe_float((levels or {}).get("risk_reward_1"), 0),
+            "precision_ok": False, "precision_checks": precision_checks or {},
+            "precision_blockers": precision_blockers or [reason],
+            "entry_zone": (levels or {}).get("entry_zone"),
+            "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
+            "entry_distance_atr": (levels or {}).get("entry_distance_atr", 999),
+            "sl_distance_atr": (levels or {}).get("sl_distance_atr", 999),
+            "tp1_distance_atr": (levels or {}).get("tp1_distance_atr", 999),
+            "max_hold_hours": (levels or {}).get("max_hold_hours", MAX_HOLD_HOURS),
+            "trade_grade": "WAIT", "soft_penalties": 0.0, "soft_advisories": "None",
+            "filter_results": {"News Window": {"pass": True, "msg": "Ignored"}},
+            "all_filters_passed": False, "filter_block_reason": reason,
+            "regime": regime, "dxy_bias": dxy_bias, "usd_msg": usd_msg,
+            "divergence": detect_divergence(df),
+            "reasons": [f"{st}: {m}" for st, _, m in h] + [f"BLOCKER: {reason}"],
         }
+
+    if df is None or len(df) < 80 or current_price is None:
+        return wait_result("Insufficient market data")
 
     if precomputed is None:
         mtf_bias, mtf_conf, mtf_details = get_mtf_analysis(symbol, pair_name)
         wk_bias, _ = weekly_bias(symbol, pair_name)
         dxy_bias, _, usd_msg = get_dxy_context()
-        gold_corr = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
     else:
         mtf_bias = precomputed.get("mtf_bias", "NEUTRAL")
         mtf_conf = precomputed.get("mtf_conf", 50.0)
@@ -2374,310 +2404,211 @@ def generate_signal(df, current_price, pair_name, symbol,
         wk_bias = precomputed.get("weekly_bias", "NEUTRAL")
         dxy_bias = precomputed.get("dxy_bias", "NEUTRAL")
         usd_msg = ""
-        gold_corr = precomputed.get("gold_corr", None)
 
     last = df.iloc[-1]
     atr = safe_float(last.get("atr"), np.nan)
     regime, regime_conf = detect_regime(df)
-
-    # ------------------------------------------------------------
-    # Diagnostic scores remain available, but NEVER create a trade.
-    # ------------------------------------------------------------
-    scores = directional_score(df, pair_name, symbol,
-                               dxy_bias=dxy_bias, gold_corr=gold_corr)
-    buy_score = clamp(scores.get("buy", 0), 0, 100)
-    sell_score = clamp(scores.get("sell", 0), 0, 100)
-    pillars = scores.get("pillars", {
-        "BUY": {p: 0 for p in PILLAR_WEIGHTS},
-        "SELL": {p: 0 for p in PILLAR_WEIGHTS},
-    })
-
-    filter_results = {}
     hierarchy = []
+    filter_results = {}
     blockers = []
 
-    # ------------------------------------------------------------
-    # 1) MARKET GATE
-    # ------------------------------------------------------------
+    # 1. Market safety only.
     market_open, market_msg = is_market_open(pair_name)
-    filter_results["Market Open"] = {"pass": market_open, "msg": market_msg}
-    if not market_open and not skip_external_filters:
-        blockers.append("Market closed")
-
     kill_blocked, consec = check_kill_switch()
-    filter_results["Kill Switch"] = {
-        "pass": not kill_blocked, "msg": f"{consec} consecutive losses"
-    }
-    if kill_blocked and not skip_external_filters:
-        blockers.append("Kill Switch")
+    market_ok = (market_open or skip_external_filters) and (not kill_blocked or skip_external_filters)
+    filter_results["Market Open"] = {"pass": market_open, "msg": market_msg}
+    filter_results["Kill Switch"] = {"pass": not kill_blocked, "msg": f"{consec} consecutive losses"}
+    hierarchy.append(("MARKET", market_ok, "Tradable market" if market_ok else "Market safety block"))
+    if not market_ok:
+        return wait_result("Market safety block", "MARKET", hierarchy=hierarchy,
+                           mtf_bias=mtf_bias, mtf_conf=mtf_conf, mtf_details=mtf_details,
+                           wk_bias=wk_bias, regime=regime, regime_conf=regime_conf,
+                           dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    hierarchy.append(("MARKET", len(blockers) == 0,
-                      "Market conditions tradable" if not blockers else ", ".join(blockers)))
-
-    # ------------------------------------------------------------
-    # 2) REGIME GATE
-    # ------------------------------------------------------------
+    # 2. Regime: only reject compression/unknown. Direction comes from MTF+structure.
     regime_ok = regime not in ("UNKNOWN", "COMPRESSION")
-    hierarchy.append(("REGIME", regime_ok,
-                      f"{regime} ({regime_conf:.0f})"))
+    hierarchy.append(("REGIME", regime_ok, f"{regime} ({regime_conf:.0f})"))
     if not regime_ok:
-        blockers.append(f"Regime {regime}")
+        return wait_result(f"Regime {regime}", "REGIME", hierarchy=hierarchy,
+                           mtf_bias=mtf_bias, mtf_conf=mtf_conf, mtf_details=mtf_details,
+                           wk_bias=wk_bias, regime=regime, regime_conf=regime_conf,
+                           dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    # ------------------------------------------------------------
-    # 3) HTF DIRECTION GATE — this selects the ONLY candidate direction.
-    # ------------------------------------------------------------
-    if mtf_bias == "BULLISH":
+    # 3. MTF direction: 2-of-3 core timeframes. 1D is context only.
+    tf_items = []
+    for tf in ("4H", "1H", "15M"):
+        b = (mtf_details or {}).get(tf, {}).get("bias", "NEUTRAL")
+        tf_items.append((tf, b))
+    bull_tfs = sum(b == "BULLISH" for _, b in tf_items)
+    bear_tfs = sum(b == "BEARISH" for _, b in tf_items)
+    if bull_tfs >= 2 and bull_tfs > bear_tfs:
         candidate = "BUY"
-    elif mtf_bias == "BEARISH":
+    elif bear_tfs >= 2 and bear_tfs > bull_tfs:
         candidate = "SELL"
+    elif mtf_bias in ("BULLISH", "BEARISH") and mtf_conf >= 75:
+        candidate = "BUY" if mtf_bias == "BULLISH" else "SELL"
     else:
         candidate = "NONE"
-        blockers.append("HTF direction is neutral")
+    htf_ok = candidate in ("BUY", "SELL")
+    hierarchy.append(("MTF DIRECTION", htf_ok,
+                      f"{candidate} | 4H/1H/15M = {bull_tfs}B/{bear_tfs}S"))
+    if not htf_ok:
+        return wait_result("Waiting for 2-of-3 MTF direction", "MTF DIRECTION",
+                           candidate=candidate, hierarchy=hierarchy,
+                           mtf_bias=mtf_bias, mtf_conf=mtf_conf, mtf_details=mtf_details,
+                           wk_bias=wk_bias, regime=regime, regime_conf=regime_conf,
+                           dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    htf_ok = candidate in ("BUY", "SELL") and mtf_conf >= MIN_MTF_CONFIRMED
-    if candidate == "BUY" and regime == "TREND_BEARISH":
-        htf_ok = False
-        blockers.append("HTF BUY conflicts with bearish regime")
-    if candidate == "SELL" and regime == "TREND_BULLISH":
-        htf_ok = False
-        blockers.append("HTF SELL conflicts with bullish regime")
-    if not htf_ok and candidate in ("BUY", "SELL"):
-        blockers.append(f"HTF confirmation {mtf_conf:.0f} below threshold")
-    hierarchy.append(("HTF DIRECTION", htf_ok,
-                      f"{candidate} / {mtf_bias} / {mtf_conf:.0f}"))
+    # Weekly is contextual only: neutral is fine; opposite is a warning, not a blocker.
+    filter_results["Weekly Bias"] = {"pass": True, "msg": f"Context only: {wk_bias}"}
 
-    # Weekly context is a veto, not a score bonus.
-    weekly_ok = (
-        wk_bias == "NEUTRAL" or candidate == "NONE"
-        or (candidate == "BUY" and wk_bias == "BULLISH")
-        or (candidate == "SELL" and wk_bias == "BEARISH")
-    )
-    filter_results["Weekly Bias"] = {
-        "pass": weekly_ok, "msg": f"Weekly: {wk_bias}"
-    }
-    if not weekly_ok:
-        blockers.append(f"Weekly bias conflicts: {wk_bias}")
-
-    # ------------------------------------------------------------
-    # 4) STRUCTURE GATE — BOS/MSS must agree with candidate.
-    # ------------------------------------------------------------
+    # 4. Structure: 2-of-3 = EMA trend + BOS + MSS. No MACD/Ichimoku.
     recent = df.tail(14)
-    if candidate == "BUY":
-        bos = bool(recent.get("bos_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
-        mss = bool(recent.get("mss_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
-        opposite = bool(recent.get("mss_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
-    elif candidate == "SELL":
-        bos = bool(recent.get("bos_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
-        mss = bool(recent.get("mss_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
-        opposite = bool(recent.get("mss_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
-    else:
-        bos = mss = opposite = False
-
-    structure_ok = candidate in ("BUY", "SELL") and (bos or mss) and not opposite
-    filter_results["Structure"] = {
-        "pass": structure_ok,
-        "msg": f"BOS={bos} MSS={mss} Opposite={opposite}"
-    }
-    hierarchy.append(("STRUCTURE", structure_ok,
-                      "BOS/MSS aligned" if structure_ok else "Waiting for aligned BOS/MSS"))
+    ema50 = safe_float(last.get("ema50"), np.nan)
+    ema200 = safe_float(last.get("ema200"), np.nan)
+    ema_ok = (candidate == "BUY" and ema50 > ema200) or (candidate == "SELL" and ema50 < ema200)
+    bos_ok = bool(recent.get("bos_bullish" if candidate == "BUY" else "bos_bearish",
+                           pd.Series(False, index=recent.index)).fillna(False).any())
+    mss_ok = bool(recent.get("mss_bullish" if candidate == "BUY" else "mss_bearish",
+                           pd.Series(False, index=recent.index)).fillna(False).any())
+    structure_count = sum((ema_ok, bos_ok, mss_ok))
+    structure_ok = structure_count >= 2
+    filter_results["Structure"] = {"pass": structure_ok,
+                                    "msg": f"EMA={ema_ok} BOS={bos_ok} MSS={mss_ok}"}
+    hierarchy.append(("STRUCTURE", structure_ok, f"{structure_count}/3 structure confirmations"))
     if not structure_ok:
-        blockers.append("Structure not confirmed")
+        return wait_result("Waiting for structure confirmation", "STRUCTURE", candidate=candidate,
+                           hierarchy=hierarchy, mtf_bias=mtf_bias, mtf_conf=mtf_conf,
+                           mtf_details=mtf_details, wk_bias=wk_bias, regime=regime,
+                           regime_conf=regime_conf, dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    # ------------------------------------------------------------
-    # 5) LIQUIDITY + DISPLACEMENT — institutional sequence.
-    # ------------------------------------------------------------
-    zone = _recent_smc_zone(df, candidate, atr) if candidate in ("BUY", "SELL") and np.isfinite(atr) else None
+    # 5. Liquidity + SMC zone: one strong sweep is enough; OB/FVG provide the location.
+    zone = _recent_smc_zone(df, candidate, atr) if np.isfinite(atr) else None
     sweep_ok = bool(zone and zone.get("sweep"))
-    displacement_ok = bool(zone and zone.get("displacement"))
-    bos_zone_ok = bool(zone and (zone.get("bos") or zone.get("mss")))
+    ob_ok = bool(zone and (zone.get("ob") or zone.get("order_block"))) or bool(last.get("order_block_bullish" if candidate == "BUY" else "order_block_bearish"))
+    fvg_ok = bool(zone and zone.get("fvg")) or bool(last.get("fvg_bullish" if candidate == "BUY" else "fvg_bearish"))
+    zone_structure_ok = bool(zone and (zone.get("bos") or zone.get("mss")))
+    liquidity_ok = sweep_ok or (zone_structure_ok and (ob_ok or fvg_ok))
+    filter_results["Liquidity Sweep"] = {"pass": sweep_ok, "msg": "Sweep" if sweep_ok else "No fresh sweep"}
+    hierarchy.append(("LIQUIDITY", liquidity_ok,
+                      "Sweep confirmed" if sweep_ok else "SMC liquidity/zone evidence" if liquidity_ok else "Waiting for liquidity event"))
+    if not liquidity_ok:
+        return wait_result("Waiting for liquidity/SMC event", "LIQUIDITY", candidate=candidate,
+                           hierarchy=hierarchy, mtf_bias=mtf_bias, mtf_conf=mtf_conf,
+                           mtf_details=mtf_details, wk_bias=wk_bias, regime=regime,
+                           regime_conf=regime_conf, dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    filter_results["Liquidity Sweep"] = {
-        "pass": sweep_ok, "msg": "Liquidity sweep confirmed" if sweep_ok else "No fresh directional sweep"
-    }
-    filter_results["Displacement"] = {
-        "pass": displacement_ok, "msg": "Displacement confirmed" if displacement_ok else "No directional displacement"
-    }
-    hierarchy.append(("LIQUIDITY", sweep_ok,
-                      "Fresh sweep" if sweep_ok else "Waiting for liquidity sweep"))
-    hierarchy.append(("DISPLACEMENT", displacement_ok,
-                      "Strong displacement" if displacement_ok else "Waiting for displacement"))
-    if not sweep_ok:
-        blockers.append("Liquidity sweep")
-    if not displacement_ok:
-        blockers.append("Displacement")
-    if not bos_zone_ok:
-        blockers.append("Zone structure evidence")
-
-    # ------------------------------------------------------------
-    # 6) ENTRY ZONE GATE — no chasing.
-    # ------------------------------------------------------------
-    levels = calculate_trade_levels(df, candidate, current_price, profile) if candidate in ("BUY", "SELL") else None
-    risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "No valid trade levels")
-
+    # 6. Entry zone: OB/FVG + proximity. No chasing.
+    levels = calculate_trade_levels(df, candidate, current_price, profile)
     zone_quality = safe_float((levels or {}).get("entry_zone_quality"), 0)
     entry_dist = safe_float((levels or {}).get("entry_distance_atr"), 999)
     zone_ok = bool(levels) and zone_quality >= MIN_ENTRY_ZONE_QUALITY and entry_dist <= MAX_ENTRY_DISTANCE_ATR
-    filter_results["Entry Zone"] = {
-        "pass": zone_ok,
-        "msg": f"Quality {zone_quality:.0f} | distance {entry_dist:.2f} ATR"
-    }
+    filter_results["Entry Zone"] = {"pass": zone_ok,
+                                     "msg": f"Quality {zone_quality:.0f} | distance {entry_dist:.2f} ATR"}
     hierarchy.append(("ENTRY ZONE", zone_ok,
-                      "Price is in/near valid zone" if zone_ok else "Waiting for price to return to zone"))
+                      "Valid OB/FVG zone" if zone_ok else "Price too far from valid zone"))
     if not zone_ok:
-        blockers.append("Entry zone / no chase")
+        return wait_result("Waiting for price to enter valid OB/FVG zone", "ENTRY ZONE", candidate=candidate,
+                           levels=levels, hierarchy=hierarchy, mtf_bias=mtf_bias, mtf_conf=mtf_conf,
+                           mtf_details=mtf_details, wk_bias=wk_bias, regime=regime,
+                           regime_conf=regime_conf, dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    # ------------------------------------------------------------
-    # 7) LTF TRIGGER — final timing layer.
-    # ------------------------------------------------------------
-    if skip_external_filters or candidate == "NONE":
-        ltf_ok, ltf_msg = (True, "Backtest / no candidate") if candidate == "NONE" else (True, "Backtest — skipped")
-    else:
-        ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
+    # 7. Trigger quorum: 2-of-4. RSI is support, never mandatory by itself.
+    closed_df = df.iloc[:-1] if len(df) > 2 else df
+    displacement_ok = bool(zone and zone.get("displacement"))
+    candle_ok = candle_confirmation(closed_df, candidate)
+    rsi = safe_float(last.get("rsi"), 50)
+    rsi_ok = (candidate == "BUY" and rsi >= 48) or (candidate == "SELL" and rsi <= 52)
+    ltf_ok, ltf_msg = (True, "Backtest trigger bypass") if skip_external_filters else ltf_entry_trigger(symbol, candidate, profile_key)
+    trigger_count = sum((displacement_ok, candle_ok, rsi_ok, ltf_ok))
+    trigger_ok = trigger_count >= 2
     filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
-    hierarchy.append(("LTF TRIGGER", ltf_ok,
-                      ltf_msg if ltf_ok else "Waiting for LTF trigger"))
-    if not ltf_ok:
-        blockers.append("LTF trigger")
+    filter_results["Candle Trigger"] = {"pass": candle_ok, "msg": "Closed candle" if candle_ok else "Waiting"}
+    filter_results["Displacement"] = {"pass": displacement_ok, "msg": "Displacement" if displacement_ok else "No displacement"}
+    hierarchy.append(("TRIGGER", trigger_ok,
+                      f"{trigger_count}/4 trigger confirmations"))
+    if not trigger_ok:
+        return wait_result("Waiting for entry trigger", "TRIGGER", candidate=candidate,
+                           levels=levels, hierarchy=hierarchy, mtf_bias=mtf_bias, mtf_conf=mtf_conf,
+                           mtf_details=mtf_details, wk_bias=wk_bias, regime=regime,
+                           regime_conf=regime_conf, dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    # ------------------------------------------------------------
-    # 8) RISK GEOMETRY — tight, intraday and structural.
-    # ------------------------------------------------------------
-    precision_ok, precision_checks, precision_blockers = intraday_precision_gate(
-        levels, candidate, df
-    ) if candidate in ("BUY", "SELL") else (False, {}, ["No candidate"])
+    # 8. Risk geometry is hard: ATR-sized SL, realistic TP1 and minimum RR.
+    risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "No valid levels")
+    precision_ok, precision_checks, precision_blockers = intraday_precision_gate(levels, candidate, df)
     if not risk_ok:
         precision_ok = False
         precision_blockers = list(dict.fromkeys(precision_blockers + [risk_msg]))
-
-    filter_results["Risk Geometry"] = {
-        "pass": precision_ok,
-        "msg": "Entry/SL/TP geometry valid" if precision_ok else ", ".join(precision_blockers[:3])
-    }
+    filter_results["Risk Geometry"] = {"pass": precision_ok,
+                                        "msg": "Valid intraday geometry" if precision_ok else ", ".join(precision_blockers[:3])}
     hierarchy.append(("RISK", precision_ok,
-                      "RR and distances valid" if precision_ok else "Invalid intraday risk geometry"))
+                      f"RR1 {safe_float((levels or {}).get('risk_reward_1'), 0):.2f} | SL {safe_float((levels or {}).get('sl_distance_atr'), 999):.2f} ATR"))
     if not precision_ok:
-        blockers.extend([f"Risk: {x}" for x in precision_blockers])
+        return wait_result("Risk geometry invalid", "RISK", candidate=candidate, levels=levels,
+                           hierarchy=hierarchy, precision_checks=precision_checks,
+                           precision_blockers=precision_blockers, mtf_bias=mtf_bias, mtf_conf=mtf_conf,
+                           mtf_details=mtf_details, wk_bias=wk_bias, regime=regime,
+                           regime_conf=regime_conf, dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    # ------------------------------------------------------------
-    # 9) FINAL CLOSED-CANDLE TRIGGER
-    # ------------------------------------------------------------
-    candle_ok = candle_confirmation(df.iloc[:-1] if len(df) > 2 else df, candidate) if candidate in ("BUY", "SELL") else False
-    filter_results["Candle Trigger"] = {
-        "pass": candle_ok,
-        "msg": "Closed candle confirms direction" if candle_ok else "Waiting for closed candle confirmation"
-    }
-    hierarchy.append(("CANDLE", candle_ok,
-                      "Closed candle confirmed" if candle_ok else "Waiting for closed candle"))
-    if not candle_ok:
-        blockers.append("Candle trigger")
-
-    # ------------------------------------------------------------
-    # 10) QUALITY METRIC — only after hierarchy, never before.
-    # ------------------------------------------------------------
-    direction_score = buy_score if candidate == "BUY" else sell_score if candidate == "SELL" else 0
-    hierarchy_passes = sum(1 for _, ok, _ in hierarchy if ok)
-    hierarchy_total = max(len(hierarchy), 1)
+    # 9. Final quality. Supporting indicators can lower quality but cannot create direction.
+    stage_passes = sum(1 for _, ok, _ in hierarchy if ok)
+    stage_total = len(hierarchy)
+    trigger_quality = trigger_count / 4 * 100
+    structure_quality = structure_count / 3 * 100
+    mtf_quality = max(bull_tfs, bear_tfs) / 3 * 100
     quality = clamp(
-        40 + (hierarchy_passes / hierarchy_total) * 35
-        + min(direction_score, 100) * 0.15
-        + min(zone_quality, 100) * 0.10,
-        0, 95
+        55 + mtf_quality * 0.12 + structure_quality * 0.12 +
+        (100 if liquidity_ok else 0) * 0.10 + zone_quality * 0.31 +
+        trigger_quality * 0.20 + (10 if risk_ok else 0), 0, 95
     )
 
-    # Final confirmation stability applies only to live execution.
-    stability_count = update_confirmation_stability(
-        candidate if not blockers else "WAIT",
-        enabled=not skip_external_filters
-    )
+    # Live stability: 2 consecutive same-direction evaluations.
+    stability_count = update_confirmation_stability(candidate, enabled=not skip_external_filters)
     stability_ok = skip_external_filters or stability_count >= REQUIRED_STABLE_ANALYSES
     if not stability_ok:
-        blockers.append(f"Signal stability {stability_count}/{REQUIRED_STABLE_ANALYSES}")
+        return wait_result(f"Signal stability {stability_count}/{REQUIRED_STABLE_ANALYSES}",
+                           "STABILITY", candidate=candidate, levels=levels, hierarchy=hierarchy,
+                           precision_checks=precision_checks, precision_blockers=["Signal stability"],
+                           quality=quality, mtf_bias=mtf_bias, mtf_conf=mtf_conf,
+                           mtf_details=mtf_details, wk_bias=wk_bias, regime=regime,
+                           regime_conf=regime_conf, dxy_bias=dxy_bias, usd_msg=usd_msg)
 
-    # Confirmation score is now a diagnostic of the hierarchy, not a creator of direction.
-    conf_score = clamp((hierarchy_passes / hierarchy_total) * 100, 0, 100)
-    w_confluence = clamp(
-        (zone_quality * 0.35) + (conf_score * 0.40) + (direction_score * 0.25),
-        0, 100
-    )
-    confirmation_reasons = [msg for stage, ok, msg in hierarchy if ok]
-    confirmation_blockers = [msg for stage, ok, msg in hierarchy if not ok]
-    confirmed_ok = (
-        candidate in ("BUY", "SELL") and
-        not blockers and stability_ok
-    )
-
-    # No news logic. User explicitly requested the engine to ignore news.
-    filter_results["News Window"] = {"pass": True, "msg": "Ignored by hierarchical engine"}
-
-    if confirmed_ok:
-        signal = candidate
-        execution_status = "EXECUTE"
-        execution_reason = (
-            f"CONFIRMED {candidate} — hierarchy passed | "
-            f"RR1 {safe_float((levels or {}).get('risk_reward_1'), 0):.2f}"
-        )
-        trade_grade = "A+" if quality >= 85 else "A"
-    else:
-        signal = "WAIT"
-        execution_status = "WAIT"
-        first_blocker = next((b for b in blockers if b), "Confirmation pending")
-        execution_reason = f"WAIT — {first_blocker}"
-        trade_grade = "WAIT"
-
-    confidence = quality if confirmed_ok else min(quality, 69.0)
-    precision_ok = precision_ok and zone_ok
-
-    reasons = [f"{stage}: {msg}" for stage, ok, msg in hierarchy]
-    if blockers:
-        reasons.append("BLOCKERS: " + " | ".join(dict.fromkeys(blockers))[:500])
+    confirmed_ok = True
+    signal = candidate
+    execution_status = "EXECUTE"
+    execution_reason = f"CONFIRMED {candidate} — core hierarchy passed | RR1 {safe_float((levels or {}).get('risk_reward_1'), 0):.2f}"
+    trade_grade = "A+" if quality >= 85 else "A"
+    filter_results["News Window"] = {"pass": True, "msg": "Ignored by design"}
+    conf_score = clamp((stage_passes / max(stage_total, 1)) * 100, 0, 100)
+    w_confluence = clamp((zone_quality * 0.45) + (trigger_quality * 0.25) + (structure_quality * 0.15) + (mtf_quality * 0.15), 0, 100)
+    reasons = [f"{stage}: {msg}" for stage, _, msg in hierarchy]
 
     return {
-        "signal": signal,
-        "setup_direction": candidate,
-        "hierarchy_stage": next((stage for stage, ok, _ in hierarchy if not ok), "EXECUTE"),
-        "confidence": confidence,
-        "raw_confidence": quality,
-        "buy_score": buy_score,
-        "sell_score": sell_score,
+        "signal": signal, "setup_direction": candidate, "hierarchy_stage": "EXECUTE",
+        "confidence": quality, "raw_confidence": quality,
+        "buy_score": quality if candidate == "BUY" else 0.0,
+        "sell_score": quality if candidate == "SELL" else 0.0,
         "weighted_confluence": w_confluence,
-        "pillars": pillars,
-        "mtf_bias": mtf_bias,
-        "mtf_conf": mtf_conf,
-        "mtf_details": mtf_details,
-        "weekly_bias": wk_bias,
-        "levels": levels if risk_ok else None,
-        "df": df,
-        "confirmation_ok": confirmed_ok,
-        "confirmation_score": conf_score,
-        "confirmation_reasons": confirmation_reasons,
-        "confirmation_blockers": confirmation_blockers,
-        "execution_status": execution_status,
-        "execution_reason": execution_reason,
-        "confirmed_entry": confirmed_ok,
+        "pillars": {"BUY": {p: 0 for p in PILLAR_WEIGHTS}, "SELL": {p: 0 for p in PILLAR_WEIGHTS}},
+        "mtf_bias": mtf_bias, "mtf_conf": mtf_conf, "mtf_details": mtf_details,
+        "weekly_bias": wk_bias, "levels": levels, "df": df,
+        "confirmation_ok": True, "confirmation_score": conf_score,
+        "confirmation_reasons": reasons, "confirmation_blockers": [],
+        "execution_status": execution_status, "execution_reason": execution_reason,
+        "confirmed_entry": True,
         "confirmation_checks": {stage: ok for stage, ok, _ in hierarchy},
-        "confirmation_blockers_final": list(dict.fromkeys(blockers)),
-        "confirmation_stability": stability_count,
+        "confirmation_blockers_final": [], "confirmation_stability": stability_count,
         "confirmed_rr1": safe_float((levels or {}).get("risk_reward_1"), 0),
-        "precision_ok": precision_ok,
-        "precision_checks": precision_checks,
-        "precision_blockers": precision_blockers,
-        "entry_zone": (levels or {}).get("entry_zone"),
-        "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
-        "entry_distance_atr": (levels or {}).get("entry_distance_atr", 999),
+        "precision_ok": precision_ok, "precision_checks": precision_checks,
+        "precision_blockers": [], "entry_zone": (levels or {}).get("entry_zone"),
+        "entry_zone_quality": zone_quality, "entry_distance_atr": entry_dist,
         "sl_distance_atr": (levels or {}).get("sl_distance_atr", 999),
         "tp1_distance_atr": (levels or {}).get("tp1_distance_atr", 999),
         "max_hold_hours": (levels or {}).get("max_hold_hours", MAX_HOLD_HOURS),
-        "trade_grade": trade_grade,
-        "soft_penalties": 0.0,
-        "soft_advisories": "None",
-        "filter_results": filter_results,
-        "all_filters_passed": not bool(blockers),
-        "filter_block_reason": " | ".join(dict.fromkeys(blockers))[:500],
-        "regime": regime,
-        "dxy_bias": dxy_bias,
-        "usd_msg": usd_msg,
-        "divergence": detect_divergence(df),
-        "reasons": reasons,
+        "trade_grade": trade_grade, "soft_penalties": 0.0, "soft_advisories": "None",
+        "filter_results": filter_results, "all_filters_passed": True,
+        "filter_block_reason": "", "regime": regime, "dxy_bias": dxy_bias,
+        "usd_msg": usd_msg, "divergence": detect_divergence(df), "reasons": reasons,
     }
 
 # ============================================================
