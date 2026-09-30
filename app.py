@@ -1,15 +1,16 @@
 # ============================================================
-# BLACK PYRAMID v2006.0 — FUNDAMENTAL + MODELS EDITION
+# BLACK PYRAMID v2006.1 — CORRELATION GUARD EDITION
 # Institutional Analysis Terminal
 #
-# v2006.0 CHANGELOG:
-#  - NEW: Currency Strength Matrix (8 currencies vs basket)
-#  - NEW: Interest Rate Differentials (Carry bias)
-#  - NEW: Risk Sentiment (VIX → Risk-on/Risk-off)
-#  - NEW: Monte Carlo Simulation on Backtest
-#  - NEW: Fundamentals tab (full fundamental analysis)
-#  - ENHANCED: Context pillar with currency strength + rates + risk
-#  - KEPT: All v2005.9 cleaned features (Fibonacci, SMC, MTF, etc.)
+# v2006.1 CHANGELOG:
+#  - NEW: Correlation Guard (30-day rolling)
+#  - NEW: Portfolio Risk Manager (open positions tracker)
+#  - NEW: Currency Exposure Monitor (per-currency net)
+#  - NEW: Correlation Heatmap (visual)
+#  - NEW: Auto-block on correlation > 0.85 + same direction
+#  - NEW: Max 2 positions per currency (same direction)
+#  - NEW: Portfolio tab with live monitoring
+#  - KEPT: All v2006.0 features (Fundamentals + Monte Carlo)
 # ============================================================
 
 import os
@@ -47,7 +48,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2006.0-Fundamental"
+APP_VERSION = "v2006.1-CorrelationGuard"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -69,8 +70,13 @@ MIN_RR_TP3 = 2.50
 
 MAX_SOFT_PENALTY = 12.0
 SOFT_PENALTY_TOP_N = 4
-
 MAX_CONSECUTIVE_LOSSES = 3
+
+# Correlation Guard
+CORRELATION_WINDOW_DAYS = 30
+CORRELATION_THRESHOLD = 0.70
+CORRELATION_BLOCK_THRESHOLD = 0.85
+MAX_SAME_CURRENCY_EXPOSURE = 2
 
 LOGO_CANDIDATES = [
     "file_000000005cb4824697f509df31f2168a.png",
@@ -165,12 +171,6 @@ KILL_ZONES = {
     "London Close": (15, 17),
 }
 
-
-# ============================================================
-# FUNDAMENTAL CONFIG
-# ============================================================
-
-# أسعار الفائدة المركزية (يتم تحديثها يدوياً أو عبر API)
 CENTRAL_BANK_RATES = {
     "USD": 5.25, "EUR": 4.00, "GBP": 5.25, "JPY": 0.10,
     "CHF": 1.75, "AUD": 4.35, "NZD": 5.50, "CAD": 4.75,
@@ -234,6 +234,7 @@ def init_state():
         "show_market_status": False,
         "recent_results": [],
         "trade_journal": [],
+        "open_positions": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -267,10 +268,8 @@ def safe_bool(value):
 
 def asset_type_from_name(name: str) -> str:
     n = name.lower()
-    if any(x in n for x in ["gold", "silver", "xau", "xag"]):
-        return "gold"
-    if any(x in n for x in ["bitcoin", "ethereum", "btc", "eth"]):
-        return "crypto"
+    if any(x in n for x in ["gold", "silver", "xau", "xag"]): return "gold"
+    if any(x in n for x in ["bitcoin", "ethereum", "btc", "eth"]): return "crypto"
     return "forex"
 
 
@@ -280,16 +279,13 @@ def profile_for(name: str):
 
 def get_asset_profile(pair_name):
     name = str(pair_name).upper()
-    if "XAU" in name or "GOLD" in name or "SILVER" in name or "XAG" in name:
-        return "gold"
-    if any(x in name for x in ("BTC", "ETH", "XRP", "SOL", "ADA")):
-        return "crypto"
+    if "XAU" in name or "GOLD" in name or "SILVER" in name or "XAG" in name: return "gold"
+    if any(x in name for x in ("BTC", "ETH", "XRP", "SOL", "ADA")): return "crypto"
     return "forex"
 
 
 def fmt_price(value, pair_name):
-    if value is None or not np.isfinite(safe_float(value)):
-        return "N/A"
+    if value is None or not np.isfinite(safe_float(value)): return "N/A"
     if asset_type_from_name(pair_name) in ("gold", "crypto"):
         return f"${float(value):,.2f}"
     return f"{float(value):.5f}"
@@ -315,16 +311,13 @@ def load_logo_b64():
     for p in LOGO_CANDIDATES:
         if Path(p).exists():
             b64 = img_to_base64(p)
-            if b64:
-                return b64
+            if b64: return b64
     return None
 
 
 def parse_pair_currencies(pair_name):
-    """يستخرج (base, quote) من اسم الزوج."""
     name = str(pair_name).upper()
-    if "/" not in name:
-        return "", ""
+    if "/" not in name: return "", ""
     parts = name.split("/")
     base = parts[0].strip().split()[0].split("(")[0]
     quote = parts[1].strip().split()[0].split("(")[0] if len(parts) > 1 else ""
@@ -368,49 +361,37 @@ def log_trade_result(result, outcome):
 def is_market_open(pair_name):
     now = datetime.now(timezone.utc)
     asset = asset_type_from_name(pair_name)
-    if asset == "crypto":
-        return True, "Crypto 24/7"
-    weekday = now.weekday()
-    hour = now.hour
-    if weekday == 4 and hour >= 21:
-        return False, "🚫 السوق مغلق (الجمعة مساءً)"
-    if weekday == 5:
-        return False, "🚫 السوق مغلق (السبت)"
-    if weekday == 6 and hour < 22:
-        return False, "🚫 السوق لم يفتح بعد (الأحد)"
+    if asset == "crypto": return True, "Crypto 24/7"
+    weekday = now.weekday(); hour = now.hour
+    if weekday == 4 and hour >= 21: return False, "🚫 السوق مغلق (الجمعة مساءً)"
+    if weekday == 5: return False, "🚫 السوق مغلق (السبت)"
+    if weekday == 6 and hour < 22: return False, "🚫 السوق لم يفتح بعد (الأحد)"
     return True, "✅ السوق مفتوح"
 
 
 # ============================================================
-# SESSION & MARKET STATUS
+# SESSION INFO
 # ============================================================
 
 def get_current_session_info():
     now_utc = datetime.now(timezone.utc)
-    hour = now_utc.hour
-    minute = now_utc.minute
+    hour = now_utc.hour; minute = now_utc.minute
     time_str = f"{hour:02d}:{minute:02d} UTC"
-
     sessions = {
-        "Asian":       (0, 7,   "🌏", "طوكيو/سيدني — سيولة منخفضة"),
-        "London":      (7, 12,  "🇬🇧", "لندن — سيولة عالية"),
-        "Overlap":     (12, 16, "🔥", "London/NY Overlap — أعلى سيولة"),
-        "NY":          (16, 21, "🇺🇸", "نيويورك — سيولة عالية"),
+        "Asian": (0, 7, "🌏", "طوكيو/سيدني — سيولة منخفضة"),
+        "London": (7, 12, "🇬🇧", "لندن — سيولة عالية"),
+        "Overlap": (12, 16, "🔥", "London/NY Overlap — أعلى سيولة"),
+        "NY": (16, 21, "🇺🇸", "نيويورك — سيولة عالية"),
         "After-Hours": (21, 24, "🌙", "بعد الإغلاق — سيولة منخفضة"),
     }
-
     current = "After-Hours"; icon = "🌙"; desc = "بعد الإغلاق"
     for name, (start, end, sicon, sdesc) in sessions.items():
         if start <= hour < end:
-            current = name; icon = sicon; desc = sdesc
-            break
-
+            current = name; icon = sicon; desc = sdesc; break
     kz_msg = "خارج Kill Zones"
     for kz_name, (start, end) in KILL_ZONES.items():
         if start <= hour < end:
-            kz_msg = f"داخل {kz_name} ✅"
-            break
-
+            kz_msg = f"داخل {kz_name} ✅"; break
     return {"session": current, "icon": icon, "desc": desc,
             "time_utc": time_str, "kill_zone": kz_msg, "hour": hour}
 
@@ -418,8 +399,7 @@ def get_current_session_info():
 def get_market_status_info(symbol, pair_name):
     try:
         df = get_historical_data(symbol, "3mo", "4h")
-        if df is None or len(df) < 60:
-            return None
+        if df is None or len(df) < 60: return None
         profile = profile_for(pair_name)
         x = build_features(df, profile)
         last = x.iloc[-1]
@@ -431,30 +411,21 @@ def get_market_status_info(symbol, pair_name):
         atr_ratio = (atr_now / atr_mean) if atr_mean > 0 else 1.0
         structure = structure_state(x)
         struct_state = structure["state"]
-        ema20 = safe_float(last.get("ema20"))
-        ema50 = safe_float(last.get("ema50"))
+        ema20 = safe_float(last.get("ema20")); ema50 = safe_float(last.get("ema50"))
         ema200 = safe_float(last.get("ema200"))
-        if ema20 > ema50 > ema200:
-            trend_align = "متراصف صاعد"; trend_icon_v = "🟢"
-        elif ema20 < ema50 < ema200:
-            trend_align = "متراصف هابط"; trend_icon_v = "🔴"
-        elif ema20 > ema50:
-            trend_align = "صاعد قصير المدى"; trend_icon_v = "🟡"
-        else:
-            trend_align = "هابط قصير المدى"; trend_icon_v = "🟡"
+        if ema20 > ema50 > ema200: trend_align = "متراصف صاعد"; trend_icon_v = "🟢"
+        elif ema20 < ema50 < ema200: trend_align = "متراصف هابط"; trend_icon_v = "🔴"
+        elif ema20 > ema50: trend_align = "صاعد قصير المدى"; trend_icon_v = "🟡"
+        else: trend_align = "هابط قصير المدى"; trend_icon_v = "🟡"
         if atr_ratio > 1.5: vol_state = "مرتفع"; vol_icon = "🔥"
         elif atr_ratio < 0.7: vol_state = "منخفض"; vol_icon = "😴"
         else: vol_state = "طبيعي"; vol_icon = "🌊"
         if regime in ("TREND_BULLISH", "TREND_BEARISH") and vol_label in ("NORMAL", "HIGH"):
             overall = "مواتٍ للتداول ✅"; overall_icon = "✅"
-        elif regime == "RANGE":
-            overall = "تذبذب — حذر ⚠️"; overall_icon = "⚠️"
-        elif regime == "COMPRESSION":
-            overall = "انضغاط — انتظر الاختراق 🔵"; overall_icon = "🔵"
-        elif vol_label == "CHAOS":
-            overall = "تقلب مفرط — لا تتداول 🛑"; overall_icon = "🛑"
-        else:
-            overall = "غير واضح ⚪"; overall_icon = "⚪"
+        elif regime == "RANGE": overall = "تذبذب — حذر ⚠️"; overall_icon = "⚠️"
+        elif regime == "COMPRESSION": overall = "انضغاط — انتظر الاختراق 🔵"; overall_icon = "🔵"
+        elif vol_label == "CHAOS": overall = "تقلب مفرط 🛑"; overall_icon = "🛑"
+        else: overall = "غير واضح ⚪"; overall_icon = "⚪"
         return {"regime": regime, "regime_strength": regime_strength,
                 "volatility": vol_label, "vol_msg": vol_msg,
                 "vol_state": vol_state, "vol_icon": vol_icon,
@@ -481,8 +452,7 @@ def get_todays_events(events, pair_name):
             country = str(event.get("country", "")).strip().upper()
             mapped = country_map.get(country, country)
             if mapped not in currencies: continue
-            todays.append({"time": str(event.get("time", "")),
-                           "country": country,
+            todays.append({"time": str(event.get("time", "")), "country": country,
                            "event": str(event.get("event", "")),
                            "impact": str(event.get("impact", "")).strip().lower()})
         except Exception:
@@ -500,8 +470,7 @@ def sanitize_yf_symbol(sym: str) -> str:
     if "/" in s and s.count("/") == 1:
         parts = s.split("/")
         a, b = parts[0].strip(), parts[1].strip()
-        if a.upper() in ("BTC", "ETH", "SOL", "XRP", "ADA"):
-            return f"{a.upper()}-{b.upper()}"
+        if a.upper() in ("BTC", "ETH", "SOL", "XRP", "ADA"): return f"{a.upper()}-{b.upper()}"
         return f"{a.upper()}{b.upper()}=X"
     return s
 
@@ -560,8 +529,7 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
     td_symbol = mapping.get(symbol, sanitize_yf_symbol(symbol))
     interval_map = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1day"}
     url = "https://api.twelvedata.com/time_series"
-    params = {"symbol": td_symbol,
-              "interval": interval_map.get(interval, interval),
+    params = {"symbol": td_symbol, "interval": interval_map.get(interval, interval),
               "outputsize": outputsize, "apikey": TWELVE_API_KEY, "format": "JSON"}
     try:
         r = requests.get(url, params=params, timeout=10)
@@ -632,10 +600,6 @@ def get_spot_price(symbol):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_currency_strength_matrix():
-    """
-    قوة كل عملة مقابل سلة (نسبة مئوية على 20 فترة يومية).
-    يرجع dict: {CCY: score in -100..+100}
-    """
     strength = {}
     for ccy, pairs in CURRENCY_PAIRS_MAP.items():
         changes = []
@@ -644,22 +608,18 @@ def get_currency_strength_matrix():
                 df = get_historical_data(sym, "1mo", "1d")
                 if df is None or len(df) < 21: continue
                 pct = (df["close"].iloc[-1] - df["close"].iloc[-21]) / df["close"].iloc[-21] * 100
-                if np.isfinite(pct):
-                    changes.append(sign * pct)
+                if np.isfinite(pct): changes.append(sign * pct)
             except Exception:
                 continue
         strength[ccy] = float(np.mean(changes)) if changes else 0.0
-
     if not strength: return {}
     max_abs = max(abs(v) for v in strength.values()) or 1.0
     return {k: (v / max_abs) * 100 for k, v in strength.items()}
 
 
 def get_interest_rate_differential(pair_name):
-    """يرجع (diff, message) لفرق الفائدة."""
     base, quote = parse_pair_currencies(pair_name)
-    if not base or not quote:
-        return 0.0, "لا يوجد زوج صالح"
+    if not base or not quote: return 0.0, "لا يوجد زوج صالح"
     if base not in CENTRAL_BANK_RATES or quote not in CENTRAL_BANK_RATES:
         return 0.0, f"معدلات غير متاحة ({base}/{quote})"
     diff = CENTRAL_BANK_RATES[base] - CENTRAL_BANK_RATES[quote]
@@ -670,110 +630,70 @@ def get_interest_rate_differential(pair_name):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_risk_sentiment():
-    """VIX → Risk-on/Risk-off mode."""
     vix_df = get_historical_data("^VIX", "3mo", "1d")
     if vix_df is None or len(vix_df) < 5:
-        return {"vix": None, "vix_state": "UNKNOWN",
-                "risk_mode": "NEUTRAL", "bias_impact": 0.0,
-                "msg": "VIX غير متاح"}
-
+        return {"vix": None, "vix_state": "UNKNOWN", "risk_mode": "NEUTRAL",
+                "bias_impact": 0.0, "msg": "VIX غير متاح"}
     vix_now = float(vix_df["close"].iloc[-1])
     vix_avg = float(vix_df["close"].rolling(20).mean().iloc[-1]) if len(vix_df) >= 20 else vix_now
     vix_change = (vix_now - vix_avg) / vix_avg * 100 if vix_avg > 0 else 0
-
     if vix_now > 25: vix_state = "HIGH FEAR"
     elif vix_now > 20: vix_state = "ELEVATED"
     elif vix_now < 14: vix_state = "COMPLACENT"
     else: vix_state = "NORMAL"
-
     if vix_now > 25 or vix_change > 15:
         risk_mode = "RISK-OFF"; bias_impact = -1.0
     elif vix_now < 15 and vix_change < -5:
         risk_mode = "RISK-ON"; bias_impact = 1.0
     else:
         risk_mode = "NEUTRAL"; bias_impact = 0.0
-
-    return {
-        "vix": vix_now, "vix_avg": vix_avg, "vix_change": vix_change,
-        "vix_state": vix_state, "risk_mode": risk_mode,
-        "bias_impact": bias_impact,
-        "msg": f"VIX {vix_now:.2f} ({vix_state}) · {risk_mode}",
-    }
+    return {"vix": vix_now, "vix_avg": vix_avg, "vix_change": vix_change,
+            "vix_state": vix_state, "risk_mode": risk_mode,
+            "bias_impact": bias_impact,
+            "msg": f"VIX {vix_now:.2f} ({vix_state}) · {risk_mode}"}
 
 
 def get_fundamental_score(pair_name, ccy_strength=None, rate_diff=0.0, risk=None):
-    """
-    يحسب درجة التأثير الأساسي الكلي على الزوج.
-    يرجع (buy_bias, sell_bias, details)
-    """
-    if ccy_strength is None:
-        ccy_strength = get_currency_strength_matrix()
-    if risk is None:
-        risk = get_risk_sentiment()
-
+    if ccy_strength is None: ccy_strength = get_currency_strength_matrix()
+    if risk is None: risk = get_risk_sentiment()
     base, quote = parse_pair_currencies(pair_name)
-    buy_bias = 0.0; sell_bias = 0.0
-    details = []
-
-    # 1. Currency Strength Matrix
+    buy_bias = 0.0; sell_bias = 0.0; details = []
     if ccy_strength and base in ccy_strength and quote in ccy_strength:
-        base_str = ccy_strength[base]
-        quote_str = ccy_strength[quote]
+        base_str = ccy_strength[base]; quote_str = ccy_strength[quote]
         ccy_diff = base_str - quote_str
-        details.append({
-            "factor": "Currency Strength",
-            "base_val": base_str, "quote_val": quote_str,
-            "diff": ccy_diff,
-        })
+        details.append({"factor": "Currency Strength", "base_val": base_str,
+                        "quote_val": quote_str, "diff": ccy_diff})
         if ccy_diff > 20: buy_bias += 40
         elif ccy_diff > 10: buy_bias += 25
         elif ccy_diff < -20: sell_bias += 40
         elif ccy_diff < -10: sell_bias += 25
-
-    # 2. Interest Rate Differential (Carry)
     if abs(rate_diff) >= 0.5:
-        details.append({
-            "factor": "Rate Differential",
-            "diff": rate_diff,
-        })
+        details.append({"factor": "Rate Differential", "diff": rate_diff})
         if rate_diff > 2.0: buy_bias += 20
         elif rate_diff > 1.0: buy_bias += 12
         elif rate_diff < -2.0: sell_bias += 20
         elif rate_diff < -1.0: sell_bias += 12
-
-    # 3. Risk Sentiment
     if risk and risk.get("bias_impact", 0) != 0:
-        details.append({
-            "factor": "Risk Sentiment",
-            "mode": risk["risk_mode"],
-        })
+        details.append({"factor": "Risk Sentiment", "mode": risk["risk_mode"]})
         if risk["risk_mode"] == "RISK-OFF":
-            if base in RISK_OFF_CURRENCIES and quote not in RISK_OFF_CURRENCIES:
-                buy_bias += 15
-            elif quote in RISK_OFF_CURRENCIES and base not in RISK_OFF_CURRENCIES:
-                sell_bias += 15
+            if base in RISK_OFF_CURRENCIES and quote not in RISK_OFF_CURRENCIES: buy_bias += 15
+            elif quote in RISK_OFF_CURRENCIES and base not in RISK_OFF_CURRENCIES: sell_bias += 15
         elif risk["risk_mode"] == "RISK-ON":
-            if base in RISK_ON_CURRENCIES and quote not in RISK_ON_CURRENCIES:
-                buy_bias += 15
-            elif quote in RISK_ON_CURRENCIES and base not in RISK_ON_CURRENCIES:
-                sell_bias += 15
-
+            if base in RISK_ON_CURRENCIES and quote not in RISK_ON_CURRENCIES: buy_bias += 15
+            elif quote in RISK_ON_CURRENCIES and base not in RISK_ON_CURRENCIES: sell_bias += 15
     return clamp(buy_bias, 0, 100), clamp(sell_bias, 0, 100), details
 
 
 # ============================================================
-# MONTE CARLO SIMULATION
+# MONTE CARLO
 # ============================================================
 
 def monte_carlo_simulation(trades_r, n_sims=1000, n_trades=None):
-    """محاكاة Monte Carlo على توزيع R."""
     if not trades_r or len(trades_r) < 5: return None
     if n_trades is None: n_trades = len(trades_r)
-
     rng = np.random.default_rng(42)
     final_equities = np.zeros(n_sims)
     max_dds = np.zeros(n_sims)
-
     for i in range(n_sims):
         sampled = rng.choice(trades_r, size=n_trades, replace=True)
         equity_curve = np.cumsum(sampled)
@@ -781,19 +701,135 @@ def monte_carlo_simulation(trades_r, n_sims=1000, n_trades=None):
         dd = peak - equity_curve
         final_equities[i] = equity_curve[-1]
         max_dds[i] = dd.max() if len(dd) > 0 else 0
+    return {"mean_final": float(np.mean(final_equities)),
+            "median_final": float(np.median(final_equities)),
+            "p5_final": float(np.percentile(final_equities, 5)),
+            "p95_final": float(np.percentile(final_equities, 95)),
+            "prob_profit": float((final_equities > 0).mean() * 100),
+            "mean_dd": float(np.mean(max_dds)),
+            "p95_dd": float(np.percentile(max_dds, 95)),
+            "worst_dd": float(np.max(max_dds)),
+            "n_sims": n_sims, "n_trades": n_trades}
 
-    return {
-        "mean_final": float(np.mean(final_equities)),
-        "median_final": float(np.median(final_equities)),
-        "p5_final": float(np.percentile(final_equities, 5)),
-        "p95_final": float(np.percentile(final_equities, 95)),
-        "prob_profit": float((final_equities > 0).mean() * 100),
-        "mean_dd": float(np.mean(max_dds)),
-        "p95_dd": float(np.percentile(max_dds, 95)),
-        "worst_dd": float(np.max(max_dds)),
-        "n_sims": n_sims,
-        "n_trades": n_trades,
-    }
+
+# ============================================================
+# CORRELATION GUARD
+# ============================================================
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_pair_correlation(symbol1, symbol2, days=30):
+    try:
+        df1 = get_historical_data(symbol1, "3mo", "1d")
+        df2 = get_historical_data(symbol2, "3mo", "1d")
+        if df1 is None or df2 is None: return None
+        s1 = df1["close"].pct_change().dropna()
+        s2 = df2["close"].pct_change().dropna()
+        aligned = pd.concat([s1, s2], axis=1, join="inner").dropna()
+        if len(aligned) < days: return None
+        corr = float(aligned.iloc[-days:, 0].corr(aligned.iloc[-days:, 1]))
+        return corr if np.isfinite(corr) else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def build_correlation_matrix(symbols_tuple):
+    symbols = list(symbols_tuple)
+    n = len(symbols)
+    matrix = np.eye(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            corr = get_pair_correlation(symbols[i], symbols[j])
+            if corr is not None:
+                matrix[i, j] = corr; matrix[j, i] = corr
+    return matrix, symbols
+
+
+def check_portfolio_conflict(symbol, direction, pair_name, open_positions):
+    result = {"blocked": False, "warnings": [], "max_corr": 0.0,
+              "conflicting_pair": None, "same_currency_count": 0}
+    if not open_positions: return result
+    base_new, quote_new = parse_pair_currencies(pair_name)
+    for pos in open_positions:
+        if pos["symbol"] == symbol: continue
+        corr = get_pair_correlation(symbol, pos["symbol"])
+        if corr is None: continue
+        abs_corr = abs(corr)
+        if abs_corr > result["max_corr"]:
+            result["max_corr"] = abs_corr
+            result["conflicting_pair"] = pos["pair"]
+        if abs_corr >= CORRELATION_BLOCK_THRESHOLD and pos["direction"] == direction:
+            result["blocked"] = True
+            result["warnings"].append(
+                f"🚫 ارتباط {abs_corr:.0%} مع {pos['pair']} ({pos['direction']}) — نفس الاتجاه")
+        elif abs_corr >= CORRELATION_THRESHOLD and pos["direction"] == direction:
+            result["warnings"].append(
+                f"⚠️ ارتباط {abs_corr:.0%} مع {pos['pair']} ({pos['direction']})")
+        if abs_corr >= CORRELATION_THRESHOLD and pos["direction"] != direction:
+            result["warnings"].append(
+                f"ℹ️ تحوط طبيعي مع {pos['pair']} (ارتباط {abs_corr:.0%})")
+    for ccy in [base_new, quote_new]:
+        if not ccy: continue
+        count = 0
+        for pos in open_positions:
+            pb, pq = parse_pair_currencies(pos["pair"])
+            if ccy == pb and pos["direction"] == direction: count += 1
+            elif ccy == pq and pos["direction"] == direction: count += 1
+        if count >= MAX_SAME_CURRENCY_EXPOSURE:
+            result["blocked"] = True
+            result["warnings"].append(f"🚫 {count} صفقات {direction} على {ccy} — تعرض مفرط")
+        elif count == MAX_SAME_CURRENCY_EXPOSURE - 1:
+            result["warnings"].append(f"⚠️ {count} صفقة {direction} على {ccy} — قرب الحد")
+        result["same_currency_count"] = max(result["same_currency_count"], count)
+    return result
+
+
+def add_open_position(result, pair_name, symbol, lot_size=None, notes=""):
+    if result.get("signal") not in ("BUY", "SELL"): return False
+    if "open_positions" not in st.session_state:
+        st.session_state.open_positions = []
+    levels = result.get("levels") or {}
+    st.session_state.open_positions.append({
+        "id": len(st.session_state.open_positions) + 1,
+        "pair": pair_name, "symbol": symbol,
+        "direction": result["signal"],
+        "entry": levels.get("entry"), "stop_loss": levels.get("stop_loss"),
+        "target1": levels.get("target1"), "target2": levels.get("target2"),
+        "target3": levels.get("target3"),
+        "grade": result.get("trade_grade", "?"),
+        "confidence": result.get("confidence", 0),
+        "lot_size": lot_size,
+        "opened_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "notes": notes, "status": "OPEN",
+    })
+    return True
+
+
+def close_open_position(pos_id):
+    if "open_positions" not in st.session_state: return False
+    st.session_state.open_positions = [
+        p for p in st.session_state.open_positions if p["id"] != pos_id]
+    return True
+
+
+def get_portfolio_exposure():
+    exposure = {}
+    for pos in st.session_state.get("open_positions", []):
+        base, quote = parse_pair_currencies(pos["pair"])
+        direction = pos["direction"]
+        size = pos.get("lot_size") or 1.0
+        if base not in exposure:
+            exposure[base] = {"long": 0.0, "short": 0.0, "net": 0.0, "count": 0}
+        if quote not in exposure:
+            exposure[quote] = {"long": 0.0, "short": 0.0, "net": 0.0, "count": 0}
+        if direction == "BUY":
+            exposure[base]["long"] += size; exposure[quote]["short"] += size
+            exposure[base]["net"] += size; exposure[quote]["net"] -= size
+        else:
+            exposure[base]["short"] += size; exposure[quote]["long"] += size
+            exposure[base]["net"] -= size; exposure[quote]["net"] += size
+        exposure[base]["count"] += 1; exposure[quote]["count"] += 1
+    return exposure
 
 
 # ============================================================
@@ -802,14 +838,12 @@ def monte_carlo_simulation(trades_r, n_sims=1000, n_trades=None):
 
 def calc_rsi(series, period=14):
     delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+    gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    rsi = rsi.where(avg_loss > 0, 100.0)
-    rsi = rsi.where(avg_gain > 0, 0.0)
+    rsi = rsi.where(avg_loss > 0, 100.0); rsi = rsi.where(avg_gain > 0, 0.0)
     return rsi.fillna(50).clip(0, 100)
 
 
@@ -845,8 +879,7 @@ def calc_chaikin(df, period=21):
 
 def calc_rolling_vwap(df, period=20):
     tp = (df["high"] + df["low"] + df["close"]) / 3
-    vol = df["volume"].clip(lower=0)
-    pv = tp * vol
+    vol = df["volume"].clip(lower=0); pv = tp * vol
     cum_pv = pv.rolling(period, min_periods=period).sum()
     cum_vol = vol.rolling(period, min_periods=period).sum()
     vwap = cum_pv / cum_vol.replace(0, np.nan)
@@ -856,10 +889,8 @@ def calc_rolling_vwap(df, period=20):
 
 def calc_session_vwap(df):
     work = df.copy()
-    if work.index.tz is None:
-        dates = work.index.normalize()
-    else:
-        dates = work.index.tz_convert("UTC").normalize()
+    if work.index.tz is None: dates = work.index.normalize()
+    else: dates = work.index.tz_convert("UTC").normalize()
     tp = (work["high"] + work["low"] + work["close"]) / 3
     pv = tp * work["volume"].clip(lower=0)
     cum_pv = pv.groupby(dates).cumsum()
@@ -874,8 +905,7 @@ def calc_session_vwap(df):
 # ============================================================
 
 def find_confirmed_swings(df, order=3):
-    out = df.copy()
-    window = 2 * order + 1
+    out = df.copy(); window = 2 * order + 1
     if len(out) < window:
         out["swing_high"] = False; out["swing_low"] = False
         return out
@@ -898,14 +928,11 @@ def get_last_two_swings(df, kind="high"):
 
 
 def structure_state(df):
-    highs = get_last_two_swings(df, "high")
-    lows = get_last_two_swings(df, "low")
+    highs = get_last_two_swings(df, "high"); lows = get_last_two_swings(df, "low")
     bullish = False; bearish = False; state = "RANGE"
     if highs and lows:
-        hh = highs[-1][1] > highs[-2][1]
-        hl = lows[-1][1] > lows[-2][1]
-        lh = highs[-1][1] < highs[-2][1]
-        ll = lows[-1][1] < lows[-2][1]
+        hh = highs[-1][1] > highs[-2][1]; hl = lows[-1][1] > lows[-2][1]
+        lh = highs[-1][1] < highs[-2][1]; ll = lows[-1][1] < lows[-2][1]
         if hh and hl: bullish = True; state = "BULLISH"
         elif lh and ll: bearish = True; state = "BEARISH"
     return {"state": state, "bullish": bullish, "bearish": bearish,
@@ -913,20 +940,15 @@ def structure_state(df):
 
 
 def detect_bos_mss(df):
-    out = df.copy()
-    n = len(out)
-    bos_bull = np.zeros(n, dtype=bool)
-    bos_bear = np.zeros(n, dtype=bool)
-    mss_bull = np.zeros(n, dtype=bool)
-    mss_bear = np.zeros(n, dtype=bool)
+    out = df.copy(); n = len(out)
+    bos_bull = np.zeros(n, dtype=bool); bos_bear = np.zeros(n, dtype=bool)
+    mss_bull = np.zeros(n, dtype=bool); mss_bear = np.zeros(n, dtype=bool)
     if n == 0:
         out["bos_bullish"] = bos_bull; out["bos_bearish"] = bos_bear
         out["mss_bullish"] = mss_bull; out["mss_bearish"] = mss_bear
         return out
-    sh_arr = out["swing_high"].values
-    sl_arr = out["swing_low"].values
-    high_arr = out["high"].values
-    low_arr = out["low"].values
+    sh_arr = out["swing_high"].values; sl_arr = out["swing_low"].values
+    high_arr = out["high"].values; low_arr = out["low"].values
     close_arr = out["close"].values
     state = "RANGE"; last_high = np.nan; last_low = np.nan
     for i in range(n):
@@ -948,13 +970,8 @@ def detect_bos_mss(df):
     return out
 
 
-# ============================================================
-# LIQUIDITY / FVG / OB
-# ============================================================
-
 def detect_liquidity_sweeps(df, tolerance_atr=0.10):
-    out = df.copy()
-    tol = out["atr"] * tolerance_atr
+    out = df.copy(); tol = out["atr"] * tolerance_atr
     prev_high = out["high"].rolling(3).max().shift(1)
     prev_low = out["low"].rolling(3).min().shift(1)
     out["liquidity_sweep_bearish"] = ((out["high"] > prev_high + tol) & (out["close"] < prev_high)).fillna(False)
@@ -1009,17 +1026,12 @@ def analyze_smc(df, profile):
     out = detect_fvg(out)
     out = detect_order_blocks(out)
     out = add_premium_discount(out, min(profile["structure_lookback"], 100))
-    highs = out.index[out["swing_high"]]
-    lows = out.index[out["swing_low"]]
+    highs = out.index[out["swing_high"]]; lows = out.index[out["swing_low"]]
     out["bsl"] = np.nan; out["ssl"] = np.nan
     if len(highs): out["bsl"] = float(out.loc[highs[-1], "high"])
     if len(lows): out["ssl"] = float(out.loc[lows[-1], "low"])
     return out
 
-
-# ============================================================
-# PATTERN
-# ============================================================
 
 def candle_confirmation(df, direction):
     if len(df) < 3: return False
@@ -1066,10 +1078,6 @@ def smc_quality(df):
     return min(score, 100.0), reasons
 
 
-# ============================================================
-# FEATURE BUILD
-# ============================================================
-
 def build_features(df, profile, use_rolling_vwap=True):
     out = df.copy()
     out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
@@ -1081,10 +1089,8 @@ def build_features(df, profile, use_rolling_vwap=True):
     out["bb_upper"], out["bb_mid"], out["bb_lower"] = calc_bollinger(
         out["close"], profile["bb_period"], profile["bb_std"])
     out["chaikin_mf"] = calc_chaikin(out, 21)
-    try:
-        bar_hours = (out.index[-1] - out.index[-2]).total_seconds() / 3600
-    except Exception:
-        bar_hours = 4.0
+    try: bar_hours = (out.index[-1] - out.index[-2]).total_seconds() / 3600
+    except Exception: bar_hours = 4.0
     if use_rolling_vwap and bar_hours >= 3.5:
         out["vwap"] = calc_rolling_vwap(out, 20); out["vwap_type"] = "rolling"
     else:
@@ -1093,15 +1099,10 @@ def build_features(df, profile, use_rolling_vwap=True):
     return out
 
 
-# ============================================================
-# MTF
-# ============================================================
-
 def timeframe_bias(df, pair_name=None):
     if df is None or len(df) < 80: return "NEUTRAL", 0
     x = build_features(df, profile_for(pair_name or ""))
-    last = x.iloc[-1]
-    bull = bear = 0.0
+    last = x.iloc[-1]; bull = bear = 0.0
     if last["ema20"] > last["ema50"]: bull += 1
     elif last["ema20"] < last["ema50"]: bear += 1
     if last["ema50"] > last["ema200"]: bull += 1
@@ -1143,17 +1144,12 @@ def get_mtf_analysis(symbol, pair_name=None):
     return final, conf, results
 
 
-# ============================================================
-# CONTEXT
-# ============================================================
-
 @st.cache_data(ttl=300, show_spinner=False)
 def get_dxy_context():
     df = get_historical_data("DX-Y.NYB", "6mo", "4h")
     if df is None: return "NEUTRAL", 50.0, {}
     x = build_features(df, ASSET_PROFILES["forex"])
-    last = x.iloc[-1]
-    bull = bear = 0
+    last = x.iloc[-1]; bull = bear = 0
     if last["close"] > last["ema50"]: bull += 1
     elif last["close"] < last["ema50"]: bear += 1
     if last["macd"] > last["macd_signal"]: bull += 1
@@ -1189,10 +1185,6 @@ def get_gold_dxy_correlation():
     return float(aligned.iloc[:, 0].rolling(30).corr(aligned.iloc[:, 1]).iloc[-1])
 
 
-# ============================================================
-# REGIME
-# ============================================================
-
 def detect_regime(df):
     last = df.iloc[-1]
     atr = safe_float(last["atr"], np.nan)
@@ -1205,29 +1197,20 @@ def detect_regime(df):
     return "RANGE", 55
 
 
-# ============================================================
-# FILTERS
-# ============================================================
-
 @st.cache_data(ttl=180, show_spinner=False)
 def htf_zone_filter(symbol, direction, profile_key):
     try:
         df_d1 = get_historical_data(symbol, "1y", "1d")
-        if df_d1 is None or len(df_d1) < 60:
-            return True, "HTF غير متاح — مسموح", "UNKNOWN"
+        if df_d1 is None or len(df_d1) < 60: return True, "HTF غير متاح — مسموح", "UNKNOWN"
         profile = ASSET_PROFILES[profile_key]
         x = build_features(df_d1, profile)
         last = x.iloc[-1]
         in_premium = safe_bool(last.get("in_premium"))
         in_discount = safe_bool(last.get("in_discount"))
-        if direction == "BUY" and in_premium:
-            return False, "BUY مرفوض: HTF في Premium", "PREMIUM"
-        if direction == "SELL" and in_discount:
-            return False, "SELL مرفوض: HTF في Discount", "DISCOUNT"
-        if direction == "BUY" and in_discount:
-            return True, "BUY في Discount HTF ✅", "DISCOUNT"
-        if direction == "SELL" and in_premium:
-            return True, "SELL في Premium HTF ✅", "PREMIUM"
+        if direction == "BUY" and in_premium: return False, "BUY مرفوض: HTF في Premium", "PREMIUM"
+        if direction == "SELL" and in_discount: return False, "SELL مرفوض: HTF في Discount", "DISCOUNT"
+        if direction == "BUY" and in_discount: return True, "BUY في Discount HTF ✅", "DISCOUNT"
+        if direction == "SELL" and in_premium: return True, "SELL في Premium HTF ✅", "PREMIUM"
         return True, "HTF محايد", "MID"
     except Exception:
         return True, "HTF فشل التحميل", "UNKNOWN"
@@ -1237,8 +1220,7 @@ def htf_zone_filter(symbol, direction, profile_key):
 def ltf_entry_trigger(symbol, direction, profile_key):
     try:
         df = get_historical_data(symbol, "3mo", "1h")
-        if df is None or len(df) < 60:
-            return True, "LTF غير متاح — مسموح"
+        if df is None or len(df) < 60: return True, "LTF غير متاح — مسموح"
         profile = ASSET_PROFILES[profile_key]
         x = build_features(df, profile)
         if len(x) < 3: return True, "LTF قصير"
@@ -1262,10 +1244,8 @@ def ltf_entry_trigger(symbol, direction, profile_key):
 
 def session_filter(pair_name, strict=True):
     now_utc = datetime.now(timezone.utc).hour
-    london_open = 7 <= now_utc <= 16
-    ny_open = 12 <= now_utc <= 21
-    overlap = 12 <= now_utc <= 16
-    asian = 0 <= now_utc <= 7
+    london_open = 7 <= now_utc <= 16; ny_open = 12 <= now_utc <= 21
+    overlap = 12 <= now_utc <= 16; asian = 0 <= now_utc <= 7
     asset = asset_type_from_name(pair_name)
     if asset == "crypto":
         if overlap: return True, "NY/London Overlap (أعلى سيولة)", "OVERLAP"
@@ -1275,8 +1255,7 @@ def session_filter(pair_name, strict=True):
         if london_open or ny_open: return True, "جلسة نشطة للذهب ✅", "ACTIVE"
         if strict: return False, "خارج جلسات الذهب النشطة", "DEAD"
         return True, "خارج الجلسات (غير مشدّد)", "OFF_HOURS"
-    if strict and asian:
-        return False, "الجلسة الآسيوية — سيولة منخفضة", "ASIAN"
+    if strict and asian: return False, "الجلسة الآسيوية — سيولة منخفضة", "ASIAN"
     if overlap: return True, "Overlap مثالي ✅", "OVERLAP"
     if london_open or ny_open: return True, "جلسة نشطة ✅", "ACTIVE"
     if strict: return False, "خارج الجلسات النشطة", "DEAD"
@@ -1299,8 +1278,7 @@ def volatility_regime_filter(df):
 
 
 def weighted_confluence(pillar_data, direction):
-    weights = {"structure": 30, "trend": 20, "context": 20,
-               "momentum": 15, "volume": 15}
+    weights = {"structure": 30, "trend": 20, "context": 20, "momentum": 15, "volume": 15}
     total = 0.0
     for pillar, w in weights.items():
         raw = safe_float(pillar_data.get(direction, {}).get(pillar), 0)
@@ -1314,9 +1292,8 @@ def weighted_confluence(pillar_data, direction):
 def compute_soft_penalty(penalty_items, strict=False):
     if not penalty_items: return 0.0, []
     if not strict: return 0.0, []
-    sorted_items = sorted(
-        [item for item in penalty_items if item[1] > 0],
-        key=lambda x: x[1], reverse=True)[:SOFT_PENALTY_TOP_N]
+    sorted_items = sorted([item for item in penalty_items if item[1] > 0],
+                          key=lambda x: x[1], reverse=True)[:SOFT_PENALTY_TOP_N]
     weights = [1.0, 0.5, 0.25, 0.15]
     total = sum(p * w for (_, p), w in zip(sorted_items, weights))
     return min(total, MAX_SOFT_PENALTY), sorted_items
@@ -1372,8 +1349,7 @@ def ote_filter(df, direction):
     swings_l = get_last_two_swings(df, "low")
     if not swings_h or not swings_l: return True, "OTE غير متاح — مسموح"
     swing_h = swings_h[-1][1]; swing_l = swings_l[-1][1]
-    current = df["close"].iloc[-1]
-    leg = swing_h - swing_l
+    current = df["close"].iloc[-1]; leg = swing_h - swing_l
     if leg <= 0: return True, "موجة غير صالحة"
     if direction == "BUY":
         retr = (swing_h - current) / leg
@@ -1393,8 +1369,7 @@ def weekly_bias(symbol, pair_name):
         profile = profile_for(pair_name)
         x = build_features(df, profile)
         if len(x) < 5: return "NEUTRAL", 0
-        last = x.iloc[-1]
-        bull = bear = 0
+        last = x.iloc[-1]; bull = bear = 0
         if last["ema20"] > last["ema50"]: bull += 1
         elif last["ema20"] < last["ema50"]: bear += 1
         if last["macd"] > last["macd_signal"]: bull += 1
@@ -1408,10 +1383,6 @@ def weekly_bias(symbol, pair_name):
     except Exception:
         return "NEUTRAL", 0
 
-
-# ============================================================
-# SCORING — WITH FUNDAMENTAL INTEGRATION
-# ============================================================
 
 PILLAR_WEIGHTS = {"structure": 0.28, "trend": 0.18, "momentum": 0.14,
                   "volume": 0.14, "context": 0.26}
@@ -1470,27 +1441,20 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
         if last["close"] > last["open"]: scores["BUY"]["volume"] += 20
         elif last["close"] < last["open"]: scores["SELL"]["volume"] += 20
 
-    # ============ CONTEXT — ENHANCED WITH FUNDAMENTALS ============
-    if dxy_bias is None:
-        dxy_bias, _, _ = get_dxy_context()
+    if dxy_bias is None: dxy_bias, _, _ = get_dxy_context()
     usd_impact, usd_msg = get_pair_usd_context(pair_name, dxy_bias=dxy_bias)
     if usd_impact > 0: scores["BUY"]["context"] += 25; reasons.append("DXY يدعم")
     elif usd_impact < 0: scores["SELL"]["context"] += 25; reasons.append("DXY يدعم")
 
     if "Gold" in pair_name or "XAU" in pair_name.upper():
-        if gold_corr is None:
-            gold_corr = get_gold_dxy_correlation()
+        if gold_corr is None: gold_corr = get_gold_dxy_correlation()
         if gold_corr is not None:
-            if gold_corr <= -0.50 and dxy_bias == "BEARISH":
-                scores["BUY"]["context"] += 15
-            elif gold_corr <= -0.50 and dxy_bias == "BULLISH":
-                scores["SELL"]["context"] += 15
+            if gold_corr <= -0.50 and dxy_bias == "BEARISH": scores["BUY"]["context"] += 15
+            elif gold_corr <= -0.50 and dxy_bias == "BULLISH": scores["SELL"]["context"] += 15
 
-    # NEW: Fundamental score (Currency Strength + Rates + Risk)
     fund_buy, fund_sell, fund_details = get_fundamental_score(
-        pair_name, ccy_strength=ccy_strength,
-        rate_diff=rate_diff, risk=risk)
-    scores["BUY"]["context"] += fund_buy * 0.6   # scaled
+        pair_name, ccy_strength=ccy_strength, rate_diff=rate_diff, risk=risk)
+    scores["BUY"]["context"] += fund_buy * 0.6
     scores["SELL"]["context"] += fund_sell * 0.6
     if fund_buy > 20: reasons.append("أساسي يدعم BUY")
     if fund_sell > 20: reasons.append("أساسي يدعم SELL")
@@ -1503,8 +1467,7 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
     for p, w in PILLAR_WEIGHTS.items():
         scores["BUY"][p] = clamp(scores["BUY"][p], 0, 100)
         scores["SELL"][p] = clamp(scores["SELL"][p], 0, 100)
-        tb += scores["BUY"][p] * w
-        ts += scores["SELL"][p] * w
+        tb += scores["BUY"][p] * w; ts += scores["SELL"][p] * w
     div = detect_divergence(df)
     if div == "BULLISH": tb += 3
     elif div == "BEARISH": ts += 3
@@ -1516,37 +1479,27 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
             "fund_buy": fund_buy, "fund_sell": fund_sell}
 
 
-# ============================================================
-# CONFIRMATION
-# ============================================================
-
 def confirmation_gate(df, direction, pillar_scores, regime,
                       mtf_bias="NEUTRAL", mtf_conf=50.0, profile=None,
                       weekly_bias_val="NEUTRAL"):
     if df is None or len(df) < 30:
         return False, 0.0, ["بيانات غير كافية"], ["DATA"]
     profile = profile or ASSET_PROFILES["forex"]
-    last = df.iloc[-1]
-    score = 0.0; reasons = []; blockers = []
+    last = df.iloc[-1]; score = 0.0; reasons = []; blockers = []
     if (direction == "BUY" and regime == "TREND_BULLISH") or \
        (direction == "SELL" and regime == "TREND_BEARISH"):
         score += 20; reasons.append("Regime متوافق")
-    elif regime == "RANGE":
-        score += 8; reasons.append("Range")
-    elif regime == "COMPRESSION":
-        score += 5; reasons.append("Compression")
-    else:
-        blockers.append("Regime غير متوافق")
+    elif regime == "RANGE": score += 8; reasons.append("Range")
+    elif regime == "COMPRESSION": score += 5; reasons.append("Compression")
+    else: blockers.append("Regime غير متوافق")
     if (direction == "BUY" and mtf_bias == "BULLISH") or \
        (direction == "SELL" and mtf_bias == "BEARISH"):
         score += 25 * min(mtf_conf / 95, 1); reasons.append("MTF متوافق")
-    elif mtf_bias != "NEUTRAL":
-        blockers.append("MTF ضد الاتجاه")
+    elif mtf_bias != "NEUTRAL": blockers.append("MTF ضد الاتجاه")
     if (direction == "BUY" and weekly_bias_val == "BULLISH") or \
        (direction == "SELL" and weekly_bias_val == "BEARISH"):
         score += 15; reasons.append("Weekly متوافق")
-    elif weekly_bias_val != "NEUTRAL":
-        blockers.append("Weekly Bias ضد الاتجاه")
+    elif weekly_bias_val != "NEUTRAL": blockers.append("Weekly Bias ضد الاتجاه")
     ema_ok = (direction == "BUY" and last["ema20"] > last["ema50"]) or \
              (direction == "SELL" and last["ema20"] < last["ema50"])
     if ema_ok: score += 15; reasons.append("EMA alignment")
@@ -1558,10 +1511,8 @@ def confirmation_gate(df, direction, pillar_scores, regime,
     if candle_confirmation(df, direction):
         score += 10; reasons.append("Candle confirmation")
     smc_score, smc_reasons = smc_quality(df)
-    if smc_score >= 40:
-        score += 15; reasons.extend(smc_reasons[:3])
-    elif smc_score < 20:
-        blockers.append("SMC ضعيف")
+    if smc_score >= 40: score += 15; reasons.extend(smc_reasons[:3])
+    elif smc_score < 20: blockers.append("SMC ضعيف")
     own = sum(float(v) for v in pillar_scores.get(direction, {}).values())
     opp = sum(float(v) for v in pillar_scores.get(
         "SELL" if direction == "BUY" else "BUY", {}).values())
@@ -1574,13 +1525,8 @@ def confirmation_gate(df, direction, pillar_scores, regime,
     return ok, clamp(score, 0, 100), reasons, blockers
 
 
-# ============================================================
-# LEVELS
-# ============================================================
-
 def latest_structure_levels(df):
-    lows = df.index[df["swing_low"]].tolist()
-    highs = df.index[df["swing_high"]].tolist()
+    lows = df.index[df["swing_low"]].tolist(); highs = df.index[df["swing_high"]].tolist()
     sl = float(df.loc[lows[-1], "low"]) if lows else np.nan
     sh = float(df.loc[highs[-1], "high"]) if highs else np.nan
     return sl, sh
@@ -1590,8 +1536,7 @@ def calc_pivot_points(df):
     if len(df) < 2: return None
     last = df.iloc[-1]
     h = float(last["high"]); l = float(last["low"]); c = float(last["close"])
-    p = (h + l + c) / 3.0
-    rng = h - l
+    p = (h + l + c) / 3.0; rng = h - l
     if rng <= 0: return None
     return {"pivot": p, "range": rng,
             "r1": 2*p-l, "r2": p+rng, "r3": h+2*(p-l),
@@ -1609,10 +1554,8 @@ def find_impulse_leg(df, direction, lookback=120):
         if pos >= len(work) - 5:
             sub = work.iloc[:len(work)-5]
             if len(sub) < 10: return None
-            work = sub
-            pos = int(work["low"].values.argmin())
-        start = float(work["low"].iloc[pos])
-        after = work.iloc[pos:]
+            work = sub; pos = int(work["low"].values.argmin())
+        start = float(work["low"].iloc[pos]); after = work.iloc[pos:]
         if len(after) < 3: return None
         end = float(after["high"].iloc[int(after["high"].values.argmax())])
         if end <= start: return None
@@ -1622,10 +1565,8 @@ def find_impulse_leg(df, direction, lookback=120):
         if pos >= len(work) - 5:
             sub = work.iloc[:len(work)-5]
             if len(sub) < 10: return None
-            work = sub
-            pos = int(work["high"].values.argmax())
-        start = float(work["high"].iloc[pos])
-        after = work.iloc[pos:]
+            work = sub; pos = int(work["high"].values.argmax())
+        start = float(work["high"].iloc[pos]); after = work.iloc[pos:]
         if len(after) < 3: return None
         end = float(after["low"].iloc[int(after["low"].values.argmin())])
         if end >= start: return None
@@ -1640,8 +1581,8 @@ def fib_levels_from_impulse(impulse):
     def x(mult): return s + mult * leg if d == "BUY" else s - mult * leg
     return {"retracement": {"0.382": r(0.382), "0.500": r(0.500),
                             "0.618": r(0.618), "0.786": r(0.786)},
-            "extension": {"1.000": e, "1.272": x(1.272),
-                          "1.618": x(1.618), "2.000": x(2.000), "2.618": x(2.618)}}
+            "extension": {"1.000": e, "1.272": x(1.272), "1.618": x(1.618),
+                          "2.000": x(2.000), "2.618": x(2.618)}}
 
 
 def collect_sr_levels(df, lookback=200):
@@ -1673,8 +1614,7 @@ def calculate_trade_levels(df, signal, current_price, profile):
     bsl = safe_float(df["bsl"].iloc[-1], np.nan)
 
     if signal == "BUY":
-        entry = float(current_price)
-        stop_cands = []
+        entry = float(current_price); stop_cands = []
         for lvl in (swing_low, recent_low, ssl):
             if np.isfinite(lvl) and lvl < entry - 0.15 * atr: stop_cands.append(lvl)
         if fibs:
@@ -1691,8 +1631,7 @@ def calculate_trade_levels(df, signal, current_price, profile):
         stop_loss = structural - 0.25 * atr
         risk = entry - stop_loss
         if risk <= 0: return None
-        min_t1 = entry + risk * MIN_RR_TP1
-        min_t2 = entry + risk * MIN_RR_TP2
+        min_t1 = entry + risk * MIN_RR_TP1; min_t2 = entry + risk * MIN_RR_TP2
         min_t3 = entry + risk * MIN_RR_TP3
         cands = []
         if fibs:
@@ -1719,18 +1658,13 @@ def calculate_trade_levels(df, signal, current_price, profile):
         fb1 = fibs["extension"]["1.000"] if fibs else min_t1
         fb2 = fibs["extension"]["1.618"] if fibs else min_t2
         fb3 = fibs["extension"]["2.618"] if fibs else min_t3
-        fb1 = max(fb1, min_t1)
-        fb2 = max(fb2, min_t2, fb1 + 0.5 * atr)
+        fb1 = max(fb1, min_t1); fb2 = max(fb2, min_t2, fb1 + 0.5 * atr)
         fb3 = max(fb3, min_t3, fb2 + 0.5 * atr)
-        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000")
-        t1 = max(t1, min_t1)
-        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618")
-        t2 = max(t2, min_t2, t1 + 0.5 * atr)
-        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618")
-        t3 = max(t3, min_t3, t2 + 0.5 * atr)
+        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000"); t1 = max(t1, min_t1)
+        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618"); t2 = max(t2, min_t2, t1 + 0.5 * atr)
+        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618"); t3 = max(t3, min_t3, t2 + 0.5 * atr)
     else:
-        entry = float(current_price)
-        stop_cands = []
+        entry = float(current_price); stop_cands = []
         for lvl in (swing_high, recent_high, bsl):
             if np.isfinite(lvl) and lvl > entry + 0.15 * atr: stop_cands.append(lvl)
         if fibs:
@@ -1747,8 +1681,7 @@ def calculate_trade_levels(df, signal, current_price, profile):
         stop_loss = structural + 0.25 * atr
         risk = stop_loss - entry
         if risk <= 0: return None
-        min_t1 = entry - risk * MIN_RR_TP1
-        min_t2 = entry - risk * MIN_RR_TP2
+        min_t1 = entry - risk * MIN_RR_TP1; min_t2 = entry - risk * MIN_RR_TP2
         min_t3 = entry - risk * MIN_RR_TP3
         cands = []
         if fibs:
@@ -1775,19 +1708,12 @@ def calculate_trade_levels(df, signal, current_price, profile):
         fb1 = fibs["extension"]["1.000"] if fibs else min_t1
         fb2 = fibs["extension"]["1.618"] if fibs else min_t2
         fb3 = fibs["extension"]["2.618"] if fibs else min_t3
-        fb1 = min(fb1, min_t1)
-        fb2 = min(fb2, min_t2, fb1 - 0.5 * atr)
+        fb1 = min(fb1, min_t1); fb2 = min(fb2, min_t2, fb1 - 0.5 * atr)
         fb3 = min(fb3, min_t3, fb2 - 0.5 * atr)
-        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000")
-        t1 = min(t1, min_t1)
-        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618")
-        t2 = min(t2, min_t2, t1 - 0.5 * atr)
-        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618")
-        t3 = min(t3, min_t3, t2 - 0.5 * atr)
-
-    rr1 = abs(t1 - entry) / risk
-    rr2 = abs(t2 - entry) / risk
-    rr3 = abs(t3 - entry) / risk
+        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000"); t1 = min(t1, min_t1)
+        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618"); t2 = min(t2, min_t2, t1 - 0.5 * atr)
+        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618"); t3 = min(t3, min_t3, t2 - 0.5 * atr)
+    rr1 = abs(t1 - entry) / risk; rr2 = abs(t2 - entry) / risk; rr3 = abs(t3 - entry) / risk
     return {"entry": float(entry), "stop_loss": float(stop_loss),
             "target1": float(t1), "target2": float(t2), "target3": float(t3),
             "risk": float(risk),
@@ -1809,10 +1735,6 @@ def validate_levels(signal, levels, profile):
     if levels["risk_reward_3"] < MIN_RR_TP3: return False, "TP3 RR منخفض"
     return True, ""
 
-
-# ============================================================
-# POSITION SIZE
-# ============================================================
 
 def calc_position_size(balance, risk_pct, entry, stop_loss, pair_name):
     if balance <= 0 or risk_pct <= 0: return None
@@ -1856,15 +1778,11 @@ def build_trade_management(signal, levels, profile):
         {"stage": "TP1 Hit", "action": "إغلاق 40%",
          "details": f"نقل Stop Loss إلى التعادل ({fmt_price(entry, '')})", "icon": "🎯"},
         {"stage": "TP2 Hit", "action": "إغلاق 30%",
-         "details": f"تفعيل Trailing Stop = {atr_trail}× ATR من آخر قمة/قاع", "icon": "🎯"},
+         "details": f"Trailing Stop = {atr_trail}× ATR", "icon": "🎯"},
         {"stage": "TP3 Hit", "action": "إغلاق 30% النهائي",
-         "details": "إغلاق كامل + تسجيل النتيجة في Kill Switch", "icon": "🏁"},
+         "details": "إغلاق كامل + تسجيل النتيجة", "icon": "🏁"},
     ]
 
-
-# ============================================================
-# SIGNAL ENGINE
-# ============================================================
 
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
@@ -1892,9 +1810,8 @@ def generate_signal(df, current_price, pair_name, symbol,
         rate_diff = precomputed.get("rate_diff", 0.0)
         risk = precomputed.get("risk", None)
 
-    scores = directional_score(df, pair_name, symbol,
-                               dxy_bias=dxy_bias, gold_corr=gold_corr,
-                               ccy_strength=ccy_strength,
+    scores = directional_score(df, pair_name, symbol, dxy_bias=dxy_bias,
+                               gold_corr=gold_corr, ccy_strength=ccy_strength,
                                rate_diff=rate_diff, risk=risk)
 
     buy, sell = scores["buy"], scores["sell"]
@@ -1937,8 +1854,7 @@ def generate_signal(df, current_price, pair_name, symbol,
         atr_now = safe_float(last.get("atr"), 0)
         if atr_now > 0:
             body = abs(float(last["close"]) - float(last["open"]))
-            if body < 0.50 * atr_now:
-                soft_penalty_items.append(("شمعة ضعيفة", PENALTY_WEAK_CANDLE))
+            if body < 0.50 * atr_now: soft_penalty_items.append(("شمعة ضعيفة", PENALTY_WEAK_CANDLE))
             elif signal == "BUY" and last["close"] < last["open"]:
                 soft_penalty_items.append(("شمعة ضد الاتجاه", PENALTY_WEAK_CANDLE))
             elif signal == "SELL" and last["close"] > last["open"]:
@@ -1959,15 +1875,12 @@ def generate_signal(df, current_price, pair_name, symbol,
         df, candidate, pillars, scores["regime"], mtf_bias, mtf_conf, profile, wk_bias)
 
     filter_results = {}
-    filter_results["MSS Conflict"] = {
-        "pass": not mss_conflict,
+    filter_results["MSS Conflict"] = {"pass": not mss_conflict,
         "msg": "MSS معاكس — تنبيه" if mss_conflict else "MSS متوافق"}
 
-    all_passed = True
-    block_reason = ""
+    all_passed = True; block_reason = ""
     external_filter_names = ["HTF Zone", "LTF Trigger", "Session", "Volatility",
                              "Kill Zone", "OTE", "Displacement", "News Window"]
-
     if skip_external_filters:
         for _name in external_filter_names:
             filter_results[_name] = {"pass": True, "msg": "Backtest — skipped"}
@@ -1979,17 +1892,14 @@ def generate_signal(df, current_price, pair_name, symbol,
         ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
         filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
         if not ltf_ok: soft_penalty_items.append(("LTF Trigger", 6))
-        sess_ok, sess_msg, sess_label = session_filter(
-            pair_name, strict=(profile_key != "crypto"))
+        sess_ok, sess_msg, sess_label = session_filter(pair_name, strict=(profile_key != "crypto"))
         filter_results["Session"] = {"pass": sess_ok, "msg": sess_msg, "label": sess_label}
         if not sess_ok: soft_penalty_items.append(("Session", 5))
         vol_ok, vol_msg, vol_label = volatility_regime_filter(df)
         filter_results["Volatility"] = {"pass": vol_ok, "msg": vol_msg, "label": vol_label}
         if not vol_ok:
-            if vol_label == "CHAOS":
-                all_passed = False; block_reason = block_reason or vol_msg
-            else:
-                soft_penalty_items.append(("Volatility", 8))
+            if vol_label == "CHAOS": all_passed = False; block_reason = block_reason or vol_msg
+            else: soft_penalty_items.append(("Volatility", 8))
         kz_ok, kz_msg = in_kill_zone(asset_type_from_name(pair_name))
         filter_results["Kill Zone"] = {"pass": kz_ok, "msg": kz_msg}
         if not kz_ok: soft_penalty_items.append(("Kill Zone", 3))
@@ -2001,8 +1911,7 @@ def generate_signal(df, current_price, pair_name, symbol,
         if not disp_ok: soft_penalty_items.append(("Displacement", 5))
         ntw_block, ntw_msg = news_time_block(
             st.session_state.get("economic_events") or [], pair_name)
-        filter_results["News Window"] = {
-            "pass": not ntw_block, "msg": ntw_msg or "لا خبر قريب"}
+        filter_results["News Window"] = {"pass": not ntw_block, "msg": ntw_msg or "لا خبر قريب"}
         if ntw_block: all_passed = False; block_reason = block_reason or ntw_msg
 
     market_open, market_msg = is_market_open(pair_name)
@@ -2012,13 +1921,28 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     kill_blocked, consec = check_kill_switch()
     if kill_blocked and not skip_external_filters:
-        filter_results["Kill Switch"] = {
-            "pass": False, "msg": f"{MAX_CONSECUTIVE_LOSSES} خسائر متتالية — توقف"}
+        filter_results["Kill Switch"] = {"pass": False,
+            "msg": f"{MAX_CONSECUTIVE_LOSSES} خسائر متتالية — توقف"}
         all_passed = False
         block_reason = block_reason or f"Kill Switch نشط ({consec} خسائر)"
     else:
-        filter_results["Kill Switch"] = {"pass": True,
-                                          "msg": f"Discipline OK ({consec})"}
+        filter_results["Kill Switch"] = {"pass": True, "msg": f"Discipline OK ({consec})"}
+
+    # ---- Correlation Guard Filter ----
+    corr_blocked = False; corr_warnings = []
+    if not skip_external_filters and st.session_state.get("open_positions") and signal in ("BUY", "SELL"):
+        corr_check = check_portfolio_conflict(
+            symbol, signal, pair_name, st.session_state.open_positions)
+        corr_blocked = corr_check["blocked"]
+        corr_warnings = corr_check["warnings"]
+        if corr_blocked:
+            all_passed = False
+            block_reason = block_reason or "Portfolio Correlation Conflict"
+        filter_results["Correlation Guard"] = {
+            "pass": not corr_blocked,
+            "msg": f"⚠️ {len(corr_warnings)} تحذير" if corr_warnings else "✅ متوافق"}
+    else:
+        filter_results["Correlation Guard"] = {"pass": True, "msg": "لا مراكز مفتوحة"}
 
     weekly_ok = (wk_bias == "NEUTRAL"
                  or (candidate == "BUY" and wk_bias == "BULLISH")
@@ -2028,8 +1952,7 @@ def generate_signal(df, current_price, pair_name, symbol,
         "pass": w_confluence >= 50, "msg": f"Confluence: {w_confluence:.0f}/100"}
 
     raw_confidence = confidence
-    penalty_total, applied_penalties = compute_soft_penalty(
-        soft_penalty_items, strict=True)
+    penalty_total, applied_penalties = compute_soft_penalty(soft_penalty_items, strict=True)
     effective_confidence = clamp(raw_confidence - penalty_total, 0, 95)
 
     if raw_confidence >= A_PLUS_MIN and conf_score >= 78: trade_grade = "A+"
@@ -2049,9 +1972,9 @@ def generate_signal(df, current_price, pair_name, symbol,
     elif conf_score < profile.get("confirmation_threshold", 65):
         execution_status, execution_reason = "WAIT", f"Confirmation < {profile.get('confirmation_threshold', 65)}"
     elif trade_grade in ("A+", "A"):
-        execution_status, execution_reason = "EXECUTE", f"{trade_grade} — Balanced PASS"
+        execution_status, execution_reason = "EXECUTE", f"{trade_grade} — PASS"
     elif trade_grade == "B":
-        execution_status, execution_reason = "EXECUTE", "B — Balanced PASS"
+        execution_status, execution_reason = "EXECUTE", "B — PASS"
     elif trade_grade == "C":
         execution_status, execution_reason = "WATCH", "C — مراقبة فقط"
     else:
@@ -2061,8 +1984,7 @@ def generate_signal(df, current_price, pair_name, symbol,
     advisories_str = ", ".join(f"{n}({p})" for n, p in soft_penalty_items) or "None"
 
     return {
-        "signal": signal, "confidence": confidence,
-        "raw_confidence": raw_confidence,
+        "signal": signal, "confidence": confidence, "raw_confidence": raw_confidence,
         "buy_score": buy, "sell_score": sell,
         "weighted_confluence": w_confluence,
         "pillars": pillars, "mtf_bias": mtf_bias, "mtf_conf": mtf_conf,
@@ -2081,12 +2003,9 @@ def generate_signal(df, current_price, pair_name, symbol,
         "fund_details": scores.get("fund_details", []),
         "fund_buy": scores.get("fund_buy", 0),
         "fund_sell": scores.get("fund_sell", 0),
+        "corr_blocked": corr_blocked, "corr_warnings": corr_warnings,
     }
 
-
-# ============================================================
-# BACKTEST — WITH MONTE CARLO
-# ============================================================
 
 def _bias_from_slice(df_slice, pair_name):
     if df_slice is None or len(df_slice) < 60: return "NEUTRAL", 50.0
@@ -2095,8 +2014,7 @@ def _bias_from_slice(df_slice, pair_name):
         x["ema20"] = x["close"].ewm(span=20, adjust=False).mean()
         x["ema50"] = x["close"].ewm(span=50, adjust=False).mean()
         x["ema200"] = x["close"].ewm(span=200, adjust=False).mean()
-        last = x.iloc[-1]
-        bull = bear = 0
+        last = x.iloc[-1]; bull = bear = 0
         if last["ema20"] > last["ema50"]: bull += 1
         elif last["ema20"] < last["ema50"]: bear += 1
         if last["ema50"] > last["ema200"]: bull += 1
@@ -2127,53 +2045,41 @@ def quick_backtest(symbol, pair_name, lookback=200, run_monte_carlo=True):
         df_full = get_historical_data(symbol, "1y", "4h")
         if df_full is None or len(df_full) < lookback + 50: return None
         profile = profile_for(pair_name)
-
         try:
             dxy_df = get_historical_data("DX-Y.NYB", "1y", "4h")
             dxy_bias_full = _bias_from_slice(dxy_df, "DXY")[0] if dxy_df is not None else "NEUTRAL"
-        except Exception:
-            dxy_bias_full = "NEUTRAL"
+        except Exception: dxy_bias_full = "NEUTRAL"
         try:
             gold_corr = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
-        except Exception:
-            gold_corr = None
+        except Exception: gold_corr = None
         try:
             ccy_strength = get_currency_strength_matrix()
             rate_diff, _ = get_interest_rate_differential(pair_name)
             risk = get_risk_sentiment()
-        except Exception:
-            ccy_strength, rate_diff, risk = None, 0.0, None
+        except Exception: ccy_strength, rate_diff, risk = None, 0.0, None
 
         df = build_features(df_full, profile)
-        wins = losses = 0
-        total_r = 0.0
+        wins = losses = 0; total_r = 0.0
         equity = 0.0; peak = 0.0; max_dd = 0.0
-        trades_log = []
-        start_i = 100; end_i = len(df) - 20
+        trades_log = []; start_i = 100; end_i = len(df) - 20
 
         for i in range(start_i, end_i):
             slice_df = df.iloc[:i].copy()
             price = float(df["close"].iloc[i])
             mtf_bias, mtf_conf = _bias_from_slice(slice_df, pair_name)
             wk_bias = _weekly_bias_from_slice(slice_df, pair_name)
-            precomputed = {
-                "mtf_bias": mtf_bias, "mtf_conf": mtf_conf, "mtf_details": {},
-                "weekly_bias": wk_bias, "dxy_bias": dxy_bias_full,
-                "gold_corr": gold_corr, "ccy_strength": ccy_strength,
-                "rate_diff": rate_diff, "risk": risk}
+            precomputed = {"mtf_bias": mtf_bias, "mtf_conf": mtf_conf, "mtf_details": {},
+                           "weekly_bias": wk_bias, "dxy_bias": dxy_bias_full,
+                           "gold_corr": gold_corr, "ccy_strength": ccy_strength,
+                           "rate_diff": rate_diff, "risk": risk}
             try:
-                result = generate_signal(
-                    slice_df, price, pair_name, symbol,
-                    skip_external_filters=True, precomputed=precomputed)
-            except Exception:
-                continue
+                result = generate_signal(slice_df, price, pair_name, symbol,
+                                          skip_external_filters=True, precomputed=precomputed)
+            except Exception: continue
             if result["signal"] == "WAIT" or result["levels"] is None: continue
             if result["execution_status"] != "EXECUTE": continue
-
-            sl = result["levels"]["stop_loss"]
-            t1 = result["levels"]["target1"]
-            direction = result["signal"]
-            rr1 = result["levels"]["risk_reward_1"]
+            sl = result["levels"]["stop_loss"]; t1 = result["levels"]["target1"]
+            direction = result["signal"]; rr1 = result["levels"]["risk_reward_1"]
             future = df.iloc[i+1:i+21]
             hit_tp = hit_sl = False; outcome = "OPEN"
             for _, row in future.iterrows():
@@ -2183,26 +2089,20 @@ def quick_backtest(symbol, pair_name, lookback=200, run_monte_carlo=True):
                 else:
                     if row["high"] >= sl: hit_sl = True; outcome = "LOSS"; break
                     if row["low"] <= t1: hit_tp = True; outcome = "WIN"; break
-            if hit_tp:
-                wins += 1; total_r += rr1; equity += rr1
-            elif hit_sl:
-                losses += 1; total_r -= 1.0; equity -= 1.0
+            if hit_tp: wins += 1; total_r += rr1; equity += rr1
+            elif hit_sl: losses += 1; total_r -= 1.0; equity -= 1.0
             else: continue
-            peak = max(peak, equity)
-            max_dd = max(max_dd, peak - equity)
-            trades_log.append({
-                "bar_index": i, "direction": direction, "outcome": outcome,
-                "r": rr1 if hit_tp else -1.0,
-                "grade": result.get("trade_grade", "?"),
-                "confidence": result["confidence"]})
+            peak = max(peak, equity); max_dd = max(max_dd, peak - equity)
+            trades_log.append({"bar_index": i, "direction": direction, "outcome": outcome,
+                               "r": rr1 if hit_tp else -1.0,
+                               "grade": result.get("trade_grade", "?"),
+                               "confidence": result["confidence"]})
 
         total = wins + losses
         if total == 0:
-            return {"trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
-                    "total_R": 0, "expectancy": 0, "profit_factor": 0,
-                    "max_drawdown": 0, "sharpe": 0, "avg_r": 0,
-                    "trades_log": [], "monte_carlo": None}
-
+            return {"trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_R": 0,
+                    "expectancy": 0, "profit_factor": 0, "max_drawdown": 0,
+                    "sharpe": 0, "avg_r": 0, "trades_log": [], "monte_carlo": None}
         avg_r = total_r / total
         wins_r = [t["r"] for t in trades_log if t["outcome"] == "WIN"]
         losses_r = [t["r"] for t in trades_log if t["outcome"] == "LOSS"]
@@ -2210,27 +2110,19 @@ def quick_backtest(symbol, pair_name, lookback=200, run_monte_carlo=True):
         if len(all_r) > 1:
             r_std = float(np.std(all_r, ddof=1))
             sharpe = (avg_r / r_std * np.sqrt(len(all_r))) if r_std > 0 else 0.0
-        else:
-            sharpe = 0.0
-
+        else: sharpe = 0.0
         mc_result = None
         if run_monte_carlo and len(all_r) >= 5:
             mc_result = monte_carlo_simulation(all_r, n_sims=1000)
-
         return {"trades": total, "wins": wins, "losses": losses,
                 "win_rate": wins / total * 100, "total_R": total_r,
                 "expectancy": avg_r, "avg_r": avg_r,
                 "profit_factor": sum(wins_r) / max(abs(sum(losses_r)), 1e-9),
                 "max_drawdown": max_dd, "sharpe": sharpe,
-                "trades_log": trades_log[-50:],
-                "monte_carlo": mc_result}
+                "trades_log": trades_log[-50:], "monte_carlo": mc_result}
     except Exception as e:
         return {"error": str(e)}
 
-
-# ============================================================
-# ALL SIGNALS
-# ============================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_signals_parallel():
@@ -2240,25 +2132,23 @@ def get_all_signals_parallel():
             price, _ = get_spot_price(symbol)
             df = get_historical_data(symbol, "3mo", "4h")
             if price is None or df is None: return None
-            result = generate_signal(df, price, pair_name, symbol,
-                                     skip_external_filters=True)
+            result = generate_signal(df, price, pair_name, symbol, skip_external_filters=True)
             levels = result["levels"] or {}
-            return {
-                "الزوج": pair_name, "الإشارة": result["signal"],
-                "الثقة": round(result["confidence"], 1),
-                "BUY": round(result["buy_score"], 1),
-                "SELL": round(result["sell_score"], 1),
-                "MTF": result["mtf_bias"], "Weekly": result["weekly_bias"],
-                "Regime": result["regime"],
-                "Fundamental": f"B{result.get('fund_buy', 0):.0f}/S{result.get('fund_sell', 0):.0f}",
-                "Confluence": round(result["weighted_confluence"], 0),
-                "Confirmation": round(result["confirmation_score"], 1),
-                "Grade": result.get("trade_grade", "WAIT"),
-                "Execution": result["execution_status"],
-                "السعر": fmt_price(price, pair_name),
-                "SL": fmt_price(levels.get("stop_loss"), pair_name),
-                "TP1": fmt_price(levels.get("target1"), pair_name),
-                "RR3": round(levels.get("risk_reward_3", 0), 2) if levels else 0}
+            return {"الزوج": pair_name, "الإشارة": result["signal"],
+                    "الثقة": round(result["confidence"], 1),
+                    "BUY": round(result["buy_score"], 1),
+                    "SELL": round(result["sell_score"], 1),
+                    "MTF": result["mtf_bias"], "Weekly": result["weekly_bias"],
+                    "Regime": result["regime"],
+                    "Fund": f"B{result.get('fund_buy', 0):.0f}/S{result.get('fund_sell', 0):.0f}",
+                    "Confluence": round(result["weighted_confluence"], 0),
+                    "Confirmation": round(result["confirmation_score"], 1),
+                    "Grade": result.get("trade_grade", "WAIT"),
+                    "Execution": result["execution_status"],
+                    "السعر": fmt_price(price, pair_name),
+                    "SL": fmt_price(levels.get("stop_loss"), pair_name),
+                    "TP1": fmt_price(levels.get("target1"), pair_name),
+                    "RR3": round(levels.get("risk_reward_3", 0), 2) if levels else 0}
         except Exception:
             return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -2268,8 +2158,7 @@ def get_all_signals_parallel():
             try:
                 res = fut.result()
                 if res: results.append(res)
-            except Exception:
-                pass
+            except Exception: pass
     if not results: return pd.DataFrame()
     out = pd.DataFrame(results)
     order = {"BUY": 0, "SELL": 1, "WAIT": 2}
@@ -2277,10 +2166,6 @@ def get_all_signals_parallel():
     out = out.sort_values(["_o", "الثقة"], ascending=[True, False]).drop(columns="_o")
     return out
 
-
-# ============================================================
-# NEWS
-# ============================================================
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_fmp_economic_calendar():
@@ -2485,10 +2370,6 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 """, unsafe_allow_html=True)
 
 
-# ============================================================
-# HERO
-# ============================================================
-
 _logo_b64 = load_logo_b64()
 hero_left, hero_right = st.columns([1.15, 1.6])
 
@@ -2502,10 +2383,9 @@ with hero_left:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">FUNDAMENTAL</span>
+                <span class="hero-badge-balanced">CORRELATION GUARD</span>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div class="hero">
@@ -2513,10 +2393,9 @@ with hero_left:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">FUNDAMENTAL</span>
+                <span class="hero-badge-balanced">CORRELATION GUARD</span>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
 with hero_right:
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
@@ -2539,17 +2418,16 @@ with hero_right:
     with b4:
         if st.button("🔄 تحديث", width="stretch", key="btn_info_refresh"):
             st.session_state.economic_events = get_fmp_economic_calendar()
-            st.toast("✅ تم تحديث التقويم الاقتصادي")
+            st.toast("✅ تم تحديث التقويم")
 
 
 if st.session_state.show_calendar_today:
     st.markdown("### 📅 أحداث اليوم")
     if not st.session_state.economic_events:
-        st.info("لا توجد بيانات. اضغط '🔄 تحديث' أولاً.")
+        st.info("لا توجد بيانات. اضغط '🔄 تحديث'.")
     else:
         todays = get_todays_events(st.session_state.economic_events, st.session_state.selected_pair)
-        if not todays:
-            st.success("✅ لا توجد أحداث عالية التأثير اليوم.")
+        if not todays: st.success("✅ لا توجد أحداث عالية التأثير.")
         else:
             cal_cols = st.columns(3)
             for idx, ev in enumerate(todays[:9]):
@@ -2558,8 +2436,7 @@ if st.session_state.show_calendar_today:
                 elif impact in ("medium", "2"): icon = "🟡"; color = "#f5c87a"
                 else: icon = "🟢"; color = "#7cd4a0"
                 with cal_cols[idx % 3]:
-                    st.markdown(f"""
-                    <div class="tool-card" style="margin-bottom:12px;">
+                    st.markdown(f"""<div class="tool-card" style="margin-bottom:12px;">
                         <div class="tool-name">{icon} {ev['time']} · {ev['country']}</div>
                         <div class="tool-value" style="font-size:0.95rem; color:{color};">
                             {ev['event'][:50]}</div>
@@ -2590,8 +2467,7 @@ if st.session_state.show_market_status:
     st.markdown("### 📊 وضع السوق")
     _sym = PAIRS.get(st.session_state.selected_pair, "GC=F")
     mstat = get_market_status_info(_sym, st.session_state.selected_pair)
-    if mstat is None:
-        st.warning("تعذر تحميل البيانات.")
+    if mstat is None: st.warning("تعذر التحميل.")
     else:
         ms1, ms2, ms3, ms4 = st.columns(4)
         with ms1:
@@ -2613,31 +2489,28 @@ if st.session_state.show_market_status:
                 <div class="tool-desc">{mstat['overall']}</div></div>""", unsafe_allow_html=True)
 
 
-# ============================================================
-# SIDEBAR
-# ============================================================
-
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
     st.markdown("**💰 Fundamental + Models**")
-    st.caption("• Currency Strength Matrix")
-    st.caption("• Interest Rate Differentials")
+    st.caption("• Currency Strength + Rates")
     st.caption("• Risk Sentiment (VIX)")
     st.caption("• Monte Carlo Simulation")
+    st.markdown("---")
+    st.markdown("**🔗 Correlation Guard**")
+    st.caption(f"• Block threshold: {CORRELATION_BLOCK_THRESHOLD}")
+    st.caption(f"• Max per currency: {MAX_SAME_CURRENCY_EXPOSURE}")
+    st.caption(f"• Open positions: {len(st.session_state.get('open_positions', []))}")
     st.markdown("---")
     st.markdown("**🛑 Kill Switch**")
     kill_blocked, consec = check_kill_switch()
     if kill_blocked: st.error(f"🚫 نشط — {consec} خسائر")
     else: st.success(f"✅ Disciplined ({consec}/{MAX_CONSECUTIVE_LOSSES})")
-    if st.session_state.get("recent_results"):
-        st.caption(f"آخر صفقات: {' '.join(st.session_state.recent_results[-5:])}")
     if st.button("🗑️ Reset Kill Switch", width="stretch", key="reset_kill"):
         st.session_state.recent_results = []
         st.toast("✅ تم إعادة التعيين"); st.rerun()
     st.markdown("---")
-    st.markdown("**🎛️ وضع الفلاتر**")
     strict_mode = st.checkbox("🔒 Strict Filters",
         value=st.session_state.get("strict_filters", False))
     st.session_state.strict_filters = strict_mode
@@ -2646,33 +2519,20 @@ with st.sidebar:
         st.cache_data.clear(); st.rerun()
 
 
-# ============================================================
-# CONTROL BAR
-# ============================================================
-
-st.markdown('<div class="section-title">🎯 Analysis Control <span>اختر الأصل أو حلل الكل</span></div>',
-            unsafe_allow_html=True)
-
+st.markdown('<div class="section-title">🎯 Analysis Control</div>', unsafe_allow_html=True)
 ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.2, 1, 1])
-
 with ctrl_col1:
-    selected_pair = st.selectbox(
-        "🎯 اختر الأصل للتحليل",
-        list(PAIRS.keys()),
+    selected_pair = st.selectbox("🎯 اختر الأصل للتحليل", list(PAIRS.keys()),
         index=list(PAIRS.keys()).index(st.session_state.selected_pair)
-        if st.session_state.selected_pair in PAIRS else 0,
-        key="main_pair_selector")
+        if st.session_state.selected_pair in PAIRS else 0, key="main_pair_selector")
     st.session_state.selected_pair = selected_pair
     symbol = PAIRS[selected_pair]
-
 with ctrl_col2:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     analyze_this = st.button("🎯 تحليل الأصل", width="stretch", key="btn_analyze_one")
-
 with ctrl_col3:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     analyze_all = st.button("🌐 تحليل الكل", width="stretch", key="btn_analyze_all")
-
 
 if analyze_all:
     with st.spinner("🌐 Scanning..."):
@@ -2680,10 +2540,8 @@ if analyze_all:
         st.session_state.all_signals = get_all_signals_parallel()
         st.session_state.analyzing_all = True
         st.session_state.analysis_time = time.time() - start
-
 if analyze_this:
     st.cache_data.clear(); st.rerun()
-
 
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
     st.markdown('<div class="section-title">🌐 All Assets Scan</div>', unsafe_allow_html=True)
@@ -2693,56 +2551,46 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
     with res_col2:
         if st.button("🗑️ مسح", width="stretch", key="clear_all"):
             st.session_state.all_signals = None; st.rerun()
-    st.dataframe(st.session_state.all_signals, hide_index=True,
-                 width="stretch", height=440)
+    st.dataframe(st.session_state.all_signals, hide_index=True, width="stretch", height=440)
     st.markdown("---")
 
 
-# ============================================================
-# LOAD ASSET
-# ============================================================
-
 current_price, change = get_spot_price(symbol)
-if current_price is None:
-    st.error(f"تعذر الحصول على السعر لـ {selected_pair}."); st.stop()
+if current_price is None: st.error(f"تعذر السعر لـ {selected_pair}."); st.stop()
 df_raw = get_historical_data(symbol, "3mo", "4h")
-if df_raw is None:
-    st.error(f"تعذر تحميل البيانات لـ {selected_pair}."); st.stop()
+if df_raw is None: st.error(f"تعذر البيانات لـ {selected_pair}."); st.stop()
 
 news_block, _ = news_time_block(st.session_state.economic_events or [], selected_pair)
 strict_soft = st.session_state.get("strict_filters", False)
 
-# Fundamental data for context display
 _ccy_strength = get_currency_strength_matrix()
 _rate_diff, _rate_msg = get_interest_rate_differential(selected_pair)
 _risk = get_risk_sentiment()
 
-result = generate_signal(
-    df_raw, current_price, selected_pair, symbol,
-    news_block=news_block, strict_soft=strict_soft)
-
+result = generate_signal(df_raw, current_price, selected_pair, symbol,
+                         news_block=news_block, strict_soft=strict_soft)
 df = result["df"]; levels = result["levels"]
 signal = result["signal"]; confidence = result["confidence"]
 
 
-# ============================================================
-# STATUS BANNERS
-# ============================================================
-
+# ---- Status Banners ----
 mkt_open, mkt_msg = is_market_open(selected_pair)
-if not mkt_open:
-    st.error(f"🚫 **{mkt_msg}** — الإشارات معلّقة.")
+if not mkt_open: st.error(f"🚫 **{mkt_msg}** — الإشارات معلّقة.")
 kill_blocked, consec = check_kill_switch()
-if kill_blocked:
-    st.error(f"🛑 **Kill Switch نشط** — {consec} خسائر متتالية.")
+if kill_blocked: st.error(f"🛑 **Kill Switch نشط** — {consec} خسائر متتالية.")
 
+if signal in ("BUY", "SELL") and st.session_state.get("open_positions"):
+    corr_check = check_portfolio_conflict(symbol, signal, selected_pair,
+                                           st.session_state.open_positions)
+    if corr_check["blocked"]:
+        st.error(f"🚫 **Portfolio Conflict** — الدخول محظور:")
+        for w in corr_check["warnings"]: st.markdown(f"- {w}")
+    elif corr_check["warnings"]:
+        st.warning(f"⚠️ **Correlation Warnings:**")
+        for w in corr_check["warnings"]: st.markdown(f"- {w}")
 
-# ============================================================
-# MAIN GRID
-# ============================================================
 
 col_signal, col_stats = st.columns([1.6, 1])
-
 with col_signal:
     signal_color = ("#7cd4a0" if signal == "BUY"
                     else "#f57a7a" if signal == "SELL" else "#f5c87a")
@@ -2771,11 +2619,11 @@ with col_stats:
     with sc1:
         st.markdown(f"""<div class="metric-card"><div class="metric-label">BUY</div>
             <div class="metric-value" style="color:#7cd4a0;">{result['buy_score']:.0f}</div></div>""",
-                    unsafe_allow_html=True)
+            unsafe_allow_html=True)
     with sc2:
         st.markdown(f"""<div class="metric-card"><div class="metric-label">SELL</div>
             <div class="metric-value" style="color:#f57a7a;">{result['sell_score']:.0f}</div></div>""",
-                    unsafe_allow_html=True)
+            unsafe_allow_html=True)
     st.markdown(f"""
     <div class="metric-card" style="margin-top:14px;">
         <div class="metric-label">Confluence</div>
@@ -2783,16 +2631,11 @@ with col_stats:
         <div class="metric-sub">Confirmation: {result['confirmation_score']:.1f}</div>
     </div>""", unsafe_allow_html=True)
 
-
 soft_adv = result.get("soft_advisories", "None")
 if soft_adv and soft_adv != "None":
     if not strict_soft: st.info(f"💡 **Advisories:** {soft_adv}")
-    else: st.warning(f"⚠️ **Strict — عقوبات ({result['soft_penalties']:.1f}):** {soft_adv}")
+    else: st.warning(f"⚠️ **Strict — ({result['soft_penalties']:.1f}):** {soft_adv}")
 
-
-# ============================================================
-# TRADE PLAN
-# ============================================================
 
 if signal in ("BUY", "SELL") and levels:
     src = levels.get("sources", {})
@@ -2814,18 +2657,15 @@ if signal in ("BUY", "SELL") and levels:
         <span style="background:rgba(230,200,124,0.15); padding:5px 14px;
                      border-radius:20px; color:#e6c87c; font-size:0.82rem;
                      border:1px solid rgba(230,200,124,0.3);">
-            🎯 TP1: {src.get('tp1','—')}
-        </span>
+            🎯 TP1: {src.get('tp1','—')}</span>
         <span style="background:rgba(124,212,160,0.12); padding:5px 14px;
                      border-radius:20px; color:#7cd4a0; font-size:0.82rem;
                      border:1px solid rgba(124,212,160,0.3);">
-            🎯 TP2: {src.get('tp2','—')}
-        </span>
+            🎯 TP2: {src.get('tp2','—')}</span>
         <span style="background:rgba(124,212,160,0.12); padding:5px 14px;
                      border-radius:20px; color:#7cd4a0; font-size:0.82rem;
                      border:1px solid rgba(124,212,160,0.3);">
-            🎯 TP3: {src.get('tp3','—')}
-        </span>
+            🎯 TP3: {src.get('tp3','—')}</span>
     </div>""", unsafe_allow_html=True)
 
     st.markdown('<div class="section-title">💰 Position Size Calculator</div>',
@@ -2837,9 +2677,8 @@ if signal in ("BUY", "SELL") and levels:
     with ps_col2:
         risk_pct = st.number_input("⚠️ المخاطرة %", min_value=0.25, max_value=5.0,
             value=1.0, step=0.25, key=f"risk_{selected_pair}")
-
-    ps = calc_position_size(account_balance, risk_pct,
-                            levels["entry"], levels["stop_loss"], selected_pair)
+    ps = calc_position_size(account_balance, risk_pct, levels["entry"],
+                            levels["stop_loss"], selected_pair)
     if ps:
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("💵 المخاطرة", f"${ps['risk_amount']:.2f}")
@@ -2857,28 +2696,48 @@ if signal in ("BUY", "SELL") and levels:
         mg_cols = st.columns(3)
         for idx, stage in enumerate(mgmt):
             with mg_cols[idx]:
-                st.markdown(f"""
-                <div class="tool-card">
+                st.markdown(f"""<div class="tool-card">
                     <div class="tool-name">{stage['icon']} {stage['stage']}</div>
                     <div class="tool-value" style="font-size:1rem;">{stage['action']}</div>
-                    <div class="tool-desc">{stage['details']}</div>
-                </div>""", unsafe_allow_html=True)
+                    <div class="tool-desc">{stage['details']}</div></div>""", unsafe_allow_html=True)
+
+    # ---- Add to Portfolio ----
+    st.markdown('<div class="section-title">📌 Portfolio Action</div>', unsafe_allow_html=True)
+    corr_status = None
+    if st.session_state.get("open_positions"):
+        corr_status = check_portfolio_conflict(symbol, signal, selected_pair,
+                                                 st.session_state.open_positions)
+    pa1, pa2, pa3 = st.columns([1, 1, 2])
+    with pa1:
+        lot_input = st.number_input("📦 حجم المركز", min_value=0.01,
+            value=1.0, step=0.1, key=f"lot_{selected_pair}")
+    with pa2:
+        can_open = not (corr_status and corr_status["blocked"])
+        if can_open:
+            if st.button("📌 فتح صفقة", width="stretch", key="open_pos"):
+                if add_open_position(result, selected_pair, symbol, lot_input):
+                    st.success("✅ تم إضافة الصفقة"); st.rerun()
+        else:
+            st.button("🚫 محظور", width="stretch", disabled=True, key="open_pos_disabled")
+    with pa3:
+        if corr_status and corr_status["blocked"]:
+            st.error("🚫 تعارض مع مراكز مفتوحة")
+        elif corr_status and corr_status["warnings"]:
+            st.warning("⚠️ تحذيرات ارتباط — راجع Portfolio tab")
+        else:
+            st.info("💡 أضف الصفقة لتتبعها")
 
 
 # ============================================================
 # TABS
 # ============================================================
 
-tab_overview, tab_tools, tab_smc, tab_mtf, tab_fund, tab_filters, tab_chart, tab_calendar, tab_journal, tab_backtest = st.tabs([
+tab_overview, tab_tools, tab_smc, tab_mtf, tab_fund, tab_portfolio, tab_filters, tab_chart, tab_calendar, tab_journal, tab_backtest = st.tabs([
     "📊 Overview", "🧰 Tools", "🏛️ SMC", "⏱️ MTF",
-    "💰 Fundamentals", "🎛️ Filters", "📈 Chart",
+    "💰 Fundamentals", "💼 Portfolio", "🎛️ Filters", "📈 Chart",
     "📅 Calendar", "📔 Journal", "🔬 Backtest",
 ])
 
-
-# ============================================================
-# TAB 1: OVERVIEW
-# ============================================================
 
 with tab_overview:
     st.markdown('<div class="section-title">🧠 The Five Pillars</div>', unsafe_allow_html=True)
@@ -2886,31 +2745,19 @@ with tab_overview:
                     "momentum": "Momentum", "volume": "Volume & Flow", "context": "Context"}
     cols = st.columns(5)
     for idx, pillar in enumerate(PILLAR_WEIGHTS):
-        b = result["pillars"]["BUY"][pillar]
-        s = result["pillars"]["SELL"][pillar]
+        b = result["pillars"]["BUY"][pillar]; s = result["pillars"]["SELL"][pillar]
         cols[idx].metric(pillar_names[pillar], f"B {b:.0f}",
                          delta=f"S {s:.0f}", delta_color="inverse")
     st.markdown('<div class="section-title">📝 Decision Reasons</div>', unsafe_allow_html=True)
     if result["reasons"]:
-        for reason in result["reasons"][:10]:
-            st.markdown(f"- {reason}")
-    else:
-        st.caption("لا توجد أسباب.")
+        for reason in result["reasons"][:10]: st.markdown(f"- {reason}")
+    else: st.caption("لا توجد أسباب.")
     st.markdown('<div class="section-title">🛡️ Confirmation Gate</div>', unsafe_allow_html=True)
     gc1, gc2, gc3 = st.columns(3)
     gc1.metric("Confirmation", f"{result['confirmation_score']:.1f}/100")
-    gc2.metric("Gate Status", "✅ PASS" if result["confirmation_ok"] else "⚠️ SOFT")
-    gc3.metric("Raw / Effective", f"{result['raw_confidence']:.1f} / {result['confidence']:.1f}")
-    with st.expander("تفاصيل التأكيد"):
-        for r in result["confirmation_reasons"]: st.markdown(f"- ✅ {r}")
-        if result.get("confirmation_blockers"):
-            st.markdown("**الموانع:**")
-            for b in result["confirmation_blockers"]: st.markdown(f"- ❌ {b}")
+    gc2.metric("Gate", "✅ PASS" if result["confirmation_ok"] else "⚠️ SOFT")
+    gc3.metric("Raw / Eff", f"{result['raw_confidence']:.1f} / {result['confidence']:.1f}")
 
-
-# ============================================================
-# TAB 2: TOOLS
-# ============================================================
 
 with tab_tools:
     last = df.iloc[-1]
@@ -2937,7 +2784,6 @@ with tab_tools:
             <div class="tool-value">{vwap_icon} {vwap_state}</div>
             <div class="tool-desc">VWAP: <b>{vwap:.5f}</b><br>
             Distance: <b>{((current_price-vwap)/vwap*100):+.2f}%</b></div></div>""", unsafe_allow_html=True)
-
     st.markdown('<div class="section-title">⚡ Momentum</div>', unsafe_allow_html=True)
     rsi = safe_float(last.get("rsi"), 50); macd_hist = safe_float(last.get("macd_histogram"))
     if rsi >= 70: rsi_state = "Overbought"; rsi_icon = "🔴"
@@ -2956,7 +2802,6 @@ with tab_tools:
         st.markdown(f"""<div class="tool-card"><div class="tool-name">📈 MACD</div>
             <div class="tool-value">{macd_icon} {macd_state}</div>
             <div class="tool-desc">Hist: <b>{macd_hist:.5f}</b></div></div>""", unsafe_allow_html=True)
-
     st.markdown('<div class="section-title">🌊 Volatility</div>', unsafe_allow_html=True)
     atr_val = safe_float(last.get("atr")); atr_pct = (atr_val / current_price * 100) if current_price else 0
     bb_up = safe_float(last.get("bb_upper")); bb_low = safe_float(last.get("bb_lower"))
@@ -2973,7 +2818,6 @@ with tab_tools:
         st.markdown(f"""<div class="tool-card"><div class="tool-name">📉 Bollinger</div>
             <div class="tool-value">{bb_state}</div>
             <div class="tool-desc">Width: <b>{bb_width:.2f}%</b></div></div>""", unsafe_allow_html=True)
-
     st.markdown('<div class="section-title">💧 Volume & Flow</div>', unsafe_allow_html=True)
     cmf = safe_float(last.get("chaikin_mf"), 0)
     cmf_state = "Accumulation" if cmf > 0 else "Distribution"
@@ -2992,88 +2836,47 @@ with tab_tools:
             <div class="tool-desc">vs 20-avg</div></div>""", unsafe_allow_html=True)
 
 
-# ============================================================
-# TAB 3: SMC
-# ============================================================
-
 with tab_smc:
     last = df.iloc[-1]
     st.markdown('<div class="section-title">🏛️ SMC</div>', unsafe_allow_html=True)
     struct = structure_state(df)
     struct_icon = trend_icon(struct["state"])
-    st.markdown(f"""
-    <div class="tool-card" style="margin-bottom:20px;">
+    st.markdown(f"""<div class="tool-card" style="margin-bottom:20px;">
         <div class="tool-name">🏗️ Market Structure</div>
         <div class="tool-value">{struct_icon} {struct['state']}</div>
-        <div class="tool-desc">Last swing highs/lows</div>
-    </div>""", unsafe_allow_html=True)
+        <div class="tool-desc">Last swing highs/lows</div></div>""", unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
     with s1:
-        bos_bull = safe_bool(last.get("bos_bullish"))
-        bos_bear = safe_bool(last.get("bos_bearish"))
+        bos_bull = safe_bool(last.get("bos_bullish")); bos_bear = safe_bool(last.get("bos_bearish"))
         st.markdown(f"""<div class="tool-card"><div class="tool-name">🔓 BOS</div>
             <div class="tool-value">{"🟢" if bos_bull else "🔴" if bos_bear else "⚪"}</div>
             <div class="tool-desc">{"Bullish" if bos_bull else "Bearish" if bos_bear else "None"}</div></div>""",
             unsafe_allow_html=True)
     with s2:
-        mss_bull = safe_bool(last.get("mss_bullish"))
-        mss_bear = safe_bool(last.get("mss_bearish"))
+        mss_bull = safe_bool(last.get("mss_bullish")); mss_bear = safe_bool(last.get("mss_bearish"))
         st.markdown(f"""<div class="tool-card"><div class="tool-name">🔄 MSS</div>
             <div class="tool-value">{"🟢" if mss_bull else "🔴" if mss_bear else "⚪"}</div>
             <div class="tool-desc">{"Bullish" if mss_bull else "Bearish" if mss_bear else "None"}</div></div>""",
             unsafe_allow_html=True)
     with s3:
-        liq_bull = safe_bool(last.get("liquidity_sweep_bullish"))
-        liq_bear = safe_bool(last.get("liquidity_sweep_bearish"))
+        liq_bull = safe_bool(last.get("liquidity_sweep_bullish")); liq_bear = safe_bool(last.get("liquidity_sweep_bearish"))
         st.markdown(f"""<div class="tool-card"><div class="tool-name">💧 Liquidity</div>
             <div class="tool-value">{"🟢" if liq_bull else "🔴" if liq_bear else "⚪"}</div>
             <div class="tool-desc">{"Bullish" if liq_bull else "Bearish" if liq_bear else "None"}</div></div>""",
             unsafe_allow_html=True)
     with s4:
-        fvg_bull = safe_bool(last.get("fvg_bullish"))
-        fvg_bear = safe_bool(last.get("fvg_bearish"))
+        fvg_bull = safe_bool(last.get("fvg_bullish")); fvg_bear = safe_bool(last.get("fvg_bearish"))
         st.markdown(f"""<div class="tool-card"><div class="tool-name">🌫️ FVG</div>
             <div class="tool-value">{"🟢" if fvg_bull else "🔴" if fvg_bear else "⚪"}</div>
             <div class="tool-desc">{"Bullish" if fvg_bull else "Bearish" if fvg_bear else "None"}</div></div>""",
             unsafe_allow_html=True)
-    s5, s6, s7, s8 = st.columns(4)
-    with s5:
-        ob_bull = safe_bool(last.get("order_block_bullish"))
-        ob_bear = safe_bool(last.get("order_block_bearish"))
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📦 OB</div>
-            <div class="tool-value">{"🟢" if ob_bull else "🔴" if ob_bear else "⚪"}</div>
-            <div class="tool-desc">{"Bullish" if ob_bull else "Bearish" if ob_bear else "None"}</div></div>""",
-            unsafe_allow_html=True)
-    with s6:
-        in_prem = safe_bool(last.get("in_premium"))
-        in_disc = safe_bool(last.get("in_discount"))
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⚖️ P/D</div>
-            <div class="tool-value">{"🔴" if in_prem else "🟢" if in_disc else "🟡"}
-            {"Premium" if in_prem else "Discount" if in_disc else "Eq"}</div>
-            <div class="tool-desc">Range position</div></div>""", unsafe_allow_html=True)
-    with s7:
-        bsl_val = safe_float(last.get("bsl"))
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⬆️ BSL</div>
-            <div class="tool-value">{fmt_price(bsl_val, selected_pair)}</div>
-            <div class="tool-desc">Buy-Side</div></div>""", unsafe_allow_html=True)
-    with s8:
-        ssl_val = safe_float(last.get("ssl"))
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⬇️ SSL</div>
-            <div class="tool-value">{fmt_price(ssl_val, selected_pair)}</div>
-            <div class="tool-desc">Sell-Side</div></div>""", unsafe_allow_html=True)
-
     smc_score, smc_reasons = smc_quality(df)
-    st.markdown(f"""
-    <div class="tool-card" style="margin-top:20px;">
+    st.markdown(f"""<div class="tool-card" style="margin-top:20px;">
         <div class="tool-name">⭐ SMC Quality</div>
         <div class="tool-value">{smc_score:.0f}/100</div>
-        <div class="tool-desc">Factors: {', '.join(smc_reasons) if smc_reasons else 'None'}</div>
-    </div>""", unsafe_allow_html=True)
+        <div class="tool-desc">Factors: {', '.join(smc_reasons) if smc_reasons else 'None'}</div></div>""",
+        unsafe_allow_html=True)
 
-
-# ============================================================
-# TAB 4: MTF
-# ============================================================
 
 with tab_mtf:
     st.markdown('<div class="section-title">⏱️ MTF Analysis</div>', unsafe_allow_html=True)
@@ -3094,45 +2897,10 @@ with tab_mtf:
         <div class="tool-value">{final_icon} {final_mtf}</div>
         <div class="tool-desc">Confidence: <b>{result['mtf_conf']:.1f}%</b></div></div>""",
         unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📅 Weekly Bias</div>', unsafe_allow_html=True)
-    wk = result["weekly_bias"]
-    wk_icon = "🟢" if wk == "BULLISH" else "🔴" if wk == "BEARISH" else "🟡"
-    st.markdown(f"""<div class="tool-card"><div class="tool-name">📅 Weekly</div>
-        <div class="tool-value">{wk_icon} {wk}</div>
-        <div class="tool-desc">Macro filter</div></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">🌍 Macro Context</div>', unsafe_allow_html=True)
-    ctx1, ctx2, ctx3 = st.columns(3)
-    with ctx1:
-        dxy = result["dxy_bias"]
-        dxy_icon = "🟢" if dxy == "BULLISH" else "🔴" if dxy == "BEARISH" else "🟡"
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">💵 DXY</div>
-            <div class="tool-value">{dxy_icon} {dxy}</div>
-            <div class="tool-desc">{result['usd_msg']}</div></div>""", unsafe_allow_html=True)
-    with ctx2:
-        reg = result["regime"]; reg_icon = trend_icon(reg)
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📊 Regime</div>
-            <div class="tool-value">{reg_icon} {reg}</div>
-            <div class="tool-desc">Range penalty: -{int(PENALTY_RANGE_REGIME)}</div></div>""",
-            unsafe_allow_html=True)
-    with ctx3:
-        div = result["divergence"] or "None"
-        div_icon = "🟢" if div == "BULLISH" else "🔴" if div == "BEARISH" else "⚪"
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">🔄 Divergence</div>
-            <div class="tool-value">{div_icon} {div}</div>
-            <div class="tool-desc">Price vs RSI</div></div>""", unsafe_allow_html=True)
 
-
-# ============================================================
-# TAB 5: FUNDAMENTALS (NEW!)
-# ============================================================
 
 with tab_fund:
-    st.markdown('<div class="section-title">💰 Fundamental Analysis <span>Currencies · Rates · Risk</span></div>',
-                unsafe_allow_html=True)
-
-    # === Currency Strength Matrix ===
-    st.markdown('<div class="section-title">💪 Currency Strength Matrix <span>vs Basket · 20 Days</span></div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="section-title">💪 Currency Strength Matrix</div>', unsafe_allow_html=True)
     if _ccy_strength:
         sorted_ccys = sorted(_ccy_strength.items(), key=lambda x: x[1], reverse=True)
         ccy_cols = st.columns(len(sorted_ccys))
@@ -3143,39 +2911,22 @@ with tab_fund:
             elif score < -5: color = "#d4a0a0"; state = "Mild Bear"
             else: color = "#f5c87a"; state = "Neutral"
             with ccy_cols[idx]:
-                st.markdown(f"""
-                <div class="tool-card">
-                    <div class="tool-name">{ccy}</div>
-                    <div class="tool-value" style="color:{color}; font-size:1.1rem;">
-                        {score:+.0f}
-                    </div>
-                    <div class="tool-desc">{state}</div>
-                </div>""", unsafe_allow_html=True)
-    else:
-        st.warning("تعذر حساب Currency Strength Matrix.")
-
-    # === Interest Rate Differential ===
-    st.markdown('<div class="section-title">🏦 Interest Rate Differential <span>Carry Trade Bias</span></div>',
-                unsafe_allow_html=True)
+                st.markdown(f"""<div class="tool-card"><div class="tool-name">{ccy}</div>
+                    <div class="tool-value" style="color:{color}; font-size:1.1rem;">{score:+.0f}</div>
+                    <div class="tool-desc">{state}</div></div>""", unsafe_allow_html=True)
+    
+    st.markdown('<div class="section-title">🏦 Interest Rate Differential</div>', unsafe_allow_html=True)
     base, quote = parse_pair_currencies(selected_pair)
     if base and quote and base in CENTRAL_BANK_RATES and quote in CENTRAL_BANK_RATES:
         ri1, ri2, ri3 = st.columns(3)
         ri1.metric(f"{base} Rate", f"{CENTRAL_BANK_RATES[base]:.2f}%")
         ri2.metric(f"{quote} Rate", f"{CENTRAL_BANK_RATES[quote]:.2f}%")
-        diff_color = "normal" if abs(_rate_diff) < 1 else "inverse"
-        ri3.metric("Differential", f"{_rate_diff:+.2f}%", delta_color=diff_color)
-        if _rate_diff > 1.0:
-            st.success(f"✅ فرق فائدة إيجابي كبير ({_rate_diff:+.2f}%) — يدعم {base} (Carry Trade)")
-        elif _rate_diff < -1.0:
-            st.warning(f"⚠️ فرق فائدة سلبي كبير ({_rate_diff:+.2f}%) — يضغط على {base}")
-        else:
-            st.info(f"ℹ️ فرق فائدة محايد ({_rate_diff:+.2f}%)")
-    else:
-        st.caption(f"غير متاح لهذا الأصل. {_rate_msg}")
-
-    # === Risk Sentiment ===
-    st.markdown('<div class="section-title">🌊 Risk Sentiment <span>VIX · Risk-on/Risk-off</span></div>',
-                unsafe_allow_html=True)
+        ri3.metric("Diff", f"{_rate_diff:+.2f}%")
+        if _rate_diff > 1.0: st.success(f"✅ فرق فائدة يدعم {base}")
+        elif _rate_diff < -1.0: st.warning(f"⚠️ فرق فائدة يضغط على {base}")
+        else: st.info(f"ℹ️ فرق محايد ({_rate_diff:+.2f}%)")
+    
+    st.markdown('<div class="section-title">🌊 Risk Sentiment</div>', unsafe_allow_html=True)
     if _risk and _risk.get("vix") is not None:
         rs1, rs2, rs3, rs4 = st.columns(4)
         rs1.metric("VIX", f"{_risk['vix']:.2f}")
@@ -3183,54 +2934,125 @@ with tab_fund:
         rs3.metric("Change", f"{_risk.get('vix_change', 0):+.2f}%")
         rs4.metric("State", _risk["vix_state"])
         if _risk["risk_mode"] == "RISK-OFF":
-            st.error(f"🛑 **RISK-OFF** — يفضل USD/JPY/CHF · VIX {_risk['vix']:.2f}")
+            st.error(f"🛑 RISK-OFF — يفضل USD/JPY/CHF")
         elif _risk["risk_mode"] == "RISK-ON":
-            st.success(f"✅ **RISK-ON** — يفضل AUD/NZD/CAD · VIX {_risk['vix']:.2f}")
-        else:
-            st.info(f"⚖️ **Neutral Risk** — VIX {_risk['vix']:.2f}")
-    else:
-        st.warning("تعذر تحميل بيانات VIX.")
-
-    # === Fundamental Score Summary ===
-    st.markdown('<div class="section-title">🎯 Fundamental Impact <span>on This Pair</span></div>',
-                unsafe_allow_html=True)
-    fb = result.get("fund_buy", 0)
-    fs = result.get("fund_sell", 0)
+            st.success(f"✅ RISK-ON — يفضل AUD/NZD/CAD")
+        else: st.info(f"⚖️ Neutral Risk")
+    
+    st.markdown('<div class="section-title">🎯 Fundamental Impact</div>', unsafe_allow_html=True)
+    fb = result.get("fund_buy", 0); fs = result.get("fund_sell", 0)
     fsum1, fsum2, fsum3 = st.columns(3)
-    fsum1.metric("Fundamental BUY bias", f"{fb:.0f}/100")
-    fsum2.metric("Fundamental SELL bias", f"{fs:.0f}/100")
+    fsum1.metric("BUY bias", f"{fb:.0f}/100")
+    fsum2.metric("SELL bias", f"{fs:.0f}/100")
     if fb > fs + 15: verdict = "🟢 يدعم BUY"
     elif fs > fb + 15: verdict = "🔴 يدعم SELL"
     else: verdict = "⚖️ محايد"
     fsum3.metric("Verdict", verdict)
 
-    if result.get("fund_details"):
-        st.markdown("**تفاصيل العوامل الأساسية:**")
-        for d in result["fund_details"]:
-            factor = d.get("factor", "?")
-            if factor == "Currency Strength":
-                st.markdown(f"- 💪 **{factor}**: {base} = {d.get('base_val', 0):+.1f} | "
-                            f"{quote} = {d.get('quote_val', 0):+.1f} | Diff = {d.get('diff', 0):+.1f}")
-            elif factor == "Rate Differential":
-                st.markdown(f"- 🏦 **{factor}**: {d.get('diff', 0):+.2f}%")
-            elif factor == "Risk Sentiment":
-                st.markdown(f"- 🌊 **{factor}**: {d.get('mode', '?')}")
 
+with tab_portfolio:
+    st.markdown('<div class="section-title">💼 Portfolio Monitor</div>', unsafe_allow_html=True)
+    open_positions = st.session_state.get("open_positions", [])
+    if not open_positions:
+        st.info("📭 لا توجد صفقات مفتوحة. أضف صفقات من قسم Trade Plan.")
+    else:
+        sm1, sm2, sm3, sm4 = st.columns(4)
+        total_pos = len(open_positions)
+        long_count = sum(1 for p in open_positions if p["direction"] == "BUY")
+        short_count = sum(1 for p in open_positions if p["direction"] == "SELL")
+        total_lots = sum(p.get("lot_size") or 0 for p in open_positions)
+        sm1.metric("Total Positions", total_pos)
+        sm2.metric("Long", long_count)
+        sm3.metric("Short", short_count)
+        sm4.metric("Total Lots", f"{total_lots:.2f}")
 
-# ============================================================
-# TAB 6: FILTERS
-# ============================================================
+        st.markdown('<div class="section-title">📋 Open Positions</div>', unsafe_allow_html=True)
+        pos_rows = []
+        for p in open_positions:
+            pos_rows.append({"ID": p["id"], "Pair": p["pair"], "Dir": p["direction"],
+                             "Entry": fmt_price(p.get("entry"), p["pair"]),
+                             "SL": fmt_price(p.get("stop_loss"), p["pair"]),
+                             "TP1": fmt_price(p.get("target1"), p["pair"]),
+                             "Grade": p.get("grade", "?"),
+                             "Lots": p.get("lot_size", 1.0),
+                             "Opened": p.get("opened_at", "")})
+        st.dataframe(pd.DataFrame(pos_rows), hide_index=True, width="stretch")
+
+        st.markdown("**إغلاق صفقة:**")
+        close_cols = st.columns(min(len(open_positions), 5))
+        for idx, p in enumerate(open_positions[:5]):
+            with close_cols[idx]:
+                if st.button(f"❌ #{p['id']} {p['pair'][:10]}",
+                             width="stretch", key=f"close_{p['id']}"):
+                    close_open_position(p["id"])
+                    st.toast(f"✅ تم إغلاق صفقة #{p['id']}"); st.rerun()
+
+        st.markdown('<div class="section-title">🌍 Currency Exposure</div>', unsafe_allow_html=True)
+        exposure = get_portfolio_exposure()
+        if exposure:
+            exp_cols = st.columns(min(len(exposure), 6))
+            for idx, (ccy, exp) in enumerate(sorted(exposure.items())):
+                net = exp["net"]
+                if net > 0.5: color = "#7cd4a0"; state = "LONG"
+                elif net < -0.5: color = "#f57a7a"; state = "SHORT"
+                else: color = "#f5c87a"; state = "NEUTRAL"
+                with exp_cols[idx % 6]:
+                    st.markdown(f"""<div class="tool-card"><div class="tool-name">{ccy}</div>
+                        <div class="tool-value" style="color:{color}; font-size:1.1rem;">{net:+.1f}</div>
+                        <div class="tool-desc">{state} · {exp['count']} صفقات</div></div>""",
+                        unsafe_allow_html=True)
+
+        st.markdown('<div class="section-title">🔗 Correlation Matrix</div>', unsafe_allow_html=True)
+        unique_symbols = list({p["symbol"] for p in open_positions})
+        if len(unique_symbols) >= 2:
+            try:
+                matrix, symbols = build_correlation_matrix(tuple(unique_symbols))
+                pair_names = []
+                for sym in symbols:
+                    found = [p["pair"] for p in open_positions if p["symbol"] == sym]
+                    pair_names.append(found[0] if found else sym)
+                fig_corr = go.Figure(data=go.Heatmap(
+                    z=matrix, x=pair_names, y=pair_names,
+                    colorscale=[[0.0, "#f57a7a"], [0.5, "#0d1017"], [1.0, "#7cd4a0"]],
+                    zmid=0, zmin=-1, zmax=1, text=np.round(matrix, 2),
+                    texttemplate="%{text}", textfont={"size": 12, "color": "white"},
+                    colorbar=dict(title="Corr")))
+                fig_corr.update_layout(height=400, template="plotly_dark",
+                    paper_bgcolor="#0a0d13", plot_bgcolor="#0a0d13",
+                    font=dict(family="Inter", color="#c8d2e8"),
+                    margin=dict(l=20, r=20, t=20, b=20))
+                st.plotly_chart(fig_corr, width="stretch")
+
+                st.markdown("**🔍 Conflicts:**")
+                conflicts_found = False
+                for i in range(len(symbols)):
+                    for j in range(i + 1, len(symbols)):
+                        corr_val = matrix[i, j]
+                        if abs(corr_val) >= CORRELATION_THRESHOLD:
+                            p_i = next((p for p in open_positions if p["symbol"] == symbols[i]), None)
+                            p_j = next((p for p in open_positions if p["symbol"] == symbols[j]), None)
+                            if p_i and p_j and p_i["direction"] == p_j["direction"]:
+                                conflicts_found = True
+                                severity = "🚫" if abs(corr_val) >= CORRELATION_BLOCK_THRESHOLD else "⚠️"
+                                st.markdown(f"{severity} **{pair_names[i]}** + **{pair_names[j]}** "
+                                            f"→ {corr_val:+.2f} · {p_i['direction']}")
+                if not conflicts_found: st.success("✅ لا تعارضات حرجة")
+            except Exception as e:
+                st.warning(f"تعذر بناء المصفوفة: {e}")
+        else: st.info("ℹ️ تحتاج ≥ 2 صفقات.")
+
+    st.markdown("---")
+    if st.button("🗑️ Clear All Positions", width="stretch", key="clear_all_positions"):
+        st.session_state.open_positions = []; st.rerun()
+
 
 with tab_filters:
     st.markdown('<div class="section-title">🎛️ Filters</div>', unsafe_allow_html=True)
-    filters = result["filter_results"]
-    items = list(filters.items())
+    filters = result["filter_results"]; items = list(filters.items())
     for row_start in range(0, len(items), 4):
-        row = items[row_start:row_start + 4]
-        cols = st.columns(4)
+        row = items[row_start:row_start + 4]; cols = st.columns(4)
         for idx, (name, info) in enumerate(row):
-            passed = info.get("pass", True)
-            icon = "✅" if passed else "❌"
+            passed = info.get("pass", True); icon = "✅" if passed else "❌"
             with cols[idx]:
                 st.markdown(f"""<div class="tool-card"><div class="tool-name">{name}</div>
                     <div class="tool-value">{icon}</div>
@@ -3238,22 +3060,7 @@ with tab_filters:
                     unsafe_allow_html=True)
     if not result["all_filters_passed"]:
         st.error(f"🚫 **Block:** {result['filter_block_reason']}")
-    with st.expander("🔍 Diagnostic", expanded=signal == "WAIT"):
-        st.markdown(f"""
-        - **BUY/SELL:** {result['buy_score']:.1f} / {result['sell_score']:.1f}
-        - **Gap:** {abs(result['buy_score']-result['sell_score']):.1f} (min {MIN_SIGNAL_GAP})
-        - **MTF:** {result['mtf_bias']}
-        - **Regime:** {result['regime']}
-        - **Confirmation:** {result['confirmation_score']:.1f}
-        - **Fundamental:** B{result.get('fund_buy',0):.0f}/S{result.get('fund_sell',0):.0f}
-        - **Grade:** {result['trade_grade']}
-        - **Raw → Effective:** {result['raw_confidence']:.1f} → {result['confidence']:.1f}
-        """)
 
-
-# ============================================================
-# TAB 7: CHART
-# ============================================================
 
 with tab_chart:
     st.markdown('<div class="section-title">📈 Chart</div>', unsafe_allow_html=True)
@@ -3269,14 +3076,13 @@ with tab_chart:
                               line=dict(color="#e6c87c", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df["vwap"], name="VWAP",
                               line=dict(color="#a0aab8", dash="dot")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], name="BB Upper",
+    fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], name="BB Up",
                               line=dict(color="#6b7488", width=1)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["bb_lower"], name="BB Lower",
+    fig.add_trace(go.Scatter(x=df.index, y=df["bb_lower"], name="BB Low",
                               line=dict(color="#6b7488", width=1),
                               fill="tonexty", fillcolor="rgba(107,116,136,0.05)"), row=1, col=1)
     if levels and levels.get("impulse"):
-        imp = levels["impulse"]
-        start, end, leg = imp["start"], imp["end"], imp["leg"]
+        imp = levels["impulse"]; start, end, leg = imp["start"], imp["end"], imp["leg"]
         if imp["direction"] == "BUY":
             ote_low = end - 0.786 * leg; ote_high = end - 0.618 * leg
         else:
@@ -3316,10 +3122,6 @@ with tab_chart:
     st.plotly_chart(fig, width="stretch")
 
 
-# ============================================================
-# TAB 8: CALENDAR
-# ============================================================
-
 with tab_calendar:
     st.markdown('<div class="section-title">📅 Economic Calendar</div>', unsafe_allow_html=True)
     if st.button("🔄 Update Calendar", width="stretch"):
@@ -3332,13 +3134,8 @@ with tab_calendar:
                 for e in st.session_state.economic_events[:20]]
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    else:
-        st.info("اضغط 'Update Calendar'.")
+    else: st.info("اضغط 'Update Calendar'.")
 
-
-# ============================================================
-# TAB 9: JOURNAL
-# ============================================================
 
 with tab_journal:
     st.markdown('<div class="section-title">📔 Trade Journal</div>', unsafe_allow_html=True)
@@ -3347,15 +3144,13 @@ with tab_journal:
     else:
         journal_df = pd.DataFrame(st.session_state.trade_journal)
         st.dataframe(journal_df, hide_index=True, width="stretch")
-        total = len(journal_df)
-        wins = (journal_df["outcome"] == "WIN").sum()
+        total = len(journal_df); wins = (journal_df["outcome"] == "WIN").sum()
         losses = (journal_df["outcome"] == "LOSS").sum()
         wr = (wins / total * 100) if total > 0 else 0
         jc1, jc2, jc3 = st.columns(3)
         jc1.metric("Total", total); jc2.metric("Win Rate", f"{wr:.1f}%")
         jc3.metric("W/L", f"{wins}/{losses}")
     st.markdown("---")
-    st.markdown("**🔄 تسجيل نتيجة الصفقة الحالية**")
     rec1, rec2, rec3 = st.columns(3)
     with rec1:
         if st.button("✅ WIN", width="stretch", key="log_win"):
@@ -3366,92 +3161,44 @@ with tab_journal:
     with rec3:
         if st.button("🗑️ Clear", width="stretch", key="clear_journal"):
             st.session_state.trade_journal = []
-            st.session_state.recent_results = []
-            st.rerun()
+            st.session_state.recent_results = []; st.rerun()
 
-
-# ============================================================
-# TAB 10: BACKTEST + MONTE CARLO
-# ============================================================
 
 with tab_backtest:
-    st.markdown('<div class="section-title">🔬 Backtest <span>No Look-Ahead · Monte Carlo</span></div>',
-                unsafe_allow_html=True)
-    st.caption("✅ MTF/Weekly/DXY/Currency/Rates/Risk تُحسب لكل نقطة زمنية.")
-    st.caption("Monte Carlo: 1000 محاكاة على توزيع R التاريخي.")
-
-    if st.button("▶️ Run Backtest + Monte Carlo", width="stretch"):
-        with st.spinner("Running backtest + Monte Carlo..."):
+    st.markdown('<div class="section-title">🔬 Backtest + Monte Carlo</div>', unsafe_allow_html=True)
+    if st.button("▶️ Run Backtest", width="stretch"):
+        with st.spinner("Running..."):
             st.session_state.backtest_results = quick_backtest(symbol, selected_pair)
         st.rerun()
-
     if st.session_state.backtest_results:
         bt = st.session_state.backtest_results
-        if bt.get("error"):
-            st.error(f"فشل: {bt['error']}")
+        if bt.get("error"): st.error(f"فشل: {bt['error']}")
         else:
-            st.markdown("**📊 Base Statistics**")
             bc1, bc2, bc3, bc4, bc5 = st.columns(5)
-            bc1.metric("Trades", bt["trades"])
-            bc2.metric("Win Rate", f"{bt['win_rate']:.1f}%")
+            bc1.metric("Trades", bt["trades"]); bc2.metric("WR", f"{bt['win_rate']:.1f}%")
             bc3.metric("Total R", f"{bt['total_R']:.2f}")
             bc4.metric("Expectancy", f"{bt['expectancy']:.3f}R")
-            bc5.metric("Profit Factor", f"{bt['profit_factor']:.2f}")
+            bc5.metric("PF", f"{bt['profit_factor']:.2f}")
             bc6, bc7, bc8 = st.columns(3)
             bc6.metric("Max DD", f"{bt['max_drawdown']:.2f}R")
             bc7.metric("Sharpe", f"{bt['sharpe']:.2f}")
-            bc8.metric("Avg R/Trade", f"{bt['avg_r']:.3f}")
-
-            # Monte Carlo
+            bc8.metric("Avg R", f"{bt['avg_r']:.3f}")
             mc = bt.get("monte_carlo")
             if mc:
-                st.markdown("---")
-                st.markdown("**🎲 Monte Carlo Simulation**")
-                st.caption(f"{mc['n_sims']} محاكاة · {mc['n_trades']} صفقة لكل محاكاة")
-
+                st.markdown("**🎲 Monte Carlo**")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Mean Final R", f"{mc['mean_final']:.2f}R")
-                m2.metric("Median Final R", f"{mc['median_final']:.2f}R")
-                m3.metric("Probability of Profit", f"{mc['prob_profit']:.1f}%")
-
+                m1.metric("Mean", f"{mc['mean_final']:.2f}R")
+                m2.metric("Median", f"{mc['median_final']:.2f}R")
+                m3.metric("Prob Profit", f"{mc['prob_profit']:.1f}%")
                 m4, m5, m6 = st.columns(3)
-                m4.metric("5th Percentile", f"{mc['p5_final']:.2f}R")
-                m5.metric("95th Percentile", f"{mc['p95_final']:.2f}R")
-                m6.metric("Worst Case DD", f"{mc['worst_dd']:.2f}R")
+                m4.metric("5th Pct", f"{mc['p5_final']:.2f}R")
+                m5.metric("95th Pct", f"{mc['p95_final']:.2f}R")
+                m6.metric("Worst DD", f"{mc['worst_dd']:.2f}R")
 
-                m7, m8 = st.columns(2)
-                m7.metric("Mean Max DD", f"{mc['mean_dd']:.2f}R")
-                m8.metric("95% DD (VaR)", f"{mc['p95_dd']:.2f}R")
-
-                if mc['prob_profit'] >= 70:
-                    st.success(f"✅ احتمالية الربح {mc['prob_profit']:.1f}% — Edge قوي")
-                elif mc['prob_profit'] >= 55:
-                    st.warning(f"⚠️ احتمالية الربح {mc['prob_profit']:.1f}% — Edge ضعيف")
-                else:
-                    st.error(f"❌ احتمالية الربح {mc['prob_profit']:.1f}% — Edge سلبي")
-
-            if bt["trades"] == 0:
-                st.warning("⚠️ لا توجد صفقات.")
-            elif bt["expectancy"] >= 0.2 and bt["win_rate"] >= 45:
-                st.success("✅ Edge إيجابي.")
-            elif bt["expectancy"] > 0:
-                st.warning("⚠️ Edge ضعيف.")
-            else:
-                st.error("❌ Edge سلبي.")
-
-            if bt.get("trades_log"):
-                with st.expander("📜 آخر 50 صفقة"):
-                    st.dataframe(pd.DataFrame(bt["trades_log"]),
-                                 hide_index=True, width="stretch")
-
-
-# ============================================================
-# FOOTER
-# ============================================================
 
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Fundamental · Currency Strength · Rates · Risk Sentiment · Monte Carlo
+    Correlation Guard · Fundamentals · Monte Carlo · SMC · Fibonacci
 </div>
 """, unsafe_allow_html=True)
