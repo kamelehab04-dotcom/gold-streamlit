@@ -2319,14 +2319,53 @@ def intraday_precision_gate(levels, signal, df):
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
+    """Hierarchical trade engine.
+
+    Direction is NOT created by a score.  A trade is promoted through ordered
+    gates: Market -> Regime -> HTF -> Structure -> Liquidity -> Displacement
+    -> Entry Zone -> LTF Trigger -> Risk Geometry -> Confirmation.
+
+    BUY/SELL is returned only when the final execution gate passes.
+    Everything else is WAIT with an explicit blocker.
+    """
     profile = profile_for(pair_name)
     profile_key = get_asset_profile(pair_name)
     df = build_features(df, profile)
 
+    # ------------------------------------------------------------
+    # 0) DATA / MARKET SAFETY
+    # ------------------------------------------------------------
+    if df is None or len(df) < 80 or current_price is None:
+        return {
+            "signal": "WAIT", "confidence": 0.0, "raw_confidence": 0.0,
+            "buy_score": 0.0, "sell_score": 0.0, "weighted_confluence": 0.0,
+            "pillars": {"BUY": {p: 0 for p in PILLAR_WEIGHTS},
+                        "SELL": {p: 0 for p in PILLAR_WEIGHTS}},
+            "mtf_bias": "NEUTRAL", "mtf_conf": 0.0, "mtf_details": {},
+            "weekly_bias": "NEUTRAL", "levels": None, "df": df,
+            "confirmation_ok": False, "confirmation_score": 0.0,
+            "confirmation_reasons": [], "confirmation_blockers": ["Insufficient data"],
+            "execution_status": "WAIT", "execution_reason": "Insufficient market data",
+            "confirmed_entry": False, "confirmation_checks": {},
+            "confirmation_blockers_final": ["Insufficient data"],
+            "confirmation_stability": 0, "confirmed_rr1": 0.0,
+            "precision_ok": False, "precision_checks": {},
+            "precision_blockers": ["Insufficient data"], "entry_zone": None,
+            "entry_zone_quality": 0, "entry_distance_atr": 999,
+            "sl_distance_atr": 999, "tp1_distance_atr": 999,
+            "max_hold_hours": MAX_HOLD_HOURS, "trade_grade": "WAIT",
+            "soft_penalties": 0.0, "soft_advisories": "None",
+            "filter_results": {}, "all_filters_passed": False,
+            "filter_block_reason": "Insufficient market data",
+            "regime": "UNKNOWN", "dxy_bias": "NEUTRAL", "usd_msg": "",
+            "divergence": None, "reasons": ["Insufficient market data"],
+            "setup_direction": "NONE", "hierarchy_stage": "DATA",
+        }
+
     if precomputed is None:
         mtf_bias, mtf_conf, mtf_details = get_mtf_analysis(symbol, pair_name)
         wk_bias, _ = weekly_bias(symbol, pair_name)
-        dxy_bias, _, _ = get_dxy_context()
+        dxy_bias, _, usd_msg = get_dxy_context()
         gold_corr = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
     else:
         mtf_bias = precomputed.get("mtf_bias", "NEUTRAL")
@@ -2334,289 +2373,312 @@ def generate_signal(df, current_price, pair_name, symbol,
         mtf_details = precomputed.get("mtf_details", {})
         wk_bias = precomputed.get("weekly_bias", "NEUTRAL")
         dxy_bias = precomputed.get("dxy_bias", "NEUTRAL")
+        usd_msg = ""
         gold_corr = precomputed.get("gold_corr", None)
 
+    last = df.iloc[-1]
+    atr = safe_float(last.get("atr"), np.nan)
+    regime, regime_conf = detect_regime(df)
+
+    # ------------------------------------------------------------
+    # Diagnostic scores remain available, but NEVER create a trade.
+    # ------------------------------------------------------------
     scores = directional_score(df, pair_name, symbol,
                                dxy_bias=dxy_bias, gold_corr=gold_corr)
-
-    buy, sell = scores["buy"], scores["sell"]
-    if mtf_bias == "BULLISH": buy += 8; sell -= 4
-    elif mtf_bias == "BEARISH": sell += 8; buy -= 4
-    if wk_bias == "BULLISH": buy += 5; sell -= 3
-    elif wk_bias == "BEARISH": sell += 5; buy -= 3
-    buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
-
-    gap = abs(buy - sell)
-    signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
-
-    last = df.iloc[-1]
-    mss_conflict = False
-    if safe_bool(last.get("mss_bullish")) and sell > buy: mss_conflict = True
-    if safe_bool(last.get("mss_bearish")) and buy > sell: mss_conflict = True
-
-    vrsi = safe_float(last.get("vrsi"), 50)
-    if signal == "BUY" and vrsi > profile["rsi_ob"] and not safe_bool(last.get("mss_bullish")):
-        buy = max(0, buy - 5)
-    if signal == "SELL" and vrsi < profile["rsi_os"] and not safe_bool(last.get("mss_bearish")):
-        sell = max(0, sell - 5)
-
-    # Re-evaluate the final signal after every score adjustment.
-    # Previously the initial gap could remain BUY/SELL even after a VRSI
-    # penalty reduced the gap below MIN_SIGNAL_GAP.
-    buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
-    gap = abs(buy - sell)
-    signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
-
-    confidence = clamp(
-        50 + gap * 0.75 + max(0, max(buy, sell) - 60) * 0.25,
-        50, 95
-    )
-
-    soft_penalty_items = []
-
-    if signal in ("BUY", "SELL") and mtf_bias != "NEUTRAL":
-        if (signal == "BUY" and mtf_bias != "BULLISH") or \
-           (signal == "SELL" and mtf_bias != "BEARISH"):
-            soft_penalty_items.append(("MTF ضد الاتجاه", PENALTY_MTF_AGAINST))
-
-    if signal in ("BUY", "SELL") and wk_bias != "NEUTRAL":
-        if (signal == "BUY" and wk_bias != "BULLISH") or \
-           (signal == "SELL" and wk_bias != "BEARISH"):
-            soft_penalty_items.append(("Weekly ضد الاتجاه", PENALTY_WEEKLY_AGAINST))
-
-    if signal in ("BUY", "SELL") and scores["regime"] in ("RANGE", "COMPRESSION"):
-        soft_penalty_items.append((f"Regime {scores['regime']}", PENALTY_RANGE_REGIME))
-
-    if signal in ("BUY", "SELL"):
-        atr_now = safe_float(last.get("atr"), 0)
-        if atr_now > 0:
-            body = abs(float(last["close"]) - float(last["open"]))
-            if body < 0.50 * atr_now:
-                soft_penalty_items.append(("شمعة ضعيفة", PENALTY_WEAK_CANDLE))
-            elif signal == "BUY" and last["close"] < last["open"]:
-                soft_penalty_items.append(("شمعة ضد الاتجاه", PENALTY_WEAK_CANDLE))
-            elif signal == "SELL" and last["close"] > last["open"]:
-                soft_penalty_items.append(("شمعة ضد الاتجاه", PENALTY_WEAK_CANDLE))
-
-    if mss_conflict and signal in ("BUY", "SELL"):
-        soft_penalty_items.append(("MSS Conflict", 10))
-
-    candidate = signal if signal in ("BUY", "SELL") else ("BUY" if buy > sell else "SELL")
-    levels = calculate_trade_levels(df, candidate, current_price, profile)
-    risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "تعذر")
-    if signal in ("BUY", "SELL") and not risk_ok:
-        # Preserve the directional analysis, but block execution because the
-        # entry/SL/TP geometry is not suitable for an intraday trade.
-        confidence = min(confidence, 69.0)
-
-    pillars = scores["pillars"]
-    w_confluence = weighted_confluence(pillars, candidate)
-    confluence = sum(1 for p in PILLAR_WEIGHTS if pillars[candidate][p] >= 50) if signal in ("BUY", "SELL") else 0
-
-    conf_ok, conf_score, conf_reasons, conf_blockers = confirmation_gate(
-        df, candidate, pillars, scores["regime"], mtf_bias, mtf_conf, profile, wk_bias)
+    buy_score = clamp(scores.get("buy", 0), 0, 100)
+    sell_score = clamp(scores.get("sell", 0), 0, 100)
+    pillars = scores.get("pillars", {
+        "BUY": {p: 0 for p in PILLAR_WEIGHTS},
+        "SELL": {p: 0 for p in PILLAR_WEIGHTS},
+    })
 
     filter_results = {}
-    filter_results["MSS Conflict"] = {
-        "pass": not mss_conflict,
-        "msg": "MSS معاكس — تنبيه" if mss_conflict else "MSS متوافق"
-    }
+    hierarchy = []
+    blockers = []
 
-    all_passed = True
-    block_reason = ""
-    external_filter_names = ["HTF Zone", "LTF Trigger", "Session", "Volatility",
-                             "Kill Zone", "OTE", "Displacement", "News Window"]
-
-    if skip_external_filters:
-        for _name in external_filter_names:
-            filter_results[_name] = {"pass": True, "msg": "Backtest — skipped"}
-        ntw_block = False
-    else:
-        htf_ok, htf_msg, htf_zone = htf_zone_filter(symbol, candidate, profile_key)
-        filter_results["HTF Zone"] = {"pass": htf_ok, "msg": htf_msg, "zone": htf_zone}
-        if not htf_ok:
-            all_passed = False; block_reason = htf_msg
-
-        ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
-        filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
-        if not ltf_ok: soft_penalty_items.append(("LTF Trigger", 6))
-
-        sess_ok, sess_msg, sess_label = session_filter(
-            pair_name, strict=(profile_key != "crypto"))
-        filter_results["Session"] = {"pass": sess_ok, "msg": sess_msg, "label": sess_label}
-        if not sess_ok: soft_penalty_items.append(("Session", 5))
-
-        vol_ok, vol_msg, vol_label = volatility_regime_filter(df)
-        filter_results["Volatility"] = {"pass": vol_ok, "msg": vol_msg, "label": vol_label}
-        if not vol_ok:
-            if vol_label == "CHAOS":
-                all_passed = False; block_reason = block_reason or vol_msg
-            else:
-                soft_penalty_items.append(("Volatility", 8))
-
-        kz_ok, kz_msg = in_kill_zone(asset_type_from_name(pair_name))
-        filter_results["Kill Zone"] = {"pass": kz_ok, "msg": kz_msg}
-        if not kz_ok: soft_penalty_items.append(("Kill Zone", 3))
-
-        ote_ok, ote_msg = ote_filter(df, candidate)
-        filter_results["OTE"] = {"pass": ote_ok, "msg": ote_msg}
-        if not ote_ok: soft_penalty_items.append(("OTE", 5))
-
-        disp_ok, disp_msg = displacement_check(df, candidate)
-        filter_results["Displacement"] = {"pass": disp_ok, "msg": disp_msg}
-        if not disp_ok: soft_penalty_items.append(("Displacement", 5))
-
-        ntw_block, ntw_msg = news_time_block(
-            st.session_state.get("economic_events") or [], pair_name)
-        filter_results["News Window"] = {
-            "pass": not ntw_block, "msg": ntw_msg or "لا خبر قريب"
-        }
-        if ntw_block:
-            all_passed = False; block_reason = block_reason or ntw_msg
-
-    # ---- WEEKEND GUARD ----
+    # ------------------------------------------------------------
+    # 1) MARKET GATE
+    # ------------------------------------------------------------
     market_open, market_msg = is_market_open(pair_name)
     filter_results["Market Open"] = {"pass": market_open, "msg": market_msg}
     if not market_open and not skip_external_filters:
-        all_passed = False
-        block_reason = block_reason or market_msg
+        blockers.append("Market closed")
 
-    # ---- KILL SWITCH ----
     kill_blocked, consec = check_kill_switch()
-    if kill_blocked and not skip_external_filters:
-        filter_results["Kill Switch"] = {
-            "pass": False, "msg": f"{MAX_CONSECUTIVE_LOSSES} خسائر متتالية — توقف"
-        }
-        all_passed = False
-        block_reason = block_reason or f"Kill Switch نشط ({consec} خسائر)"
-    else:
-        filter_results["Kill Switch"] = {"pass": True, "msg": f"Discipline OK ({consec} خسائر متتالية)"}
-
-    weekly_ok = (wk_bias == "NEUTRAL"
-                 or (candidate == "BUY" and wk_bias == "BULLISH")
-                 or (candidate == "SELL" and wk_bias == "BEARISH"))
-    filter_results["Weekly Bias"] = {"pass": weekly_ok, "msg": f"Weekly: {wk_bias}"}
-    filter_results["Weighted Confluence"] = {
-        "pass": w_confluence >= 50, "msg": f"Confluence: {w_confluence:.0f}/100"
+    filter_results["Kill Switch"] = {
+        "pass": not kill_blocked, "msg": f"{consec} consecutive losses"
     }
+    if kill_blocked and not skip_external_filters:
+        blockers.append("Kill Switch")
 
-    raw_confidence = confidence
-    penalty_total, applied_penalties = compute_soft_penalty(
-        soft_penalty_items, strict=strict_soft)
-    effective_confidence = clamp(raw_confidence - penalty_total, 0, 95)
+    hierarchy.append(("MARKET", len(blockers) == 0,
+                      "Market conditions tradable" if not blockers else ", ".join(blockers)))
 
-    if raw_confidence >= A_PLUS_MIN and conf_score >= 78:
-        trade_grade = "A+"
-    elif raw_confidence >= A_MIN and conf_score >= 72:
-        trade_grade = "A"
-    elif raw_confidence >= B_MIN and conf_score >= 65:
-        trade_grade = "B"
-    elif raw_confidence >= C_MIN and conf_score >= 58:
-        trade_grade = "C"
+    # ------------------------------------------------------------
+    # 2) REGIME GATE
+    # ------------------------------------------------------------
+    regime_ok = regime not in ("UNKNOWN", "COMPRESSION")
+    hierarchy.append(("REGIME", regime_ok,
+                      f"{regime} ({regime_conf:.0f})"))
+    if not regime_ok:
+        blockers.append(f"Regime {regime}")
+
+    # ------------------------------------------------------------
+    # 3) HTF DIRECTION GATE — this selects the ONLY candidate direction.
+    # ------------------------------------------------------------
+    if mtf_bias == "BULLISH":
+        candidate = "BUY"
+    elif mtf_bias == "BEARISH":
+        candidate = "SELL"
     else:
+        candidate = "NONE"
+        blockers.append("HTF direction is neutral")
+
+    htf_ok = candidate in ("BUY", "SELL") and mtf_conf >= MIN_MTF_CONFIRMED
+    if candidate == "BUY" and regime == "TREND_BEARISH":
+        htf_ok = False
+        blockers.append("HTF BUY conflicts with bearish regime")
+    if candidate == "SELL" and regime == "TREND_BULLISH":
+        htf_ok = False
+        blockers.append("HTF SELL conflicts with bullish regime")
+    if not htf_ok and candidate in ("BUY", "SELL"):
+        blockers.append(f"HTF confirmation {mtf_conf:.0f} below threshold")
+    hierarchy.append(("HTF DIRECTION", htf_ok,
+                      f"{candidate} / {mtf_bias} / {mtf_conf:.0f}"))
+
+    # Weekly context is a veto, not a score bonus.
+    weekly_ok = (
+        wk_bias == "NEUTRAL" or candidate == "NONE"
+        or (candidate == "BUY" and wk_bias == "BULLISH")
+        or (candidate == "SELL" and wk_bias == "BEARISH")
+    )
+    filter_results["Weekly Bias"] = {
+        "pass": weekly_ok, "msg": f"Weekly: {wk_bias}"
+    }
+    if not weekly_ok:
+        blockers.append(f"Weekly bias conflicts: {wk_bias}")
+
+    # ------------------------------------------------------------
+    # 4) STRUCTURE GATE — BOS/MSS must agree with candidate.
+    # ------------------------------------------------------------
+    recent = df.tail(14)
+    if candidate == "BUY":
+        bos = bool(recent.get("bos_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
+        mss = bool(recent.get("mss_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
+        opposite = bool(recent.get("mss_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
+    elif candidate == "SELL":
+        bos = bool(recent.get("bos_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
+        mss = bool(recent.get("mss_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
+        opposite = bool(recent.get("mss_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
+    else:
+        bos = mss = opposite = False
+
+    structure_ok = candidate in ("BUY", "SELL") and (bos or mss) and not opposite
+    filter_results["Structure"] = {
+        "pass": structure_ok,
+        "msg": f"BOS={bos} MSS={mss} Opposite={opposite}"
+    }
+    hierarchy.append(("STRUCTURE", structure_ok,
+                      "BOS/MSS aligned" if structure_ok else "Waiting for aligned BOS/MSS"))
+    if not structure_ok:
+        blockers.append("Structure not confirmed")
+
+    # ------------------------------------------------------------
+    # 5) LIQUIDITY + DISPLACEMENT — institutional sequence.
+    # ------------------------------------------------------------
+    zone = _recent_smc_zone(df, candidate, atr) if candidate in ("BUY", "SELL") and np.isfinite(atr) else None
+    sweep_ok = bool(zone and zone.get("sweep"))
+    displacement_ok = bool(zone and zone.get("displacement"))
+    bos_zone_ok = bool(zone and (zone.get("bos") or zone.get("mss")))
+
+    filter_results["Liquidity Sweep"] = {
+        "pass": sweep_ok, "msg": "Liquidity sweep confirmed" if sweep_ok else "No fresh directional sweep"
+    }
+    filter_results["Displacement"] = {
+        "pass": displacement_ok, "msg": "Displacement confirmed" if displacement_ok else "No directional displacement"
+    }
+    hierarchy.append(("LIQUIDITY", sweep_ok,
+                      "Fresh sweep" if sweep_ok else "Waiting for liquidity sweep"))
+    hierarchy.append(("DISPLACEMENT", displacement_ok,
+                      "Strong displacement" if displacement_ok else "Waiting for displacement"))
+    if not sweep_ok:
+        blockers.append("Liquidity sweep")
+    if not displacement_ok:
+        blockers.append("Displacement")
+    if not bos_zone_ok:
+        blockers.append("Zone structure evidence")
+
+    # ------------------------------------------------------------
+    # 6) ENTRY ZONE GATE — no chasing.
+    # ------------------------------------------------------------
+    levels = calculate_trade_levels(df, candidate, current_price, profile) if candidate in ("BUY", "SELL") else None
+    risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "No valid trade levels")
+
+    zone_quality = safe_float((levels or {}).get("entry_zone_quality"), 0)
+    entry_dist = safe_float((levels or {}).get("entry_distance_atr"), 999)
+    zone_ok = bool(levels) and zone_quality >= MIN_ENTRY_ZONE_QUALITY and entry_dist <= MAX_ENTRY_DISTANCE_ATR
+    filter_results["Entry Zone"] = {
+        "pass": zone_ok,
+        "msg": f"Quality {zone_quality:.0f} | distance {entry_dist:.2f} ATR"
+    }
+    hierarchy.append(("ENTRY ZONE", zone_ok,
+                      "Price is in/near valid zone" if zone_ok else "Waiting for price to return to zone"))
+    if not zone_ok:
+        blockers.append("Entry zone / no chase")
+
+    # ------------------------------------------------------------
+    # 7) LTF TRIGGER — final timing layer.
+    # ------------------------------------------------------------
+    if skip_external_filters or candidate == "NONE":
+        ltf_ok, ltf_msg = (True, "Backtest / no candidate") if candidate == "NONE" else (True, "Backtest — skipped")
+    else:
+        ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
+    filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
+    hierarchy.append(("LTF TRIGGER", ltf_ok,
+                      ltf_msg if ltf_ok else "Waiting for LTF trigger"))
+    if not ltf_ok:
+        blockers.append("LTF trigger")
+
+    # ------------------------------------------------------------
+    # 8) RISK GEOMETRY — tight, intraday and structural.
+    # ------------------------------------------------------------
+    precision_ok, precision_checks, precision_blockers = intraday_precision_gate(
+        levels, candidate, df
+    ) if candidate in ("BUY", "SELL") else (False, {}, ["No candidate"])
+    if not risk_ok:
+        precision_ok = False
+        precision_blockers = list(dict.fromkeys(precision_blockers + [risk_msg]))
+
+    filter_results["Risk Geometry"] = {
+        "pass": precision_ok,
+        "msg": "Entry/SL/TP geometry valid" if precision_ok else ", ".join(precision_blockers[:3])
+    }
+    hierarchy.append(("RISK", precision_ok,
+                      "RR and distances valid" if precision_ok else "Invalid intraday risk geometry"))
+    if not precision_ok:
+        blockers.extend([f"Risk: {x}" for x in precision_blockers])
+
+    # ------------------------------------------------------------
+    # 9) FINAL CLOSED-CANDLE TRIGGER
+    # ------------------------------------------------------------
+    candle_ok = candle_confirmation(df.iloc[:-1] if len(df) > 2 else df, candidate) if candidate in ("BUY", "SELL") else False
+    filter_results["Candle Trigger"] = {
+        "pass": candle_ok,
+        "msg": "Closed candle confirms direction" if candle_ok else "Waiting for closed candle confirmation"
+    }
+    hierarchy.append(("CANDLE", candle_ok,
+                      "Closed candle confirmed" if candle_ok else "Waiting for closed candle"))
+    if not candle_ok:
+        blockers.append("Candle trigger")
+
+    # ------------------------------------------------------------
+    # 10) QUALITY METRIC — only after hierarchy, never before.
+    # ------------------------------------------------------------
+    direction_score = buy_score if candidate == "BUY" else sell_score if candidate == "SELL" else 0
+    hierarchy_passes = sum(1 for _, ok, _ in hierarchy if ok)
+    hierarchy_total = max(len(hierarchy), 1)
+    quality = clamp(
+        40 + (hierarchy_passes / hierarchy_total) * 35
+        + min(direction_score, 100) * 0.15
+        + min(zone_quality, 100) * 0.10,
+        0, 95
+    )
+
+    # Final confirmation stability applies only to live execution.
+    stability_count = update_confirmation_stability(
+        candidate if not blockers else "WAIT",
+        enabled=not skip_external_filters
+    )
+    stability_ok = skip_external_filters or stability_count >= REQUIRED_STABLE_ANALYSES
+    if not stability_ok:
+        blockers.append(f"Signal stability {stability_count}/{REQUIRED_STABLE_ANALYSES}")
+
+    # Confirmation score is now a diagnostic of the hierarchy, not a creator of direction.
+    conf_score = clamp((hierarchy_passes / hierarchy_total) * 100, 0, 100)
+    w_confluence = clamp(
+        (zone_quality * 0.35) + (conf_score * 0.40) + (direction_score * 0.25),
+        0, 100
+    )
+    confirmation_reasons = [msg for stage, ok, msg in hierarchy if ok]
+    confirmation_blockers = [msg for stage, ok, msg in hierarchy if not ok]
+    confirmed_ok = (
+        candidate in ("BUY", "SELL") and
+        not blockers and stability_ok
+    )
+
+    # No news logic. User explicitly requested the engine to ignore news.
+    filter_results["News Window"] = {"pass": True, "msg": "Ignored by hierarchical engine"}
+
+    if confirmed_ok:
+        signal = candidate
+        execution_status = "EXECUTE"
+        execution_reason = (
+            f"CONFIRMED {candidate} — hierarchy passed | "
+            f"RR1 {safe_float((levels or {}).get('risk_reward_1'), 0):.2f}"
+        )
+        trade_grade = "A+" if quality >= 85 else "A"
+    else:
+        signal = "WAIT"
+        execution_status = "WAIT"
+        first_blocker = next((b for b in blockers if b), "Confirmation pending")
+        execution_reason = f"WAIT — {first_blocker}"
         trade_grade = "WAIT"
 
-    # ---- CONFIRMED ENTRY GATE ----
-    stability_count = update_confirmation_stability(
-        signal, enabled=not skip_external_filters
-    )
+    confidence = quality if confirmed_ok else min(quality, 69.0)
+    precision_ok = precision_ok and zone_ok
 
-    precision_ok, precision_checks, precision_blockers = intraday_precision_gate(
-        levels, signal, df
-    )
-
-    confirmed_ok, confirmed_checks, confirmed_blockers, confirmed_rr = (
-        confirmed_entry_gate(
-            signal=signal,
-            confidence=effective_confidence,
-            conf_score=conf_score,
-            w_confluence=w_confluence,
-            mtf_bias=mtf_bias,
-            mtf_conf=mtf_conf,
-            wk_bias=wk_bias,
-            filter_results=filter_results,
-            levels=levels,
-            trade_grade=trade_grade,
-            df=df,
-            candidate=candidate,
-            effective_penalty=penalty_total,
-            stability_count=stability_count,
-            require_stability=not skip_external_filters,
-        )
-    )
-
-    confirmed_ok = confirmed_ok and precision_ok
-    if not precision_ok:
-        confirmed_blockers = confirmed_blockers + [
-            f"Precision: {b}" for b in precision_blockers
-        ]
-        confirmed_checks.update({
-            f"Precision / {k}": v for k, v in precision_checks.items()
-        })
-
-    if signal == "WAIT":
-        execution_status, execution_reason = (
-            "WAIT", "Signal WAIT — no confirmed direction"
-        )
-    elif not all_passed:
-        execution_status, execution_reason = (
-            "BLOCKED", f"Hard Gate: {block_reason}"
-        )
-    elif news_block:
-        execution_status, execution_reason = (
-            "WAIT", "High-impact news window"
-        )
-    elif not confirmed_ok:
-        preview = ", ".join(confirmed_blockers[:4])
-        if len(confirmed_blockers) > 4:
-            preview += f" +{len(confirmed_blockers) - 4} more"
-        execution_status, execution_reason = (
-            "WAIT", f"CONFIRMATION PENDING — {preview}"
-        )
-    else:
-        execution_status, execution_reason = (
-            "EXECUTE",
-            f"CONFIRMED ENTRY — A+ | RR1 {confirmed_rr:.2f} | "
-            f"{REQUIRED_STABLE_ANALYSES} consecutive confirmations",
-        )
-
-    confidence = effective_confidence
-    advisories_str = ", ".join(f"{n}({p})" for n, p in soft_penalty_items) or "None"
+    reasons = [f"{stage}: {msg}" for stage, ok, msg in hierarchy]
+    if blockers:
+        reasons.append("BLOCKERS: " + " | ".join(dict.fromkeys(blockers))[:500])
 
     return {
-        "signal": signal, "confidence": confidence,
-        "raw_confidence": raw_confidence,
-        "buy_score": buy, "sell_score": sell,
+        "signal": signal,
+        "setup_direction": candidate,
+        "hierarchy_stage": next((stage for stage, ok, _ in hierarchy if not ok), "EXECUTE"),
+        "confidence": confidence,
+        "raw_confidence": quality,
+        "buy_score": buy_score,
+        "sell_score": sell_score,
         "weighted_confluence": w_confluence,
-        "pillars": pillars, "mtf_bias": mtf_bias, "mtf_conf": mtf_conf,
-        "mtf_details": mtf_details, "weekly_bias": wk_bias,
-        "levels": levels if risk_ok else None, "df": df,
-        "confirmation_ok": conf_ok, "confirmation_score": conf_score,
-        "confirmation_reasons": conf_reasons, "confirmation_blockers": conf_blockers,
-        "execution_status": execution_status, "execution_reason": execution_reason,
+        "pillars": pillars,
+        "mtf_bias": mtf_bias,
+        "mtf_conf": mtf_conf,
+        "mtf_details": mtf_details,
+        "weekly_bias": wk_bias,
+        "levels": levels if risk_ok else None,
+        "df": df,
+        "confirmation_ok": confirmed_ok,
+        "confirmation_score": conf_score,
+        "confirmation_reasons": confirmation_reasons,
+        "confirmation_blockers": confirmation_blockers,
+        "execution_status": execution_status,
+        "execution_reason": execution_reason,
         "confirmed_entry": confirmed_ok,
-        "confirmation_checks": confirmed_checks,
-        "confirmation_blockers_final": confirmed_blockers,
+        "confirmation_checks": {stage: ok for stage, ok, _ in hierarchy},
+        "confirmation_blockers_final": list(dict.fromkeys(blockers)),
         "confirmation_stability": stability_count,
-        "confirmed_rr1": confirmed_rr,
+        "confirmed_rr1": safe_float((levels or {}).get("risk_reward_1"), 0),
         "precision_ok": precision_ok,
         "precision_checks": precision_checks,
         "precision_blockers": precision_blockers,
         "entry_zone": (levels or {}).get("entry_zone"),
         "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
-        "entry_distance_atr": (levels or {}).get("entry_distance_atr", 0),
-        "sl_distance_atr": (levels or {}).get("sl_distance_atr", 0),
-        "tp1_distance_atr": (levels or {}).get("tp1_distance_atr", 0),
+        "entry_distance_atr": (levels or {}).get("entry_distance_atr", 999),
+        "sl_distance_atr": (levels or {}).get("sl_distance_atr", 999),
+        "tp1_distance_atr": (levels or {}).get("tp1_distance_atr", 999),
         "max_hold_hours": (levels or {}).get("max_hold_hours", MAX_HOLD_HOURS),
-        "trade_grade": trade_grade, "soft_penalties": penalty_total,
-        "soft_advisories": advisories_str,
-        "filter_results": filter_results, "all_filters_passed": all_passed,
-        "filter_block_reason": block_reason,
-        "regime": scores["regime"], "dxy_bias": scores["dxy_bias"],
-        "usd_msg": scores["usd_msg"], "divergence": scores["divergence"],
-        "reasons": scores["reasons"] + conf_reasons,
+        "trade_grade": trade_grade,
+        "soft_penalties": 0.0,
+        "soft_advisories": "None",
+        "filter_results": filter_results,
+        "all_filters_passed": not bool(blockers),
+        "filter_block_reason": " | ".join(dict.fromkeys(blockers))[:500],
+        "regime": regime,
+        "dxy_bias": dxy_bias,
+        "usd_msg": usd_msg,
+        "divergence": detect_divergence(df),
+        "reasons": reasons,
     }
-
 
 # ============================================================
 # BACKTEST — NO LOOK-AHEAD + ENHANCED METRICS
