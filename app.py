@@ -573,6 +573,49 @@ def normalize_ohlcv(df, min_rows=50):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def get_yahoo_chart_api(symbol, period="3mo", interval="1h"):
+    """Direct Yahoo chart API fallback when yfinance fails or is unavailable."""
+    try:
+        safe_symbol = sanitize_yf_symbol(symbol)
+        if interval == "4h":
+            raw = get_yahoo_chart_api(safe_symbol, "1mo" if period in ("3mo", "6mo", "1y", "2y") else period, "1h")
+            if raw is None or raw.empty:
+                return None
+            out = raw.resample("4h", label="right", closed="right").agg({
+                "open": "first", "high": "max", "low": "min",
+                "close": "last", "volume": "sum"
+            }).dropna(subset=["open", "high", "low", "close"])
+            return normalize_ohlcv(out, min_rows=10)
+        period_seconds = {"1d": 86400, "5d": 5*86400, "1mo": 31*86400,
+                          "3mo": 93*86400, "6mo": 186*86400, "1y": 365*86400,
+                          "2y": 730*86400}.get(period, 93*86400)
+        end = int(datetime.now(timezone.utc).timestamp())
+        start = end - period_seconds
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(safe_symbol, safe='')}"
+        params = {"period1": start, "period2": end, "interval": interval,
+                  "events": "history", "includeAdjustedClose": "true"}
+        r = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        payload = r.json().get("chart", {}).get("result")
+        if not payload:
+            return None
+        q = payload[0]
+        ts = q.get("timestamp", [])
+        quote = (q.get("indicators", {}).get("quote") or [{}])[0]
+        if not ts:
+            return None
+        df = pd.DataFrame({
+            "open": quote.get("open", []), "high": quote.get("high", []),
+            "low": quote.get("low", []), "close": quote.get("close", []),
+            "volume": quote.get("volume", [0] * len(ts)),
+        }, index=pd.to_datetime(ts, unit="s", utc=True))
+        df.index = df.index.tz_convert("UTC").tz_localize(None)
+        return normalize_ohlcv(df)
+    except Exception as exc:
+        logging.debug("Direct Yahoo fallback failed for %s: %s", symbol, exc)
+        return None
+
+
 def get_yfinance(symbol, period="3mo", interval="4h"):
     """
     Yahoo compatibility layer.
@@ -618,7 +661,10 @@ def get_yfinance(symbol, period="3mo", interval="4h"):
                 "volume": "sum",
             }).dropna(subset=["open", "high", "low", "close"])
 
-            return normalize_ohlcv(out, min_rows=10)
+            normalized = normalize_ohlcv(out, min_rows=10)
+            if normalized is not None:
+                return normalized
+            return get_yahoo_chart_api(safe_symbol, period, "4h")
 
         df = yf.download(
             safe_symbol,
@@ -628,10 +674,15 @@ def get_yfinance(symbol, period="3mo", interval="4h"):
             progress=False,
             threads=False,
         )
-        return normalize_ohlcv(df)
+        out = normalize_ohlcv(df)
+        if out is not None:
+            return out
+        # Direct HTTP fallback is useful on Streamlit deployments where
+        # Yahoo's yfinance session is blocked or returns an empty frame.
+        return get_yahoo_chart_api(safe_symbol, period, interval)
     except Exception as exc:
         logging.debug("get_yfinance(%s, %s, %s) failed: %s", symbol, period, interval, exc)
-        return None
+        return get_yahoo_chart_api(safe_symbol, period, interval)
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -3383,8 +3434,23 @@ if analyze_all:
         st.session_state.analysis_time = time.time() - start
 
 if analyze_this:
-    st.cache_data.clear()
-    st.rerun()
+    with st.spinner(f"Analyzing {selected_pair}..."):
+        start = time.time()
+        try:
+            # Force a fresh selected-asset read, then run the actual engine.
+            get_historical_data.clear()
+            get_spot_price.clear()
+            current_price, change = get_spot_price(symbol)
+            df_check = get_historical_data(symbol, "3mo", "4h")
+            if current_price is None or df_check is None or df_check.empty:
+                st.error(f"No market data available for {selected_pair}. Check the symbol/data connection.")
+            else:
+                st.session_state.last_manual_analysis = time.time()
+                st.session_state.manual_analysis_time = time.time() - start
+                st.success(f"Analysis completed for {selected_pair}.")
+                st.rerun()
+        except Exception as exc:
+            st.error(f"Analysis failed: {exc}")
 
 
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
