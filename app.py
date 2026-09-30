@@ -1,5 +1,5 @@
 # ============================================================
-# BLACK PYRAMID v2006 — CONFIRMED ENTRY — BALANCED MODE + REALISTIC TARGETS
+# BLACK PYRAMID v2005.8 — BALANCED MODE + REALISTIC TARGETS
 # Institutional Analysis Terminal
 #
 # v2005.8 CHANGELOG:
@@ -50,40 +50,16 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG — BALANCED MODE
 # ============================================================
 
-APP_VERSION = "v2007-Intraday Precision"
+APP_VERSION = "v2005.8-Balanced"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
 B_MIN = 70.0
 C_MIN = 62.0
 
-MIN_SIGNAL_GAP = 20
-MIN_CONFIDENCE = 80.0
-MIN_CONFIRMATION_SCORE = 75.0
-MIN_CONFLUENCE_CONFIRMED = 70.0
-MIN_MTF_CONFIRMED = 75.0
-MIN_RR_CONFIRMED = 1.50
-REQUIRED_STABLE_ANALYSES = 2
-
-# ============================================================
-# INTRADAY PRECISION ENGINE
-# ============================================================
-# The entry must be near a fresh SMC zone. The engine rejects
-# price-chasing, oversized SLs and targets that are too far away.
-INTRADAY_MODE = True
-MIN_ENTRY_ZONE_QUALITY = 75.0
-MAX_ENTRY_DISTANCE_ATR = 0.30
-MAX_SL_ATR = 1.00
-MIN_SL_ATR = 0.45
-SL_BUFFER_ATR = 0.12
-MAX_TP1_ATR = 1.80
-MAX_TP2_ATR = 2.70
-MIN_TP1_ROOM_R = 1.20
-MIN_INTRADAY_RR1 = 1.30
-MAX_ZONE_AGE_BARS = 35
-ZONE_LOOKBACK_BARS = 45
-MAX_HOLD_HOURS = 8
-
+MIN_SIGNAL_GAP = 15
+MIN_CONFIDENCE = 72.0
+MIN_CONFIRMATION_SCORE = 65.0
 
 PENALTY_MTF_AGAINST = 12.0
 PENALTY_RANGE_REGIME = 10.0
@@ -119,13 +95,6 @@ ASSET_PROFILES = {
         "atr_period": 14, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20,
         "mfi_period": 9, "bb_period": 20, "bb_std": 2.2,
         "atr_sl": 1.80, "atr_trail": 1.30, "swing_order": 3,
-        "structure_lookback": 175, "confidence_threshold": 74,
-        "min_rr": 1.80, "confirmation_threshold": 67,
-    },
-    "silver": {
-        "atr_period": 14, "rsi_period": 14, "rsi_ob": 78, "rsi_os": 22,
-        "mfi_period": 10, "bb_period": 20, "bb_std": 2.2,
-        "atr_sl": 1.90, "atr_trail": 1.35, "swing_order": 3,
         "structure_lookback": 175, "confidence_threshold": 74,
         "min_rr": 1.80, "confirmation_threshold": 67,
     },
@@ -237,7 +206,6 @@ def init_state():
         "show_market_status": False,
         "recent_results": [],       # سجل نتائج آخر الصفقات (WIN/LOSS)
         "trade_journal": [],        # كل الصفقات المُنفّذة
-        "confirmation_state": {"direction": None, "count": 0},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -270,10 +238,8 @@ def safe_bool(value):
 
 
 def asset_type_from_name(name: str) -> str:
-    n = str(name).lower()
-    if any(x in n for x in ["silver", "xag"]):
-        return "silver"
-    if any(x in n for x in ["gold", "xau"]):
+    n = name.lower()
+    if any(x in n for x in ["gold", "silver", "xau", "xag"]):
         return "gold"
     if any(x in n for x in ["bitcoin", "ethereum", "btc", "eth"]):
         return "crypto"
@@ -286,9 +252,7 @@ def profile_for(name: str):
 
 def get_asset_profile(pair_name):
     name = str(pair_name).upper()
-    if "XAG" in name or "SILVER" in name:
-        return "silver"
-    if "XAU" in name or "GOLD" in name:
+    if "XAU" in name or "GOLD" in name or "SILVER" in name or "XAG" in name:
         return "gold"
     if any(x in name for x in ("BTC", "ETH", "XRP", "SOL", "ADA")):
         return "crypto"
@@ -298,7 +262,7 @@ def get_asset_profile(pair_name):
 def fmt_price(value, pair_name):
     if value is None or not np.isfinite(safe_float(value)):
         return "N/A"
-    if asset_type_from_name(pair_name) in ("gold", "silver", "crypto"):
+    if asset_type_from_name(pair_name) in ("gold", "crypto"):
         return f"${float(value):,.2f}"
     return f"{float(value):.5f}"
 
@@ -574,63 +538,12 @@ def normalize_ohlcv(df, min_rows=50):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
-    """
-    Yahoo compatibility layer.
-
-    Yahoo/yfinance exposes 1h but not 4h as a native interval. For 4H
-    requests we fetch the most recent intraday window at 1H and resample
-    locally. This avoids passing an unsupported "4h" interval to Yahoo.
-    """
     try:
         safe_symbol = sanitize_yf_symbol(symbol)
-
-        if interval == "4h":
-            # Yahoo intraday data has a limited lookback window. Fetch the
-            # maximum practical recent window and build 4H candles locally.
-            end = datetime.now(timezone.utc)
-            start = end - timedelta(days=59)
-            df = yf.download(
-                safe_symbol,
-                start=start,
-                end=end,
-                interval="1h",
-                auto_adjust=False,
-                progress=False,
-                threads=False,
-            )
-            df = normalize_ohlcv(df)
-            if df is None or df.empty:
-                return None
-
-            # Work in a consistent timezone when possible.
-            if isinstance(df.index, pd.DatetimeIndex):
-                try:
-                    if df.index.tz is not None:
-                        df.index = df.index.tz_convert("UTC").tz_localize(None)
-                except Exception:
-                    pass
-
-            out = df.resample("4h", label="right", closed="right").agg({
-                "open": "first",
-                "high": "max",
-                "low": "min",
-                "close": "last",
-                "volume": "sum",
-            }).dropna(subset=["open", "high", "low", "close"])
-
-            return normalize_ohlcv(out, min_rows=10)
-
-        df = yf.download(
-            safe_symbol,
-            period=period,
-            interval=interval,
-            auto_adjust=False,
-            progress=False,
-            threads=False,
-        )
+        df = yf.download(safe_symbol, period=period, interval=interval,
+                         auto_adjust=False, progress=False, threads=False)
         return normalize_ohlcv(df)
-    except Exception as exc:
-        logging.debug("get_yfinance(%s, %s, %s) failed: %s", symbol, period, interval, exc)
+    except Exception:
         return None
 
 
@@ -672,35 +585,17 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
 
 @st.cache_data(ttl=90, show_spinner=False)
 def get_historical_data(symbol, period="3mo", interval="4h"):
-    """
-    Historical data router.
-
-    For 4H, Twelve Data is preferred when a key exists because Yahoo's
-    intraday lookback is limited; otherwise Yahoo 1H → local 4H resampling
-    is used. This keeps the app functional without requiring a second API.
-    """
     candidates = YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol])
-
-    # Prefer the dedicated 4H provider when configured.
-    if interval == "4h" and TWELVE_API_KEY:
-        df = get_twelve_data(symbol, interval, 500)
-        if df is not None and len(df) >= 50:
-            return df
-
     for yf_sym in candidates:
         df = get_yfinance(yf_sym, period, interval)
         if df is not None and len(df) >= 50:
             return df
-
     df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
     if df is not None and len(df) >= 50:
         return df
-
     df = get_twelve_data(symbol, interval, 500)
     if df is not None and len(df) >= 50:
         return df
-
-    # Last fallback: shorter recent window.
     for yf_sym in candidates:
         df = get_yfinance(yf_sym, "1mo", interval)
         if df is not None and len(df) >= 30:
@@ -1387,40 +1282,23 @@ def in_kill_zone(asset_type):
 
 
 def ote_filter(df, direction):
-    """
-    OTE is evaluated on one coherent impulse leg.
-
-    BUY: the latest confirmed swing low must occur before the latest swing
-    high. SELL: the latest confirmed swing high must occur before the latest
-    swing low. This prevents combining unrelated swings from different legs.
-    """
     swings_h = get_last_two_swings(df, "high")
     swings_l = get_last_two_swings(df, "low")
     if not swings_h or not swings_l:
         return True, "OTE غير متاح — مسموح"
-
-    latest_h_time, swing_h = swings_h[-1]
-    latest_l_time, swing_l = swings_l[-1]
-    current = float(df["close"].iloc[-1])
-    leg = float(swing_h - swing_l)
-
-    if leg <= 0:
-        return True, "موجة غير صالحة"
-
+    swing_h = swings_h[-1][1]
+    swing_l = swings_l[-1][1]
+    current = df["close"].iloc[-1]
+    leg = swing_h - swing_l
+    if leg <= 0: return True, "موجة غير صالحة"
     if direction == "BUY":
-        if latest_l_time >= latest_h_time:
-            return True, "لا توجد موجة صاعدة مكتملة — OTE مسموح"
         retr = (swing_h - current) / leg
-        if 0.55 <= retr <= 0.85:
-            return True, f"OTE صاعد {retr*100:.0f}% ✅"
+        if 0.55 <= retr <= 0.85: return True, f"OTE صاعد {retr*100:.0f}% ✅"
         return False, f"خارج OTE ({retr*100:.0f}%)"
-
-    if latest_h_time >= latest_l_time:
-        return True, "لا توجد موجة هابطة مكتملة — OTE مسموح"
-    retr = (current - swing_l) / leg
-    if 0.55 <= retr <= 0.85:
-        return True, f"OTE هابط {retr*100:.0f}% ✅"
-    return False, f"خارج OTE ({retr*100:.0f}%)"
+    else:
+        retr = (current - swing_l) / leg
+        if 0.55 <= retr <= 0.85: return True, f"OTE هابط {retr*100:.0f}% ✅"
+        return False, f"خارج OTE ({retr*100:.0f}%)"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1687,349 +1565,150 @@ def collect_sr_levels(df, lookback=200):
     return sorted({l for l in levels if np.isfinite(l) and l > 0})
 
 
-def _recent_smc_zone(df, signal, atr):
-    """Build a fresh SMC entry zone from OB/FVG, sweep and displacement evidence."""
-    if df is None or len(df) < 10 or atr <= 0:
-        return None
-
-    work = df.iloc[-ZONE_LOOKBACK_BARS:].copy()
-    direction = signal
-    candidates = []
-
-    if direction == "BUY":
-        ob_col, fvg_col, sweep_col = (
-            "order_block_bullish", "fvg_bullish", "liquidity_sweep_bullish"
-        )
-    else:
-        ob_col, fvg_col, sweep_col = (
-            "order_block_bearish", "fvg_bearish", "liquidity_sweep_bearish"
-        )
-
-    # Fresh order blocks
-    if ob_col in work.columns:
-        idxs = list(work.index[work[ob_col].fillna(False)])
-        for idx in idxs[-4:]:
-            pos = work.index.get_loc(idx)
-            if direction == "BUY":
-                lo = safe_float(work.loc[idx, "ob_low"], np.nan)
-                hi = safe_float(work.loc[idx, "ob_high"], np.nan)
-            else:
-                lo = safe_float(work.loc[idx, "ob_low"], np.nan)
-                hi = safe_float(work.loc[idx, "ob_high"], np.nan)
-            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
-                age = len(work) - 1 - pos
-                if age <= MAX_ZONE_AGE_BARS:
-                    candidates.append({
-                        "kind": "ORDER BLOCK",
-                        "low": float(lo), "high": float(hi),
-                        "age": age, "weight": 32.0,
-                        "source": idx,
-                    })
-
-    # Fresh fair-value gaps
-    if fvg_col in work.columns:
-        idxs = list(work.index[work[fvg_col].fillna(False)])
-        for idx in idxs[-5:]:
-            pos = work.index.get_loc(idx)
-            if direction == "BUY":
-                lo = safe_float(work.loc[idx, "fvg_bull_low"], np.nan)
-                hi = safe_float(work.loc[idx, "fvg_bull_high"], np.nan)
-            else:
-                lo = safe_float(work.loc[idx, "fvg_bear_low"], np.nan)
-                hi = safe_float(work.loc[idx, "fvg_bear_high"], np.nan)
-            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
-                age = len(work) - 1 - pos
-                if age <= MAX_ZONE_AGE_BARS:
-                    candidates.append({
-                        "kind": "FVG",
-                        "low": float(lo), "high": float(hi),
-                        "age": age, "weight": 27.0,
-                        "source": idx,
-                    })
-
-    if not candidates:
-        return None
-
-    current = float(df["close"].iloc[-1])
-
-    # Prefer a zone that is close to price. For BUY price should not be
-    # materially above the zone; for SELL price should not be materially below.
-    def distance(c):
-        if current < c["low"]:
-            return c["low"] - current
-        if current > c["high"]:
-            return current - c["high"]
-        return 0.0
-
-    candidates.sort(key=lambda c: (distance(c), c["age"]))
-    best = candidates[0]
-
-    # Try to merge an overlapping/nearby OB + FVG into one stronger zone.
-    for other in candidates[1:]:
-        overlap_low = max(best["low"], other["low"])
-        overlap_high = min(best["high"], other["high"])
-        near = max(best["low"], other["low"]) <= min(best["high"], other["high"]) + 0.20 * atr
-        if near:
-            best = {
-                **best,
-                "low": min(best["low"], other["low"]),
-                "high": max(best["high"], other["high"]),
-                "kind": f"{best['kind']} + {other['kind']}",
-                "weight": best["weight"] + other["weight"] * 0.55,
-                "age": min(best["age"], other["age"]),
-            }
-            break
-
-    zone_low, zone_high = best["low"], best["high"]
-    if zone_high <= zone_low:
-        return None
-
-    # Evidence around the zone: sweep, displacement, BOS/MSS.
-    zone_score = 0.0
-    recent = work.tail(min(12, len(work)))
-    sweep = bool(recent[sweep_col].fillna(False).any()) if sweep_col in recent.columns else False
-    if sweep:
-        zone_score += 22.0
-
-    bos_col = "bos_bullish" if direction == "BUY" else "bos_bearish"
-    mss_col = "mss_bullish" if direction == "BUY" else "mss_bearish"
-    bos = bool(recent[bos_col].fillna(False).any()) if bos_col in recent.columns else False
-    mss = bool(recent[mss_col].fillna(False).any()) if mss_col in recent.columns else False
-    if bos:
-        zone_score += 14.0
-    if mss:
-        zone_score += 10.0
-
-    # Displacement: strong candle in the intended direction.
-    body = (recent["close"] - recent["open"]).abs()
-    atr_s = recent["atr"].replace(0, np.nan) if "atr" in recent.columns else pd.Series(index=recent.index)
-    disp_buy = ((recent["close"] > recent["open"]) & (body >= 1.25 * atr_s)).fillna(False)
-    disp_sell = ((recent["close"] < recent["open"]) & (body >= 1.25 * atr_s)).fillna(False)
-    displacement = bool((disp_buy if direction == "BUY" else disp_sell).any())
-    if displacement:
-        zone_score += 14.0
-
-    # OTE overlap is a quality bonus, not a substitute for the zone.
-    ote_ok, _ = ote_filter(df, direction)
-    if ote_ok:
-        zone_score += 8.0
-
-    # HTF-style premium/discount alignment from the working timeframe.
-    last = df.iloc[-1]
-    if direction == "BUY" and safe_bool(last.get("in_discount")):
-        zone_score += 7.0
-    elif direction == "SELL" and safe_bool(last.get("in_premium")):
-        zone_score += 7.0
-
-    freshness = max(0.0, 8.0 * (1.0 - best["age"] / max(MAX_ZONE_AGE_BARS, 1)))
-    zone_score += freshness
-    zone_score += min(best["weight"], 55.0)
-
-    zone_score = clamp(zone_score, 0.0, 100.0)
-    center = (zone_low + zone_high) / 2.0
-    dist_atr = distance(best) / atr if atr > 0 else np.inf
-
-    return {
-        "low": float(zone_low),
-        "high": float(zone_high),
-        "center": float(center),
-        "quality": float(zone_score),
-        "distance": float(distance(best)),
-        "distance_atr": float(dist_atr),
-        "age": int(best["age"]),
-        "kind": best["kind"],
-        "sweep": sweep,
-        "bos": bos,
-        "mss": mss,
-        "displacement": displacement,
-        "ote": bool(ote_ok),
-    }
-
-
-def _nearest_intraday_liquidity(df, signal, entry, max_distance):
-    """Nearest opposing liquidity/structure within a bounded intraday range."""
-    candidates = []
-    work = df.iloc[-60:] if len(df) > 60 else df
-
-    if signal == "BUY":
-        for col in ("swing_high",):
-            if col in work.columns:
-                for idx in work.index[work[col].fillna(False)]:
-                    v = safe_float(work.loc[idx, "high"], np.nan)
-                    if np.isfinite(v) and v > entry:
-                        candidates.append(("Swing High", v))
-        if len(work):
-            for n, label in ((8, "8-bar High"), (20, "20-bar High")):
-                if len(work) >= n:
-                    v = float(work["high"].iloc[-n:].max())
-                    if v > entry:
-                        candidates.append((label, v))
-        candidates = [(n, v) for n, v in candidates if v - entry <= max_distance]
-        return min(candidates, key=lambda x: x[1], default=(None, np.nan))
-
-    for col in ("swing_low",):
-        if col in work.columns:
-            for idx in work.index[work[col].fillna(False)]:
-                v = safe_float(work.loc[idx, "low"], np.nan)
-                if np.isfinite(v) and v < entry:
-                    candidates.append(("Swing Low", v))
-    if len(work):
-        for n, label in ((8, "8-bar Low"), (20, "20-bar Low")):
-            if len(work) >= n:
-                v = float(work["low"].iloc[-n:].min())
-                if v < entry:
-                    candidates.append((label, v))
-    candidates = [(n, v) for n, v in candidates if entry - v <= max_distance]
-    return max(candidates, key=lambda x: x[1], default=(None, np.nan))
-
-
 def calculate_trade_levels(df, signal, current_price, profile):
-    """
-    Intraday Precision levels:
-      1) entry must be inside/near a fresh OB/FVG zone,
-      2) SL sits just beyond that zone,
-      3) TP1 uses nearby liquidity first,
-      4) TP distances are capped to avoid unrealistic same-day targets.
-    """
+    """ATR-buffered structural SL + Fibonacci / Pivot / S&R targets."""
     atr = safe_float(df["atr"].iloc[-1], np.nan)
     if not np.isfinite(atr) or atr <= 0:
         return None
 
-    zone = _recent_smc_zone(df, signal, atr)
-    if zone is None:
-        return None
-
-    entry = float(current_price)
-    max_entry_distance = MAX_ENTRY_DISTANCE_ATR * atr
-
-    # Never chase price. Price can be inside the zone or just outside it.
-    entry_distance = zone["distance"]
-    entry_near = entry_distance <= max_entry_distance
+    impulse   = find_impulse_leg(df, signal, lookback=120)
+    fibs      = fib_levels_from_impulse(impulse)
+    pivots    = calc_pivot_points(df)
+    sr_levels = collect_sr_levels(df, lookback=200)
+    swing_low, swing_high = latest_structure_levels(df)
+    recent_low  = float(df["low"].iloc[-20:].min())
+    recent_high = float(df["high"].iloc[-20:].max())
+    ssl = safe_float(df["ssl"].iloc[-1], np.nan)
+    bsl = safe_float(df["bsl"].iloc[-1], np.nan)
 
     if signal == "BUY":
-        # Prefer live price when it is in/near the zone; otherwise no entry.
-        if not entry_near:
-            return {
-                "entry": entry, "stop_loss": np.nan,
-                "target1": np.nan, "target2": np.nan, "target3": np.nan,
-                "risk": np.nan, "risk_reward_1": 0.0,
-                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
-                "sources": {"tp1": "NO ENTRY — price too far from zone",
-                            "tp2": "", "tp3": ""},
-                "entry_zone": zone, "intraday_valid": False,
-                "entry_zone_quality": zone["quality"],
-                "entry_distance_atr": zone["distance_atr"],
-            }
+        entry = float(current_price)
+        stop_cands = []
+        for lvl in (swing_low, recent_low, ssl):
+            if np.isfinite(lvl) and lvl < entry - 0.15 * atr:
+                stop_cands.append(lvl)
+        if fibs:
+            for k in ("0.786", "0.618"):
+                lvl = fibs["retracement"].get(k)
+                if lvl and lvl < entry - 0.15 * atr:
+                    stop_cands.append(lvl)
+        if pivots:
+            for k in ("s1", "s2", "fib_s1", "fib_s2"):
+                lvl = pivots.get(k)
+                if lvl and lvl < entry - 0.3 * atr:
+                    stop_cands.append(lvl)
 
-        # If price is slightly above the zone, use current price. If it is
-        # inside the zone, current price is the executable entry.
-        zone_floor = zone["low"]
-        stop_base = min(zone_floor, entry)
-        stop_loss = stop_base - SL_BUFFER_ATR * atr
+        structural = max(stop_cands) if stop_cands else entry - 1.5 * atr
+        structural = max(structural, entry - 3.0 * atr)
+        structural = min(structural, entry - 1.0 * atr)
+        stop_loss  = structural - 0.25 * atr
         risk = entry - stop_loss
+        if risk <= 0: return None
 
-        # Keep the structural stop tight. Do not widen it just to manufacture RR.
-        if risk < MIN_SL_ATR * atr:
-            stop_loss = entry - MIN_SL_ATR * atr
-            risk = MIN_SL_ATR * atr
+        min_t1 = entry + risk * MIN_RR_TP1
+        min_t2 = entry + risk * MIN_RR_TP2
+        min_t3 = entry + risk * MIN_RR_TP3
 
-        if risk > MAX_SL_ATR * atr:
-            return {
-                "entry": entry, "stop_loss": stop_loss,
-                "target1": np.nan, "target2": np.nan, "target3": np.nan,
-                "risk": risk, "risk_reward_1": 0.0,
-                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
-                "sources": {"tp1": "NO ENTRY — SL too wide", "tp2": "", "tp3": ""},
-                "entry_zone": zone, "intraday_valid": False,
-                "entry_zone_quality": zone["quality"],
-                "entry_distance_atr": zone["distance_atr"],
-            }
+        cands = []
+        if fibs:
+            for k, v in fibs["extension"].items():
+                if v > entry + 0.3 * atr: cands.append({"name": f"Fib ext {k}", "level": v})
+            for k, v in fibs["retracement"].items():
+                if v > entry + 0.3 * atr: cands.append({"name": f"Fib retr {k}", "level": v})
+        if pivots:
+            for key, nm in (("r1", "Pivot R1"), ("r2", "Pivot R2"), ("r3", "Pivot R3"),
+                            ("fib_r1", "FibPivot R1"), ("fib_r2", "FibPivot R2"),
+                            ("fib_r3", "FibPivot R3")):
+                lvl = pivots.get(key)
+                if lvl and lvl > entry + 0.3 * atr: cands.append({"name": nm, "level": lvl})
+        for lvl, nm in ((bsl, "BSL"), (swing_high, "Swing High"), (recent_high, "20-bar High")):
+            if np.isfinite(lvl) and lvl > entry + 0.3 * atr: cands.append({"name": nm, "level": lvl})
+        for lvl in sr_levels:
+            if lvl > entry + 0.5 * atr: cands.append({"name": "S/R", "level": lvl})
+        cands.sort(key=lambda x: x["level"])
 
-        min_t1 = entry + max(risk * MIN_INTRADAY_RR1, risk * MIN_TP1_ROOM_R)
-        max_t1 = entry + MAX_TP1_ATR * atr
-        liq_name, liq = _nearest_intraday_liquidity(df, signal, entry, MAX_TP1_ATR * atr)
-        if np.isfinite(liq) and liq >= min_t1:
-            t1 = liq
-            t1_src = liq_name
-        else:
-            t1 = min_t1
-            t1_src = "Intraday RR fallback"
+        def pick(min_p, prev, fallback, fb_name):
+            valid = [c for c in cands if c["level"] >= min_p
+                     and (prev is None or c["level"] >= prev + 0.5 * atr)]
+            if valid: return valid[0]["level"], valid[0]["name"]
+            return fallback, fb_name
 
-        # If the closest valid liquidity is too far, do not manufacture a
-        # distant target. This keeps the setup intraday.
-        if t1 > max_t1:
-            return {
-                "entry": entry, "stop_loss": stop_loss,
-                "target1": t1, "target2": np.nan, "target3": np.nan,
-                "risk": risk, "risk_reward_1": (t1-entry)/risk,
-                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
-                "sources": {"tp1": "NO ENTRY — TP1 too far", "tp2": "", "tp3": ""},
-                "entry_zone": zone, "intraday_valid": False,
-                "entry_zone_quality": zone["quality"],
-                "entry_distance_atr": zone["distance_atr"],
-            }
+        fb1 = fibs["extension"]["1.000"] if fibs else min_t1
+        fb2 = fibs["extension"]["1.618"] if fibs else min_t2
+        fb3 = fibs["extension"]["2.618"] if fibs else min_t3
+        fb1 = max(fb1, min_t1)
+        fb2 = max(fb2, min_t2, fb1 + 0.5 * atr)
+        fb3 = max(fb3, min_t3, fb2 + 0.5 * atr)
 
-        t2 = min(entry + MAX_TP2_ATR * atr, max(t1 + 0.35 * atr, t1 + risk * 0.60))
-        t3 = min(entry + (MAX_TP2_ATR + 0.45) * atr, t2 + risk * 0.60)
+        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000")
+        t1 = max(t1, min_t1)
+        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618")
+        t2 = max(t2, min_t2, t1 + 0.5 * atr)
+        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618")
+        t3 = max(t3, min_t3, t2 + 0.5 * atr)
+
     else:
-        if not entry_near:
-            return {
-                "entry": entry, "stop_loss": np.nan,
-                "target1": np.nan, "target2": np.nan, "target3": np.nan,
-                "risk": np.nan, "risk_reward_1": 0.0,
-                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
-                "sources": {"tp1": "NO ENTRY — price too far from zone",
-                            "tp2": "", "tp3": ""},
-                "entry_zone": zone, "intraday_valid": False,
-                "entry_zone_quality": zone["quality"],
-                "entry_distance_atr": zone["distance_atr"],
-            }
+        entry = float(current_price)
+        stop_cands = []
+        for lvl in (swing_high, recent_high, bsl):
+            if np.isfinite(lvl) and lvl > entry + 0.15 * atr: stop_cands.append(lvl)
+        if fibs:
+            for k in ("0.786", "0.618"):
+                lvl = fibs["retracement"].get(k)
+                if lvl and lvl > entry + 0.15 * atr: stop_cands.append(lvl)
+        if pivots:
+            for k in ("r1", "r2", "fib_r1", "fib_r2"):
+                lvl = pivots.get(k)
+                if lvl and lvl > entry + 0.3 * atr: stop_cands.append(lvl)
 
-        zone_ceiling = zone["high"]
-        stop_base = max(zone_ceiling, entry)
-        stop_loss = stop_base + SL_BUFFER_ATR * atr
+        structural = min(stop_cands) if stop_cands else entry + 1.5 * atr
+        structural = min(structural, entry + 3.0 * atr)
+        structural = max(structural, entry + 1.0 * atr)
+        stop_loss  = structural + 0.25 * atr
         risk = stop_loss - entry
+        if risk <= 0: return None
 
-        if risk < MIN_SL_ATR * atr:
-            stop_loss = entry + MIN_SL_ATR * atr
-            risk = MIN_SL_ATR * atr
+        min_t1 = entry - risk * MIN_RR_TP1
+        min_t2 = entry - risk * MIN_RR_TP2
+        min_t3 = entry - risk * MIN_RR_TP3
 
-        if risk > MAX_SL_ATR * atr:
-            return {
-                "entry": entry, "stop_loss": stop_loss,
-                "target1": np.nan, "target2": np.nan, "target3": np.nan,
-                "risk": risk, "risk_reward_1": 0.0,
-                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
-                "sources": {"tp1": "NO ENTRY — SL too wide", "tp2": "", "tp3": ""},
-                "entry_zone": zone, "intraday_valid": False,
-                "entry_zone_quality": zone["quality"],
-                "entry_distance_atr": zone["distance_atr"],
-            }
+        cands = []
+        if fibs:
+            for k, v in fibs["extension"].items():
+                if v < entry - 0.3 * atr: cands.append({"name": f"Fib ext {k}", "level": v})
+            for k, v in fibs["retracement"].items():
+                if v < entry - 0.3 * atr: cands.append({"name": f"Fib retr {k}", "level": v})
+        if pivots:
+            for key, nm in (("s1", "Pivot S1"), ("s2", "Pivot S2"), ("s3", "Pivot S3"),
+                            ("fib_s1", "FibPivot S1"), ("fib_s2", "FibPivot S2"),
+                            ("fib_s3", "FibPivot S3")):
+                lvl = pivots.get(key)
+                if lvl and lvl < entry - 0.3 * atr: cands.append({"name": nm, "level": lvl})
+        for lvl, nm in ((ssl, "SSL"), (swing_low, "Swing Low"), (recent_low, "20-bar Low")):
+            if np.isfinite(lvl) and lvl < entry - 0.3 * atr: cands.append({"name": nm, "level": lvl})
+        for lvl in sr_levels:
+            if lvl < entry - 0.5 * atr: cands.append({"name": "S/R", "level": lvl})
+        cands.sort(key=lambda x: x["level"], reverse=True)
 
-        min_t1 = entry - max(risk * MIN_INTRADAY_RR1, risk * MIN_TP1_ROOM_R)
-        max_t1 = entry - MAX_TP1_ATR * atr
-        liq_name, liq = _nearest_intraday_liquidity(df, signal, entry, MAX_TP1_ATR * atr)
-        if np.isfinite(liq) and liq <= min_t1:
-            t1 = liq
-            t1_src = liq_name
-        else:
-            t1 = min_t1
-            t1_src = "Intraday RR fallback"
+        def pick(min_p, prev, fallback, fb_name):
+            valid = [c for c in cands if c["level"] <= min_p
+                     and (prev is None or c["level"] <= prev - 0.5 * atr)]
+            if valid: return valid[0]["level"], valid[0]["name"]
+            return fallback, fb_name
 
-        if t1 < max_t1:
-            return {
-                "entry": entry, "stop_loss": stop_loss,
-                "target1": t1, "target2": np.nan, "target3": np.nan,
-                "risk": risk, "risk_reward_1": (entry-t1)/risk,
-                "risk_reward_2": 0.0, "risk_reward_3": 0.0,
-                "sources": {"tp1": "NO ENTRY — TP1 too far", "tp2": "", "tp3": ""},
-                "entry_zone": zone, "intraday_valid": False,
-                "entry_zone_quality": zone["quality"],
-                "entry_distance_atr": zone["distance_atr"],
-            }
+        fb1 = fibs["extension"]["1.000"] if fibs else min_t1
+        fb2 = fibs["extension"]["1.618"] if fibs else min_t2
+        fb3 = fibs["extension"]["2.618"] if fibs else min_t3
+        fb1 = min(fb1, min_t1)
+        fb2 = min(fb2, min_t2, fb1 - 0.5 * atr)
+        fb3 = min(fb3, min_t3, fb2 - 0.5 * atr)
 
-        t2 = max(entry - MAX_TP2_ATR * atr, min(t1 - 0.35 * atr, t1 - risk * 0.60))
-        t3 = max(entry - (MAX_TP2_ATR + 0.45) * atr, t2 - risk * 0.60)
+        t1, s1src = pick(min_t1, None, fb1, "Fib 1.000")
+        t1 = min(t1, min_t1)
+        t2, s2src = pick(min_t2, t1, fb2, "Fib 1.618")
+        t2 = min(t2, min_t2, t1 - 0.5 * atr)
+        t3, s3src = pick(min_t3, t2, fb3, "Fib 2.618")
+        t3 = min(t3, min_t3, t2 - 0.5 * atr)
 
     rr1 = abs(t1 - entry) / risk
     rr2 = abs(t2 - entry) / risk
@@ -2039,49 +1718,25 @@ def calculate_trade_levels(df, signal, current_price, profile):
         "entry": float(entry), "stop_loss": float(stop_loss),
         "target1": float(t1), "target2": float(t2), "target3": float(t3),
         "risk": float(risk),
-        "risk_reward_1": float(rr1), "risk_reward_2": float(rr2),
-        "risk_reward_3": float(rr3),
-        "sources": {"tp1": t1_src, "tp2": "Intraday liquidity extension",
-                    "tp3": "Intraday extension"},
-        "fibs": None, "pivots": None, "impulse": None,
-        "entry_zone": zone,
-        "intraday_valid": True,
-        "entry_zone_quality": float(zone["quality"]),
-        "entry_distance_atr": float(zone["distance_atr"]),
-        "sl_distance_atr": float(risk / atr),
-        "tp1_distance_atr": float(abs(t1 - entry) / atr),
-        "max_hold_hours": MAX_HOLD_HOURS,
+        "risk_reward_1": float(rr1), "risk_reward_2": float(rr2), "risk_reward_3": float(rr3),
+        "sources": {"tp1": s1src, "tp2": s2src, "tp3": s3src},
+        "fibs": fibs, "pivots": pivots, "impulse": impulse,
     }
+
+
 def validate_levels(signal, levels, profile):
-    if not levels:
-        return False, "تعذر بناء المستويات"
-
-    if not levels.get("intraday_valid", False):
-        return False, levels.get("sources", {}).get("tp1", "Intraday setup invalid")
-
+    if not levels: return False, "تعذر بناء المستويات"
     if signal == "BUY":
         if not levels["stop_loss"] < levels["entry"] < levels["target1"]:
             return False, "ترتيب BUY غير صالح"
     else:
         if not levels["target1"] < levels["entry"] < levels["stop_loss"]:
             return False, "ترتيب SELL غير صالح"
-
-    if levels.get("entry_zone_quality", 0) < MIN_ENTRY_ZONE_QUALITY:
-        return False, "Entry zone quality منخفضة"
-
-    if levels.get("entry_distance_atr", 999) > MAX_ENTRY_DISTANCE_ATR:
-        return False, "السعر بعيد عن Entry Zone"
-
-    if levels.get("sl_distance_atr", 999) > MAX_SL_ATR:
-        return False, "Stop Loss واسع"
-
-    if levels.get("tp1_distance_atr", 999) > MAX_TP1_ATR:
-        return False, "TP1 بعيد للتداول اليومي"
-
-    if levels["risk_reward_1"] < MIN_INTRADAY_RR1:
-        return False, "TP1 RR منخفض للـIntraday"
-
+    if levels["risk_reward_1"] < MIN_RR_TP1: return False, "TP1 RR منخفض"
+    if levels["risk_reward_2"] < MIN_RR_TP2: return False, "TP2 RR منخفض"
+    if levels["risk_reward_3"] < MIN_RR_TP3: return False, "TP3 RR منخفض"
     return True, ""
+
 
 # ============================================================
 # POSITION SIZE CALCULATOR
@@ -2121,21 +1776,6 @@ def calc_position_size(balance, risk_pct, entry, stop_loss, pair_name):
             "sl_distance": round(sl_distance, 2), "sl_pips": round(sl_pips, 1),
             "lots": round(lots, 2), "ounces": round(lots * 100, 2),
             "unit_label": "lots (100 oz)",
-        }
-
-    if asset == "silver":
-        # Standard futures-style reference sizing: 5,000 oz contract.
-        # Brokers/CFDs may use a different contract size; the UI should be
-        # treated as a risk estimate unless the broker specification matches.
-        contract_size = 5000.0
-        risk_per_lot = sl_distance * contract_size
-        lots = risk_amount / risk_per_lot if risk_per_lot > 0 else 0
-        return {
-            "asset": asset, "risk_amount": round(risk_amount, 2),
-            "sl_distance": round(sl_distance, 4),
-            "lots": round(lots, 3),
-            "ounces": round(lots * contract_size, 2),
-            "unit_label": "lots (5,000 oz reference)",
         }
 
     if asset == "crypto":
@@ -2188,184 +1828,17 @@ def build_trade_management(signal, levels, profile):
 # SIGNAL ENGINE — BALANCED MODE + GUARDS
 # ============================================================
 
-# ============================================================
-# CONFIRMED ENTRY — LIVE STABILITY
-# ============================================================
-
-def update_confirmation_stability(direction, enabled=True):
-    """Requires the same BUY/SELL direction on consecutive live analyses."""
-    if not enabled or direction not in ("BUY", "SELL"):
-        if enabled:
-            st.session_state["confirmation_state"] = {"direction": None, "count": 0}
-        return 0
-
-    state = st.session_state.get(
-        "confirmation_state", {"direction": None, "count": 0}
-    )
-    if state.get("direction") == direction:
-        count = int(state.get("count", 0)) + 1
-    else:
-        count = 1
-
-    st.session_state["confirmation_state"] = {
-        "direction": direction,
-        "count": count,
-    }
-    return count
-
-
-def confirmed_entry_gate(
-    signal, confidence, conf_score, w_confluence,
-    mtf_bias, mtf_conf, wk_bias, filter_results,
-    levels, trade_grade, df, candidate,
-    effective_penalty=0.0, stability_count=0,
-    require_stability=True,
-):
-    """Strict pre-entry gate. EXECUTE is allowed only after all confirmations pass."""
-    blockers = []
-    checks = {}
-
-    aligned_mtf = (
-        (candidate == "BUY" and mtf_bias == "BULLISH")
-        or (candidate == "SELL" and mtf_bias == "BEARISH")
-    )
-    weekly_ok = (
-        wk_bias == "NEUTRAL"
-        or (candidate == "BUY" and wk_bias == "BULLISH")
-        or (candidate == "SELL" and wk_bias == "BEARISH")
-    )
-
-    checks["Signal"] = signal == candidate and signal in ("BUY", "SELL")
-    checks["Confidence"] = confidence >= MIN_CONFIDENCE
-    checks["Confirmation Score"] = conf_score >= MIN_CONFIRMATION_SCORE
-    checks["Confluence"] = w_confluence >= MIN_CONFLUENCE_CONFIRMED
-    checks["MTF"] = aligned_mtf and mtf_conf >= MIN_MTF_CONFIRMED
-    checks["Weekly"] = weekly_ok
-    checks["HTF Zone"] = filter_results.get("HTF Zone", {}).get("pass", False)
-    checks["LTF Trigger"] = filter_results.get("LTF Trigger", {}).get("pass", False)
-    checks["OTE"] = filter_results.get("OTE", {}).get("pass", False)
-    checks["Displacement"] = filter_results.get("Displacement", {}).get("pass", False)
-    checks["News Clear"] = filter_results.get("News Window", {}).get("pass", False)
-    checks["Volatility"] = filter_results.get("Volatility", {}).get("pass", False)
-    checks["Market Open"] = filter_results.get("Market Open", {}).get("pass", False)
-    checks["Kill Switch"] = filter_results.get("Kill Switch", {}).get("pass", False)
-
-    # Use the last CLOSED candle for the final candle confirmation.
-    closed_df = df.iloc[:-1] if len(df) > 2 else df
-    checks["Candle"] = candle_confirmation(closed_df, candidate)
-
-    rr1 = safe_float(levels.get("risk_reward_1"), 0) if levels else 0
-    checks["RR1"] = rr1 >= MIN_RR_CONFIRMED
-    checks["Grade"] = trade_grade == "A+"
-
-    # If Strict Filters are enabled, every penalty must be cleared.
-    # With normal mode the penalty engine remains advisory, preserving
-    # the existing UI behavior while the hard confirmation gate stays active.
-    checks["No Soft Penalty"] = effective_penalty <= 0.0
-
-    checks["Stable Signal"] = (
-        (not require_stability)
-        or stability_count >= REQUIRED_STABLE_ANALYSES
-    )
-
-    for name, passed in checks.items():
-        if not passed:
-            blockers.append(name)
-
-    return len(blockers) == 0, checks, blockers, rr1
-
-
-
-
-def intraday_precision_gate(levels, signal, df):
-    """Hard gate for entry location, SL width and intraday target room."""
-    checks = {}
-    blockers = []
-
-    zone = levels.get("entry_zone", {}) if levels else {}
-    checks["Entry Zone"] = bool(zone)
-    checks["Zone Quality"] = (
-        safe_float(levels.get("entry_zone_quality"), 0) >= MIN_ENTRY_ZONE_QUALITY
-        if levels else False
-    )
-    checks["Entry Distance"] = (
-        safe_float(levels.get("entry_distance_atr"), 999) <= MAX_ENTRY_DISTANCE_ATR
-        if levels else False
-    )
-    checks["SL Distance"] = (
-        safe_float(levels.get("sl_distance_atr"), 999) <= MAX_SL_ATR
-        if levels else False
-    )
-    checks["TP1 Distance"] = (
-        safe_float(levels.get("tp1_distance_atr"), 999) <= MAX_TP1_ATR
-        if levels else False
-    )
-    checks["TP1 RR"] = (
-        safe_float(levels.get("risk_reward_1"), 0) >= MIN_INTRADAY_RR1
-        if levels else False
-    )
-
-    checks["Liquidity Sweep"] = bool(zone.get("sweep", False))
-    checks["BOS/MSS"] = bool(zone.get("bos", False) or zone.get("mss", False))
-    checks["Displacement"] = bool(zone.get("displacement", False))
-    checks["OTE Alignment"] = bool(zone.get("ote", False))
-
-    for name, passed in checks.items():
-        if not passed:
-            blockers.append(name)
-
-    return len(blockers) == 0, checks, blockers
-
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
-    """Hierarchical trade engine.
-
-    Direction is NOT created by a score.  A trade is promoted through ordered
-    gates: Market -> Regime -> HTF -> Structure -> Liquidity -> Displacement
-    -> Entry Zone -> LTF Trigger -> Risk Geometry -> Confirmation.
-
-    BUY/SELL is returned only when the final execution gate passes.
-    Everything else is WAIT with an explicit blocker.
-    """
     profile = profile_for(pair_name)
     profile_key = get_asset_profile(pair_name)
     df = build_features(df, profile)
 
-    # ------------------------------------------------------------
-    # 0) DATA / MARKET SAFETY
-    # ------------------------------------------------------------
-    if df is None or len(df) < 80 or current_price is None:
-        return {
-            "signal": "WAIT", "confidence": 0.0, "raw_confidence": 0.0,
-            "buy_score": 0.0, "sell_score": 0.0, "weighted_confluence": 0.0,
-            "pillars": {"BUY": {p: 0 for p in PILLAR_WEIGHTS},
-                        "SELL": {p: 0 for p in PILLAR_WEIGHTS}},
-            "mtf_bias": "NEUTRAL", "mtf_conf": 0.0, "mtf_details": {},
-            "weekly_bias": "NEUTRAL", "levels": None, "df": df,
-            "confirmation_ok": False, "confirmation_score": 0.0,
-            "confirmation_reasons": [], "confirmation_blockers": ["Insufficient data"],
-            "execution_status": "WAIT", "execution_reason": "Insufficient market data",
-            "confirmed_entry": False, "confirmation_checks": {},
-            "confirmation_blockers_final": ["Insufficient data"],
-            "confirmation_stability": 0, "confirmed_rr1": 0.0,
-            "precision_ok": False, "precision_checks": {},
-            "precision_blockers": ["Insufficient data"], "entry_zone": None,
-            "entry_zone_quality": 0, "entry_distance_atr": 999,
-            "sl_distance_atr": 999, "tp1_distance_atr": 999,
-            "max_hold_hours": MAX_HOLD_HOURS, "trade_grade": "WAIT",
-            "soft_penalties": 0.0, "soft_advisories": "None",
-            "filter_results": {}, "all_filters_passed": False,
-            "filter_block_reason": "Insufficient market data",
-            "regime": "UNKNOWN", "dxy_bias": "NEUTRAL", "usd_msg": "",
-            "divergence": None, "reasons": ["Insufficient market data"],
-            "setup_direction": "NONE", "hierarchy_stage": "DATA",
-        }
-
     if precomputed is None:
         mtf_bias, mtf_conf, mtf_details = get_mtf_analysis(symbol, pair_name)
         wk_bias, _ = weekly_bias(symbol, pair_name)
-        dxy_bias, _, usd_msg = get_dxy_context()
+        dxy_bias, _, _ = get_dxy_context()
         gold_corr = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
     else:
         mtf_bias = precomputed.get("mtf_bias", "NEUTRAL")
@@ -2373,312 +1846,218 @@ def generate_signal(df, current_price, pair_name, symbol,
         mtf_details = precomputed.get("mtf_details", {})
         wk_bias = precomputed.get("weekly_bias", "NEUTRAL")
         dxy_bias = precomputed.get("dxy_bias", "NEUTRAL")
-        usd_msg = ""
         gold_corr = precomputed.get("gold_corr", None)
 
-    last = df.iloc[-1]
-    atr = safe_float(last.get("atr"), np.nan)
-    regime, regime_conf = detect_regime(df)
-
-    # ------------------------------------------------------------
-    # Diagnostic scores remain available, but NEVER create a trade.
-    # ------------------------------------------------------------
     scores = directional_score(df, pair_name, symbol,
                                dxy_bias=dxy_bias, gold_corr=gold_corr)
-    buy_score = clamp(scores.get("buy", 0), 0, 100)
-    sell_score = clamp(scores.get("sell", 0), 0, 100)
-    pillars = scores.get("pillars", {
-        "BUY": {p: 0 for p in PILLAR_WEIGHTS},
-        "SELL": {p: 0 for p in PILLAR_WEIGHTS},
-    })
+
+    buy, sell = scores["buy"], scores["sell"]
+    if mtf_bias == "BULLISH": buy += 8; sell -= 4
+    elif mtf_bias == "BEARISH": sell += 8; buy -= 4
+    if wk_bias == "BULLISH": buy += 5; sell -= 3
+    elif wk_bias == "BEARISH": sell += 5; buy -= 3
+    buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
+
+    gap = abs(buy - sell)
+    signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
+
+    last = df.iloc[-1]
+    mss_conflict = False
+    if safe_bool(last.get("mss_bullish")) and sell > buy: mss_conflict = True
+    if safe_bool(last.get("mss_bearish")) and buy > sell: mss_conflict = True
+
+    vrsi = safe_float(last.get("vrsi"), 50)
+    if signal == "BUY" and vrsi > profile["rsi_ob"] and not safe_bool(last.get("mss_bullish")):
+        buy = max(0, buy - 5)
+    if signal == "SELL" and vrsi < profile["rsi_os"] and not safe_bool(last.get("mss_bearish")):
+        sell = max(0, sell - 5)
+
+    confidence = clamp(50 + abs(buy - sell) * 0.75 + max(0, max(buy, sell) - 60) * 0.25, 50, 95)
+
+    soft_penalty_items = []
+
+    if signal in ("BUY", "SELL") and mtf_bias != "NEUTRAL":
+        if (signal == "BUY" and mtf_bias != "BULLISH") or \
+           (signal == "SELL" and mtf_bias != "BEARISH"):
+            soft_penalty_items.append(("MTF ضد الاتجاه", PENALTY_MTF_AGAINST))
+
+    if signal in ("BUY", "SELL") and wk_bias != "NEUTRAL":
+        if (signal == "BUY" and wk_bias != "BULLISH") or \
+           (signal == "SELL" and wk_bias != "BEARISH"):
+            soft_penalty_items.append(("Weekly ضد الاتجاه", PENALTY_WEEKLY_AGAINST))
+
+    if signal in ("BUY", "SELL") and scores["regime"] in ("RANGE", "COMPRESSION"):
+        soft_penalty_items.append((f"Regime {scores['regime']}", PENALTY_RANGE_REGIME))
+
+    if signal in ("BUY", "SELL"):
+        atr_now = safe_float(last.get("atr"), 0)
+        if atr_now > 0:
+            body = abs(float(last["close"]) - float(last["open"]))
+            if body < 0.50 * atr_now:
+                soft_penalty_items.append(("شمعة ضعيفة", PENALTY_WEAK_CANDLE))
+            elif signal == "BUY" and last["close"] < last["open"]:
+                soft_penalty_items.append(("شمعة ضد الاتجاه", PENALTY_WEAK_CANDLE))
+            elif signal == "SELL" and last["close"] > last["open"]:
+                soft_penalty_items.append(("شمعة ضد الاتجاه", PENALTY_WEAK_CANDLE))
+
+    if mss_conflict and signal in ("BUY", "SELL"):
+        soft_penalty_items.append(("MSS Conflict", 10))
+
+    candidate = signal if signal in ("BUY", "SELL") else ("BUY" if buy > sell else "SELL")
+    levels = calculate_trade_levels(df, candidate, current_price, profile)
+    risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "تعذر")
+    if signal in ("BUY", "SELL") and not risk_ok:
+        signal = "WAIT"; confidence = 0
+
+    pillars = scores["pillars"]
+    w_confluence = weighted_confluence(pillars, candidate)
+    confluence = sum(1 for p in PILLAR_WEIGHTS if pillars[candidate][p] >= 50) if signal in ("BUY", "SELL") else 0
+
+    conf_ok, conf_score, conf_reasons, conf_blockers = confirmation_gate(
+        df, candidate, pillars, scores["regime"], mtf_bias, mtf_conf, profile, wk_bias)
 
     filter_results = {}
-    hierarchy = []
-    blockers = []
+    filter_results["MSS Conflict"] = {
+        "pass": not mss_conflict,
+        "msg": "MSS معاكس — تنبيه" if mss_conflict else "MSS متوافق"
+    }
 
-    # ------------------------------------------------------------
-    # 1) MARKET GATE
-    # ------------------------------------------------------------
+    all_passed = True
+    block_reason = ""
+    external_filter_names = ["HTF Zone", "LTF Trigger", "Session", "Volatility",
+                             "Kill Zone", "OTE", "Displacement", "News Window"]
+
+    if skip_external_filters:
+        for _name in external_filter_names:
+            filter_results[_name] = {"pass": True, "msg": "Backtest — skipped"}
+        ntw_block = False
+    else:
+        htf_ok, htf_msg, htf_zone = htf_zone_filter(symbol, candidate, profile_key)
+        filter_results["HTF Zone"] = {"pass": htf_ok, "msg": htf_msg, "zone": htf_zone}
+        if not htf_ok:
+            all_passed = False; block_reason = htf_msg
+
+        ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
+        filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
+        if not ltf_ok: soft_penalty_items.append(("LTF Trigger", 6))
+
+        sess_ok, sess_msg, sess_label = session_filter(
+            pair_name, strict=(profile_key != "crypto"))
+        filter_results["Session"] = {"pass": sess_ok, "msg": sess_msg, "label": sess_label}
+        if not sess_ok: soft_penalty_items.append(("Session", 5))
+
+        vol_ok, vol_msg, vol_label = volatility_regime_filter(df)
+        filter_results["Volatility"] = {"pass": vol_ok, "msg": vol_msg, "label": vol_label}
+        if not vol_ok:
+            if vol_label == "CHAOS":
+                all_passed = False; block_reason = block_reason or vol_msg
+            else:
+                soft_penalty_items.append(("Volatility", 8))
+
+        kz_ok, kz_msg = in_kill_zone(asset_type_from_name(pair_name))
+        filter_results["Kill Zone"] = {"pass": kz_ok, "msg": kz_msg}
+        if not kz_ok: soft_penalty_items.append(("Kill Zone", 3))
+
+        ote_ok, ote_msg = ote_filter(df, candidate)
+        filter_results["OTE"] = {"pass": ote_ok, "msg": ote_msg}
+        if not ote_ok: soft_penalty_items.append(("OTE", 5))
+
+        disp_ok, disp_msg = displacement_check(df, candidate)
+        filter_results["Displacement"] = {"pass": disp_ok, "msg": disp_msg}
+        if not disp_ok: soft_penalty_items.append(("Displacement", 5))
+
+        ntw_block, ntw_msg = news_time_block(
+            st.session_state.get("economic_events") or [], pair_name)
+        filter_results["News Window"] = {
+            "pass": not ntw_block, "msg": ntw_msg or "لا خبر قريب"
+        }
+        if ntw_block:
+            all_passed = False; block_reason = block_reason or ntw_msg
+
+    # ---- WEEKEND GUARD ----
     market_open, market_msg = is_market_open(pair_name)
     filter_results["Market Open"] = {"pass": market_open, "msg": market_msg}
     if not market_open and not skip_external_filters:
-        blockers.append("Market closed")
+        all_passed = False
+        block_reason = block_reason or market_msg
 
+    # ---- KILL SWITCH ----
     kill_blocked, consec = check_kill_switch()
-    filter_results["Kill Switch"] = {
-        "pass": not kill_blocked, "msg": f"{consec} consecutive losses"
-    }
     if kill_blocked and not skip_external_filters:
-        blockers.append("Kill Switch")
-
-    hierarchy.append(("MARKET", len(blockers) == 0,
-                      "Market conditions tradable" if not blockers else ", ".join(blockers)))
-
-    # ------------------------------------------------------------
-    # 2) REGIME GATE
-    # ------------------------------------------------------------
-    regime_ok = regime not in ("UNKNOWN", "COMPRESSION")
-    hierarchy.append(("REGIME", regime_ok,
-                      f"{regime} ({regime_conf:.0f})"))
-    if not regime_ok:
-        blockers.append(f"Regime {regime}")
-
-    # ------------------------------------------------------------
-    # 3) HTF DIRECTION GATE — this selects the ONLY candidate direction.
-    # ------------------------------------------------------------
-    if mtf_bias == "BULLISH":
-        candidate = "BUY"
-    elif mtf_bias == "BEARISH":
-        candidate = "SELL"
+        filter_results["Kill Switch"] = {
+            "pass": False, "msg": f"{MAX_CONSECUTIVE_LOSSES} خسائر متتالية — توقف"
+        }
+        all_passed = False
+        block_reason = block_reason or f"Kill Switch نشط ({consec} خسائر)"
     else:
-        candidate = "NONE"
-        blockers.append("HTF direction is neutral")
+        filter_results["Kill Switch"] = {"pass": True, "msg": f"Discipline OK ({consec} خسائر متتالية)"}
 
-    htf_ok = candidate in ("BUY", "SELL") and mtf_conf >= MIN_MTF_CONFIRMED
-    if candidate == "BUY" and regime == "TREND_BEARISH":
-        htf_ok = False
-        blockers.append("HTF BUY conflicts with bearish regime")
-    if candidate == "SELL" and regime == "TREND_BULLISH":
-        htf_ok = False
-        blockers.append("HTF SELL conflicts with bullish regime")
-    if not htf_ok and candidate in ("BUY", "SELL"):
-        blockers.append(f"HTF confirmation {mtf_conf:.0f} below threshold")
-    hierarchy.append(("HTF DIRECTION", htf_ok,
-                      f"{candidate} / {mtf_bias} / {mtf_conf:.0f}"))
-
-    # Weekly context is a veto, not a score bonus.
-    weekly_ok = (
-        wk_bias == "NEUTRAL" or candidate == "NONE"
-        or (candidate == "BUY" and wk_bias == "BULLISH")
-        or (candidate == "SELL" and wk_bias == "BEARISH")
-    )
-    filter_results["Weekly Bias"] = {
-        "pass": weekly_ok, "msg": f"Weekly: {wk_bias}"
+    weekly_ok = (wk_bias == "NEUTRAL"
+                 or (candidate == "BUY" and wk_bias == "BULLISH")
+                 or (candidate == "SELL" and wk_bias == "BEARISH"))
+    filter_results["Weekly Bias"] = {"pass": weekly_ok, "msg": f"Weekly: {wk_bias}"}
+    filter_results["Weighted Confluence"] = {
+        "pass": w_confluence >= 50, "msg": f"Confluence: {w_confluence:.0f}/100"
     }
-    if not weekly_ok:
-        blockers.append(f"Weekly bias conflicts: {wk_bias}")
 
-    # ------------------------------------------------------------
-    # 4) STRUCTURE GATE — BOS/MSS must agree with candidate.
-    # ------------------------------------------------------------
-    recent = df.tail(14)
-    if candidate == "BUY":
-        bos = bool(recent.get("bos_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
-        mss = bool(recent.get("mss_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
-        opposite = bool(recent.get("mss_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
-    elif candidate == "SELL":
-        bos = bool(recent.get("bos_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
-        mss = bool(recent.get("mss_bearish", pd.Series(False, index=recent.index)).fillna(False).any())
-        opposite = bool(recent.get("mss_bullish", pd.Series(False, index=recent.index)).fillna(False).any())
+    raw_confidence = confidence
+    penalty_total, applied_penalties = compute_soft_penalty(
+        soft_penalty_items, strict=True)
+    effective_confidence = clamp(raw_confidence - penalty_total, 0, 95)
+
+    if raw_confidence >= A_PLUS_MIN and conf_score >= 78:
+        trade_grade = "A+"
+    elif raw_confidence >= A_MIN and conf_score >= 72:
+        trade_grade = "A"
+    elif raw_confidence >= B_MIN and conf_score >= 65:
+        trade_grade = "B"
+    elif raw_confidence >= C_MIN and conf_score >= 58:
+        trade_grade = "C"
     else:
-        bos = mss = opposite = False
-
-    structure_ok = candidate in ("BUY", "SELL") and (bos or mss) and not opposite
-    filter_results["Structure"] = {
-        "pass": structure_ok,
-        "msg": f"BOS={bos} MSS={mss} Opposite={opposite}"
-    }
-    hierarchy.append(("STRUCTURE", structure_ok,
-                      "BOS/MSS aligned" if structure_ok else "Waiting for aligned BOS/MSS"))
-    if not structure_ok:
-        blockers.append("Structure not confirmed")
-
-    # ------------------------------------------------------------
-    # 5) LIQUIDITY + DISPLACEMENT — institutional sequence.
-    # ------------------------------------------------------------
-    zone = _recent_smc_zone(df, candidate, atr) if candidate in ("BUY", "SELL") and np.isfinite(atr) else None
-    sweep_ok = bool(zone and zone.get("sweep"))
-    displacement_ok = bool(zone and zone.get("displacement"))
-    bos_zone_ok = bool(zone and (zone.get("bos") or zone.get("mss")))
-
-    filter_results["Liquidity Sweep"] = {
-        "pass": sweep_ok, "msg": "Liquidity sweep confirmed" if sweep_ok else "No fresh directional sweep"
-    }
-    filter_results["Displacement"] = {
-        "pass": displacement_ok, "msg": "Displacement confirmed" if displacement_ok else "No directional displacement"
-    }
-    hierarchy.append(("LIQUIDITY", sweep_ok,
-                      "Fresh sweep" if sweep_ok else "Waiting for liquidity sweep"))
-    hierarchy.append(("DISPLACEMENT", displacement_ok,
-                      "Strong displacement" if displacement_ok else "Waiting for displacement"))
-    if not sweep_ok:
-        blockers.append("Liquidity sweep")
-    if not displacement_ok:
-        blockers.append("Displacement")
-    if not bos_zone_ok:
-        blockers.append("Zone structure evidence")
-
-    # ------------------------------------------------------------
-    # 6) ENTRY ZONE GATE — no chasing.
-    # ------------------------------------------------------------
-    levels = calculate_trade_levels(df, candidate, current_price, profile) if candidate in ("BUY", "SELL") else None
-    risk_ok, risk_msg = validate_levels(candidate, levels, profile) if levels else (False, "No valid trade levels")
-
-    zone_quality = safe_float((levels or {}).get("entry_zone_quality"), 0)
-    entry_dist = safe_float((levels or {}).get("entry_distance_atr"), 999)
-    zone_ok = bool(levels) and zone_quality >= MIN_ENTRY_ZONE_QUALITY and entry_dist <= MAX_ENTRY_DISTANCE_ATR
-    filter_results["Entry Zone"] = {
-        "pass": zone_ok,
-        "msg": f"Quality {zone_quality:.0f} | distance {entry_dist:.2f} ATR"
-    }
-    hierarchy.append(("ENTRY ZONE", zone_ok,
-                      "Price is in/near valid zone" if zone_ok else "Waiting for price to return to zone"))
-    if not zone_ok:
-        blockers.append("Entry zone / no chase")
-
-    # ------------------------------------------------------------
-    # 7) LTF TRIGGER — final timing layer.
-    # ------------------------------------------------------------
-    if skip_external_filters or candidate == "NONE":
-        ltf_ok, ltf_msg = (True, "Backtest / no candidate") if candidate == "NONE" else (True, "Backtest — skipped")
-    else:
-        ltf_ok, ltf_msg = ltf_entry_trigger(symbol, candidate, profile_key)
-    filter_results["LTF Trigger"] = {"pass": ltf_ok, "msg": ltf_msg}
-    hierarchy.append(("LTF TRIGGER", ltf_ok,
-                      ltf_msg if ltf_ok else "Waiting for LTF trigger"))
-    if not ltf_ok:
-        blockers.append("LTF trigger")
-
-    # ------------------------------------------------------------
-    # 8) RISK GEOMETRY — tight, intraday and structural.
-    # ------------------------------------------------------------
-    precision_ok, precision_checks, precision_blockers = intraday_precision_gate(
-        levels, candidate, df
-    ) if candidate in ("BUY", "SELL") else (False, {}, ["No candidate"])
-    if not risk_ok:
-        precision_ok = False
-        precision_blockers = list(dict.fromkeys(precision_blockers + [risk_msg]))
-
-    filter_results["Risk Geometry"] = {
-        "pass": precision_ok,
-        "msg": "Entry/SL/TP geometry valid" if precision_ok else ", ".join(precision_blockers[:3])
-    }
-    hierarchy.append(("RISK", precision_ok,
-                      "RR and distances valid" if precision_ok else "Invalid intraday risk geometry"))
-    if not precision_ok:
-        blockers.extend([f"Risk: {x}" for x in precision_blockers])
-
-    # ------------------------------------------------------------
-    # 9) FINAL CLOSED-CANDLE TRIGGER
-    # ------------------------------------------------------------
-    candle_ok = candle_confirmation(df.iloc[:-1] if len(df) > 2 else df, candidate) if candidate in ("BUY", "SELL") else False
-    filter_results["Candle Trigger"] = {
-        "pass": candle_ok,
-        "msg": "Closed candle confirms direction" if candle_ok else "Waiting for closed candle confirmation"
-    }
-    hierarchy.append(("CANDLE", candle_ok,
-                      "Closed candle confirmed" if candle_ok else "Waiting for closed candle"))
-    if not candle_ok:
-        blockers.append("Candle trigger")
-
-    # ------------------------------------------------------------
-    # 10) QUALITY METRIC — only after hierarchy, never before.
-    # ------------------------------------------------------------
-    direction_score = buy_score if candidate == "BUY" else sell_score if candidate == "SELL" else 0
-    hierarchy_passes = sum(1 for _, ok, _ in hierarchy if ok)
-    hierarchy_total = max(len(hierarchy), 1)
-    quality = clamp(
-        40 + (hierarchy_passes / hierarchy_total) * 35
-        + min(direction_score, 100) * 0.15
-        + min(zone_quality, 100) * 0.10,
-        0, 95
-    )
-
-    # Final confirmation stability applies only to live execution.
-    stability_count = update_confirmation_stability(
-        candidate if not blockers else "WAIT",
-        enabled=not skip_external_filters
-    )
-    stability_ok = skip_external_filters or stability_count >= REQUIRED_STABLE_ANALYSES
-    if not stability_ok:
-        blockers.append(f"Signal stability {stability_count}/{REQUIRED_STABLE_ANALYSES}")
-
-    # Confirmation score is now a diagnostic of the hierarchy, not a creator of direction.
-    conf_score = clamp((hierarchy_passes / hierarchy_total) * 100, 0, 100)
-    w_confluence = clamp(
-        (zone_quality * 0.35) + (conf_score * 0.40) + (direction_score * 0.25),
-        0, 100
-    )
-    confirmation_reasons = [msg for stage, ok, msg in hierarchy if ok]
-    confirmation_blockers = [msg for stage, ok, msg in hierarchy if not ok]
-    confirmed_ok = (
-        candidate in ("BUY", "SELL") and
-        not blockers and stability_ok
-    )
-
-    # No news logic. User explicitly requested the engine to ignore news.
-    filter_results["News Window"] = {"pass": True, "msg": "Ignored by hierarchical engine"}
-
-    if confirmed_ok:
-        signal = candidate
-        execution_status = "EXECUTE"
-        execution_reason = (
-            f"CONFIRMED {candidate} — hierarchy passed | "
-            f"RR1 {safe_float((levels or {}).get('risk_reward_1'), 0):.2f}"
-        )
-        trade_grade = "A+" if quality >= 85 else "A"
-    else:
-        signal = "WAIT"
-        execution_status = "WAIT"
-        first_blocker = next((b for b in blockers if b), "Confirmation pending")
-        execution_reason = f"WAIT — {first_blocker}"
         trade_grade = "WAIT"
 
-    confidence = quality if confirmed_ok else min(quality, 69.0)
-    precision_ok = precision_ok and zone_ok
+    if signal == "WAIT":
+        execution_status, execution_reason = "WAIT", "Signal WAIT"
+    elif not all_passed:
+        execution_status, execution_reason = "BLOCKED", f"Hard Gate: {block_reason}"
+    elif news_block:
+        execution_status, execution_reason = "WAIT", "خبر عالي التأثير"
+    elif effective_confidence < profile.get("confidence_threshold", 72):
+        execution_status, execution_reason = "WAIT", f"Confidence < {profile.get('confidence_threshold', 72)}"
+    elif conf_score < profile.get("confirmation_threshold", 65):
+        execution_status, execution_reason = "WAIT", f"Confirmation < {profile.get('confirmation_threshold', 65)}"
+    elif trade_grade in ("A+", "A"):
+        execution_status, execution_reason = "EXECUTE", f"{trade_grade} — Balanced PASS"
+    elif trade_grade == "B":
+        execution_status, execution_reason = "EXECUTE", "B — Balanced PASS (moderate confidence)"
+    elif trade_grade == "C":
+        execution_status, execution_reason = "WATCH", "C — مراقبة فقط"
+    else:
+        execution_status, execution_reason = "WAIT", "لا اجتياز"
 
-    reasons = [f"{stage}: {msg}" for stage, ok, msg in hierarchy]
-    if blockers:
-        reasons.append("BLOCKERS: " + " | ".join(dict.fromkeys(blockers))[:500])
+    confidence = effective_confidence
+    advisories_str = ", ".join(f"{n}({p})" for n, p in soft_penalty_items) or "None"
 
     return {
-        "signal": signal,
-        "setup_direction": candidate,
-        "hierarchy_stage": next((stage for stage, ok, _ in hierarchy if not ok), "EXECUTE"),
-        "confidence": confidence,
-        "raw_confidence": quality,
-        "buy_score": buy_score,
-        "sell_score": sell_score,
+        "signal": signal, "confidence": confidence,
+        "raw_confidence": raw_confidence,
+        "buy_score": buy, "sell_score": sell,
         "weighted_confluence": w_confluence,
-        "pillars": pillars,
-        "mtf_bias": mtf_bias,
-        "mtf_conf": mtf_conf,
-        "mtf_details": mtf_details,
-        "weekly_bias": wk_bias,
-        "levels": levels if risk_ok else None,
-        "df": df,
-        "confirmation_ok": confirmed_ok,
-        "confirmation_score": conf_score,
-        "confirmation_reasons": confirmation_reasons,
-        "confirmation_blockers": confirmation_blockers,
-        "execution_status": execution_status,
-        "execution_reason": execution_reason,
-        "confirmed_entry": confirmed_ok,
-        "confirmation_checks": {stage: ok for stage, ok, _ in hierarchy},
-        "confirmation_blockers_final": list(dict.fromkeys(blockers)),
-        "confirmation_stability": stability_count,
-        "confirmed_rr1": safe_float((levels or {}).get("risk_reward_1"), 0),
-        "precision_ok": precision_ok,
-        "precision_checks": precision_checks,
-        "precision_blockers": precision_blockers,
-        "entry_zone": (levels or {}).get("entry_zone"),
-        "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
-        "entry_distance_atr": (levels or {}).get("entry_distance_atr", 999),
-        "sl_distance_atr": (levels or {}).get("sl_distance_atr", 999),
-        "tp1_distance_atr": (levels or {}).get("tp1_distance_atr", 999),
-        "max_hold_hours": (levels or {}).get("max_hold_hours", MAX_HOLD_HOURS),
-        "trade_grade": trade_grade,
-        "soft_penalties": 0.0,
-        "soft_advisories": "None",
-        "filter_results": filter_results,
-        "all_filters_passed": not bool(blockers),
-        "filter_block_reason": " | ".join(dict.fromkeys(blockers))[:500],
-        "regime": regime,
-        "dxy_bias": dxy_bias,
-        "usd_msg": usd_msg,
-        "divergence": detect_divergence(df),
-        "reasons": reasons,
+        "pillars": pillars, "mtf_bias": mtf_bias, "mtf_conf": mtf_conf,
+        "mtf_details": mtf_details, "weekly_bias": wk_bias,
+        "levels": levels if risk_ok else None, "df": df,
+        "confirmation_ok": conf_ok, "confirmation_score": conf_score,
+        "confirmation_reasons": conf_reasons, "confirmation_blockers": conf_blockers,
+        "execution_status": execution_status, "execution_reason": execution_reason,
+        "trade_grade": trade_grade, "soft_penalties": penalty_total,
+        "soft_advisories": advisories_str,
+        "filter_results": filter_results, "all_filters_passed": all_passed,
+        "filter_block_reason": block_reason,
+        "regime": scores["regime"], "dxy_bias": scores["dxy_bias"],
+        "usd_msg": scores["usd_msg"], "divergence": scores["divergence"],
+        "reasons": scores["reasons"] + conf_reasons,
     }
+
 
 # ============================================================
 # BACKTEST — NO LOOK-AHEAD + ENHANCED METRICS
@@ -2735,14 +2114,17 @@ def quick_backtest(symbol, pair_name, lookback=200):
 
         profile = profile_for(pair_name)
 
-        # Load auxiliary history once, then slice it at each backtest bar.
-        # Never use a full-period DXY bias/correlation for an earlier bar.
         try:
             dxy_df = get_historical_data("DX-Y.NYB", "1y", "4h")
+            dxy_bias_full = _bias_from_slice(dxy_df, "DXY")[0] if dxy_df is not None else "NEUTRAL"
         except Exception:
-            dxy_df = None
+            dxy_bias_full = "NEUTRAL"
 
-        is_gold = ("Gold" in pair_name or "XAU" in pair_name.upper())
+        try:
+            gold_corr = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
+        except Exception:
+            gold_corr = None
+
         df = build_features(df_full, profile)
 
         wins = losses = 0
@@ -2762,41 +2144,9 @@ def quick_backtest(symbol, pair_name, lookback=200):
             mtf_bias, mtf_conf = _bias_from_slice(slice_df, pair_name)
             wk_bias = _weekly_bias_from_slice(slice_df, pair_name)
 
-            # Point-in-time DXY bias.
-            if dxy_df is not None and not dxy_df.empty:
-                try:
-                    ts = slice_df.index[-1]
-                    dxy_slice = dxy_df.loc[:ts]
-                    dxy_bias = _bias_from_slice(dxy_slice, "DXY")[0]
-                except Exception:
-                    dxy_bias = "NEUTRAL"
-            else:
-                dxy_bias = "NEUTRAL"
-
-            # Point-in-time Gold/DXY correlation.
-            gold_corr = None
-            if is_gold and dxy_df is not None and not dxy_df.empty:
-                try:
-                    ts = slice_df.index[-1]
-                    gold_slice = df_full.loc[:ts, ["close"]]
-                    dxy_slice = dxy_df.loc[:ts, ["close"]]
-                    aligned = pd.concat(
-                        [dxy_slice["close"].pct_change(),
-                         gold_slice["close"].pct_change()],
-                        axis=1, join="inner"
-                    ).dropna()
-                    if len(aligned) >= 30:
-                        gold_corr = float(
-                            aligned.iloc[:, 0].rolling(30).corr(
-                                aligned.iloc[:, 1]
-                            ).iloc[-1]
-                        )
-                except Exception:
-                    gold_corr = None
-
             precomputed = {
                 "mtf_bias": mtf_bias, "mtf_conf": mtf_conf, "mtf_details": {},
-                "weekly_bias": wk_bias, "dxy_bias": dxy_bias,
+                "weekly_bias": wk_bias, "dxy_bias": dxy_bias_full,
                 "gold_corr": gold_corr,
             }
 
@@ -4248,8 +3598,8 @@ with tab_journal:
 with tab_backtest:
     st.markdown('<div class="section-title">🔬 Quick Backtest <span>No Look-Ahead · A+/A/B</span></div>',
                 unsafe_allow_html=True)
-    st.caption("✅ MTF/Weekly/DXY/Gold-DXY context are calculated point-in-time from data available up to each bar.")
-    st.caption("External live filters are skipped for speed; core historical signal logic is tested without future data.")
+    st.caption("✅ MTF/Weekly/DXY تُحسب لكل نقطة زمنية من البيانات السابقة فقط — نتائج موثوقة.")
+    st.caption("External filters متجاهلة للسرعة.")
 
     if st.button("▶️ Run Backtest", width="stretch"):
         with st.spinner("Running bias-free backtest..."):
@@ -4295,6 +3645,6 @@ with tab_backtest:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Intraday Precision · SMC Entry Zones · Tight SL · Near Liquidity TP · MTF
+    Balanced Mode · Fibonacci · SMC · MTF · Position Sizing · Edge
 </div>
 """, unsafe_allow_html=True)
