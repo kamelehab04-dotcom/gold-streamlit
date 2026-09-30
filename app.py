@@ -50,7 +50,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG — BALANCED MODE
 # ============================================================
 
-APP_VERSION = "v2008-No News Intraday Precision"
+APP_VERSION = "v2007-Intraday Precision"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -71,7 +71,6 @@ REQUIRED_STABLE_ANALYSES = 2
 # The entry must be near a fresh SMC zone. The engine rejects
 # price-chasing, oversized SLs and targets that are too far away.
 INTRADAY_MODE = True
-NEWS_FILTER_ENABLED = False  # News is excluded from trade decisions.
 MIN_ENTRY_ZONE_QUALITY = 75.0
 MAX_ENTRY_DISTANCE_ATR = 0.30
 MAX_SL_ATR = 1.00
@@ -2246,7 +2245,7 @@ def confirmed_entry_gate(
     checks["LTF Trigger"] = filter_results.get("LTF Trigger", {}).get("pass", False)
     checks["OTE"] = filter_results.get("OTE", {}).get("pass", False)
     checks["Displacement"] = filter_results.get("Displacement", {}).get("pass", False)
-    checks["News Clear"] = True  # News filter disabled for trading decisions.
+    checks["News Clear"] = filter_results.get("News Window", {}).get("pass", False)
     checks["Volatility"] = filter_results.get("Volatility", {}).get("pass", False)
     checks["Market Open"] = filter_results.get("Market Open", {}).get("pass", False)
     checks["Kill Switch"] = filter_results.get("Kill Switch", {}).get("pass", False)
@@ -2555,34 +2554,26 @@ def generate_signal(df, current_price, pair_name, symbol,
             f"Precision / {k}": v for k, v in precision_checks.items()
         })
 
-    analysis_direction = signal
     if signal == "WAIT":
         execution_status, execution_reason = (
-            "WAIT", "WAIT — no directional setup"
+            "WAIT", "Signal WAIT — no confirmed direction"
         )
     elif not all_passed:
-        signal = "WAIT"
         execution_status, execution_reason = (
-            "WAIT", f"WAIT — hard gate: {block_reason}"
+            "BLOCKED", f"Hard Gate: {block_reason}"
+        )
+    elif news_block:
+        execution_status, execution_reason = (
+            "WAIT", "High-impact news window"
         )
     elif not confirmed_ok:
-        signal = "WAIT"
         preview = ", ".join(confirmed_blockers[:4])
         if len(confirmed_blockers) > 4:
             preview += f" +{len(confirmed_blockers) - 4} more"
         execution_status, execution_reason = (
-            "WAIT", f"WAIT — confirmation pending: {preview}"
-        )
-        execution_status, execution_reason = (
-            "BLOCKED", f"Hard Gate: {block_reason}"
-        )
-    elif False:  # News filter disabled
-        signal = "WAIT"
-        execution_status, execution_reason = (
-            "WAIT", "WAIT — High-impact news window"
+            "WAIT", f"CONFIRMATION PENDING — {preview}"
         )
     else:
-        signal = analysis_direction
         execution_status, execution_reason = (
             "EXECUTE",
             f"CONFIRMED ENTRY — A+ | RR1 {confirmed_rr:.2f} | "
@@ -2611,9 +2602,6 @@ def generate_signal(df, current_price, pair_name, symbol,
         "precision_ok": precision_ok,
         "precision_checks": precision_checks,
         "precision_blockers": precision_blockers,
-        "analysis_direction": analysis_direction,
-        "display_signal": signal,
-        "is_public_confirmed": bool(confirmed_ok and signal in ("BUY", "SELL")),
         "entry_zone": (levels or {}).get("entry_zone"),
         "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
         "entry_distance_atr": (levels or {}).get("entry_distance_atr", 0),
