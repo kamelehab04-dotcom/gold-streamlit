@@ -2554,26 +2554,34 @@ def generate_signal(df, current_price, pair_name, symbol,
             f"Precision / {k}": v for k, v in precision_checks.items()
         })
 
+    analysis_direction = signal
     if signal == "WAIT":
         execution_status, execution_reason = (
-            "WAIT", "Signal WAIT — no confirmed direction"
+            "WAIT", "WAIT — no directional setup"
         )
     elif not all_passed:
+        signal = "WAIT"
         execution_status, execution_reason = (
-            "BLOCKED", f"Hard Gate: {block_reason}"
-        )
-    elif news_block:
-        execution_status, execution_reason = (
-            "WAIT", "High-impact news window"
+            "WAIT", f"WAIT — hard gate: {block_reason}"
         )
     elif not confirmed_ok:
+        signal = "WAIT"
         preview = ", ".join(confirmed_blockers[:4])
         if len(confirmed_blockers) > 4:
             preview += f" +{len(confirmed_blockers) - 4} more"
         execution_status, execution_reason = (
-            "WAIT", f"CONFIRMATION PENDING — {preview}"
+            "WAIT", f"WAIT — confirmation pending: {preview}"
+        )
+        execution_status, execution_reason = (
+            "BLOCKED", f"Hard Gate: {block_reason}"
+        )
+    elif news_block:
+        signal = "WAIT"
+        execution_status, execution_reason = (
+            "WAIT", "WAIT — High-impact news window"
         )
     else:
+        signal = analysis_direction
         execution_status, execution_reason = (
             "EXECUTE",
             f"CONFIRMED ENTRY — A+ | RR1 {confirmed_rr:.2f} | "
@@ -2602,6 +2610,9 @@ def generate_signal(df, current_price, pair_name, symbol,
         "precision_ok": precision_ok,
         "precision_checks": precision_checks,
         "precision_blockers": precision_blockers,
+        "analysis_direction": analysis_direction,
+        "display_signal": signal,
+        "is_public_confirmed": bool(confirmed_ok and signal in ("BUY", "SELL")),
         "entry_zone": (levels or {}).get("entry_zone"),
         "entry_zone_quality": (levels or {}).get("entry_zone_quality", 0),
         "entry_distance_atr": (levels or {}).get("entry_distance_atr", 0),
