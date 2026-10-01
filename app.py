@@ -1,12 +1,13 @@
 # ============================================================
-# BLACK PYRAMID v2009.2 — FLIP DETECTION EDITION
+# BLACK PYRAMID v2009.3 — FLIP SL/TP EDITION
 # Institutional Analysis Terminal
 #
 # FEATURES:
-#  - SL at Nearest Discovered Level (IDM, OB, FVG, Pivot, Fib, S/R)
-#  - Signal Flip Detection (10 indicators)
-#  - Flip shown in main signal + All Signals table + Portfolio
-#  - ICT Levels + Live Portfolio Monitor
+#  - SL at Nearest Discovered Level
+#  - Signal Flip Detection with SL/TP for the opposite direction
+#  - Flip shown in All Signals table with SL/TP columns
+#  - Flip Watch section in Trade Plan with 1-click open trade
+#  - Portfolio: Flip info + SL/TP for each open position
 #  - ML (4 models + Hyperparameter Tuning)
 #  - Fundamentals + Sentiment + Bond Yields + Monte Carlo
 # ============================================================
@@ -60,7 +61,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2009.2-FlipDetection"
+APP_VERSION = "v2009.3-FlipSLTP"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -102,7 +103,6 @@ TUNING_CV_FOLDS = 5
 TUNING_SCORING = "roc_auc"
 TUNING_N_JOBS = -1
 
-# SL NEAREST LEVEL CONFIG
 SL_MIN_DIST_ATR = 0.25
 SL_MAX_DIST_ATR = 1.50
 SL_BUFFER_ATR = 0.20
@@ -482,10 +482,6 @@ def get_spot_price(symbol):
     except Exception: pass
     return None, None
 
-
-# ============================================================
-# FUNDAMENTAL LAYER
-# ============================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_currency_strength_matrix():
@@ -2322,16 +2318,13 @@ def monitor_position(pos):
     if d == "BUY" and last["ema20"] < last["ema50"]: sigs.append("EMA20<50"); sev += 20
     if d == "SELL" and last["ema20"] > last["ema50"]: sigs.append("EMA20>50"); sev += 20
 
-    # FLIP DETECTION
     flip_info = None
     try:
         flip_res = detect_signal_flip(dfx, cur, d, profile)
         if flip_res and flip_res.get("flip_signal"):
             flip_info = flip_res
-            if flip_res["status"] == "STRONG_FLIP":
-                sev = max(sev, 80)
-            elif flip_res["status"] == "POSSIBLE_FLIP":
-                sev = max(sev, 55)
+            if flip_res["status"] == "STRONG_FLIP": sev = max(sev, 80)
+            elif flip_res["status"] == "POSSIBLE_FLIP": sev = max(sev, 55)
     except Exception: pass
 
     if hs: state = "STOPPED"; action = "تم الإيقاف"; sev = 100
@@ -2407,10 +2400,6 @@ def state_color_severity(sev):
     if sev >= 20: return "#7cd4a0", "🟢"
     return "#7cd4a0", "✅"
 
-
-# ============================================================
-# SIGNAL ENGINE
-# ============================================================
 
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
@@ -2593,10 +2582,6 @@ def generate_signal(df, current_price, pair_name, symbol,
             "rate_diff": rd, "pair_name": pair_name}
 
 
-# ============================================================
-# BACKTEST
-# ============================================================
-
 def _bias_from_slice(df_s, pair_name):
     if df_s is None or len(df_s) < 60: return "NEUTRAL", 50.0
     try:
@@ -2706,6 +2691,10 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
         return {"error": str(e)}
 
 
+# ============================================================
+# ALL SIGNALS with FLIP SL/TP
+# ============================================================
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_signals_parallel():
     results = []
@@ -2717,6 +2706,8 @@ def get_all_signals_parallel():
             r = generate_signal(d, p, pn, sym, skip_external_filters=True)
             lv = r["levels"] or {}
             flip_sig = "—"; flip_conf = 0; flip_status = "NONE"; flip_icon = ""
+            flip_sl = "—"; flip_tp1 = "—"; flip_tp2 = "—"; flip_tp3 = "—"
+            flip_rr1 = "—"; flip_sl_src = "—"
             sig_ = r["signal"]
             if sig_ in ("BUY", "SELL"):
                 try:
@@ -2730,27 +2721,44 @@ def get_all_signals_parallel():
                             if fl["status"] == "STRONG_FLIP": flip_icon = "🚨"
                             elif fl["status"] == "POSSIBLE_FLIP": flip_icon = "⚠️"
                             else: flip_icon = "💡"
-                except Exception: pass
-            return {"الزوج": pn, "الإشارة": sig_,
-                    "الثقة": round(r["confidence"], 1),
-                    "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
-                    "Flip%": flip_conf if flip_conf > 0 else "—",
-                    "BUY": round(r["buy_score"], 1),
-                    "SELL": round(r["sell_score"], 1),
-                    "MTF": r["mtf_bias"], "Weekly": r["weekly_bias"],
-                    "Regime": r["regime"],
-                    "Fund": f"B{r.get('fund_buy',0):.0f}/S{r.get('fund_sell',0):.0f}",
-                    "Conf": round(r["weighted_confluence"], 0),
-                    "Confirm": round(r["confirmation_score"], 1),
-                    "Grade": r.get("trade_grade","WAIT"),
-                    "Execution": r["execution_status"],
-                    "السعر": fmt_price(p, pn),
-                    "SL": fmt_price(lv.get("stop_loss"), pn),
-                    "SLsrc": lv.get("sources", {}).get("sl", "—"),
-                    "TP1": fmt_price(lv.get("target1"), pn),
-                    "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0,
-                    "_flip_status": flip_status}
-        except Exception: return None
+                            nl = fl.get("new_levels")
+                            if nl and flip_conf >= 25:
+                                flip_sl = fmt_price(nl["stop_loss"], pn)
+                                flip_tp1 = fmt_price(nl["target1"], pn)
+                                flip_tp2 = fmt_price(nl["target2"], pn)
+                                flip_tp3 = fmt_price(nl["target3"], pn)
+                                flip_rr1 = f"1:{nl['risk_reward_1']:.2f}"
+                                flip_sl_src = nl.get("sources", {}).get("sl", "—")
+                except Exception:
+                    pass
+            return {
+                "الزوج": pn, "الإشارة": sig_,
+                "الثقة": round(r["confidence"], 1),
+                "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
+                "Flip%": flip_conf if flip_conf > 0 else "—",
+                "🛑 F-SL": flip_sl,
+                "🎯 F-TP1": flip_tp1,
+                "🎯 F-TP2": flip_tp2,
+                "🎯 F-TP3": flip_tp3,
+                "F-RR1": flip_rr1,
+                "SL Src": flip_sl_src,
+                "BUY": round(r["buy_score"], 1),
+                "SELL": round(r["sell_score"], 1),
+                "MTF": r["mtf_bias"], "Weekly": r["weekly_bias"],
+                "Regime": r["regime"],
+                "Conf": round(r["weighted_confluence"], 0),
+                "Confirm": round(r["confirmation_score"], 1),
+                "Grade": r.get("trade_grade", "WAIT"),
+                "Execution": r["execution_status"],
+                "السعر": fmt_price(p, pn),
+                "SL": fmt_price(lv.get("stop_loss"), pn),
+                "SLsrc": lv.get("sources", {}).get("sl", "—"),
+                "TP1": fmt_price(lv.get("target1"), pn),
+                "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0,
+                "_flip_status": flip_status}
+        except Exception:
+            return None
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(one, p, s): (p, i) for i, (p, s) in enumerate(PAIRS.items())}
         for f in concurrent.futures.as_completed(futs):
@@ -2758,15 +2766,26 @@ def get_all_signals_parallel():
                 r = f.result()
                 if r: results.append(r)
             except Exception: pass
+
     if not results: return pd.DataFrame()
     out = pd.DataFrame(results)
+
+    def _safe_flip_num(v):
+        try:
+            if v == "—" or v is None or v == "": return 0.0
+            return float(v)
+        except (ValueError, TypeError):
+            return 0.0
+
     def sort_key(row):
         status = row.get("_flip_status", "NONE")
         sig = row["الإشارة"]
         fp = {"STRONG_FLIP": 0, "POSSIBLE_FLIP": 1, "WEAK_FLIP": 2, "NONE": 3}.get(status, 3)
         sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
-        return (fp, sp_, -float(row.get("Flip%", 0) or 0))
-    out["_sort"] = out.apply(lambda r: sort_key(r), axis=1)
+        flip_val = _safe_flip_num(row.get("Flip%", 0))
+        return (fp, sp_, -flip_val)
+
+    out["_sort"] = out.apply(sort_key, axis=1)
     out = out.sort_values("_sort").drop(columns=["_sort", "_flip_status"])
     return out
 
@@ -2947,7 +2966,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">FLIP WATCH</span>
+                <span class="hero-badge-balanced">FLIP SL/TP</span>
             </div>
         </div>""", unsafe_allow_html=True)
     else:
@@ -2957,7 +2976,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">FLIP WATCH</span>
+                <span class="hero-badge-balanced">FLIP SL/TP</span>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -3119,17 +3138,27 @@ if ana_all:
 if ana1:
     st.cache_data.clear(); st.rerun()
 
+
+# ============================================================
+# ALL SIGNALS DISPLAY WITH FLIP SL/TP
+# ============================================================
+
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-    st.markdown('<div class="section-title">🌐 All Assets <span>مع Flip Detection</span></div>',
+    st.markdown('<div class="section-title">🌐 All Assets <span>مع Flip SL/TP</span></div>',
                 unsafe_allow_html=True)
     r1, r2, r3 = st.columns([3, 1, 1])
     with r1:
         n_flips = 0
         if "🔄 Flip" in st.session_state.all_signals.columns:
             n_flips = (st.session_state.all_signals["🔄 Flip"] != "—").sum()
+        n_strong = 0
+        if "Flip%" in st.session_state.all_signals.columns:
+            flip_vals = st.session_state.all_signals["Flip%"].apply(
+                lambda x: x if isinstance(x, (int, float)) else 0)
+            n_strong = (flip_vals >= 70).sum()
         if n_flips > 0:
             st.warning(f"✅ {len(st.session_state.all_signals)} أصول · "
-                       f"🔄 **{n_flips} فيها إشارة انعكاس**")
+                       f"🔄 **{n_flips} فيها Flip** · 🚨 **{n_strong} قوية**")
         else:
             st.success(f"✅ {len(st.session_state.all_signals)} أصول.")
     with r2:
@@ -3138,51 +3167,116 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
     with r3:
         if st.button("🗑️ مسح", width="stretch", key="clr_all"):
             st.session_state.all_signals = None; st.rerun()
+
     df_show = st.session_state.all_signals.copy()
     if show_flips_only and "🔄 Flip" in df_show.columns:
         df_show = df_show[df_show["🔄 Flip"] != "—"]
+
     st.dataframe(df_show, hide_index=True, width="stretch", height=460)
-    
+
+    # ---- Flip Summary with SL/TP ----
     if "🔄 Flip" in st.session_state.all_signals.columns:
         flips_df = st.session_state.all_signals[
             st.session_state.all_signals["🔄 Flip"] != "—"]
         if not flips_df.empty:
-            with st.expander(f"🔀 {len(flips_df)} إشارات Flip مكتشفة", expanded=True):
+            with st.expander(f"🔀 {len(flips_df)} إشارات Flip · مع SL/TP", expanded=True):
                 for _, row in flips_df.iterrows():
                     flip_txt = row["🔄 Flip"]
                     flip_conf = row.get("Flip%", 0)
                     pair_name = row["الزوج"]
+                    orig_sig = row["الإشارة"]
+
                     if "🚨" in flip_txt:
                         color = "#f57a7a"; label = "STRONG"
                     elif "⚠️" in flip_txt:
                         color = "#f5c87a"; label = "POSSIBLE"
                     else:
                         color = "#7cd4a0"; label = "WATCH"
+
+                    f_sl = row.get("🛑 F-SL", "—")
+                    f_tp1 = row.get("🎯 F-TP1", "—")
+                    f_tp2 = row.get("🎯 F-TP2", "—")
+                    f_tp3 = row.get("🎯 F-TP3", "—")
+                    f_rr1 = row.get("F-RR1", "—")
+                    f_src = row.get("SL Src", "—")
+
                     st.markdown(f"""
-                    <div style="margin:6px 0; padding:10px 16px;
+                    <div style="margin:10px 0; padding:14px 18px;
                                 background:linear-gradient(145deg, #10141c, #0d1017);
-                                border-radius:12px;
+                                border-radius:14px;
                                 border:1px solid {color}44;
-                                border-left:4px solid {color};
-                                display:flex; justify-content:space-between;
-                                align-items:center; flex-wrap:wrap; gap:10px;">
-                        <div>
-                            <span style="color:#e6c87c; font-weight:700;
-                                         font-size:0.95rem;">{pair_name}</span>
-                            <span style="color:#7d879c; font-size:0.8rem;
-                                         margin-left:8px;">
-                                الأصل: {row['الإشارة']}</span>
+                                border-left:4px solid {color};">
+                        <div style="display:flex; justify-content:space-between;
+                                    align-items:center; flex-wrap:wrap; gap:10px;
+                                    margin-bottom:10px;">
+                            <div>
+                                <span style="color:#e6c87c; font-weight:700;
+                                             font-size:1.05rem;">{pair_name}</span>
+                                <span style="color:#7d879c; font-size:0.8rem;
+                                             margin-left:10px;">
+                                    الأصل: {orig_sig}</span>
+                            </div>
+                            <div>
+                                <span style="color:{color}; font-weight:700;
+                                             font-size:1rem;">{flip_txt}</span>
+                                <span style="color:#a0aab8; font-size:0.85rem;
+                                             margin-left:10px;">
+                                    ثقة {flip_conf}% · {label}</span>
+                            </div>
                         </div>
-                        <div>
-                            <span style="color:{color}; font-weight:700;
-                                         font-size:0.95rem;">{flip_txt}</span>
-                            <span style="color:#a0aab8; font-size:0.85rem;
-                                         margin-left:10px;">
-                                ثقة {flip_conf}% · {label}</span>
+                        <div style="display:grid;
+                                    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+                                    gap:8px;">
+                            <div style="background:rgba(245,122,122,0.08);
+                                        padding:8px 10px; border-radius:8px;
+                                        border:1px solid rgba(245,122,122,0.25);">
+                                <div style="color:#f57a7a; font-size:0.68rem;
+                                            letter-spacing:1px;">🛑 SL</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.9rem;">{f_sl}</div>
+                                <div style="color:#7d879c; font-size:0.68rem;">
+                                    {f_src}</div>
+                            </div>
+                            <div style="background:rgba(230,200,124,0.08);
+                                        padding:8px 10px; border-radius:8px;
+                                        border:1px solid rgba(230,200,124,0.25);">
+                                <div style="color:#e6c87c; font-size:0.68rem;
+                                            letter-spacing:1px;">🎯 TP1</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.9rem;">{f_tp1}</div>
+                            </div>
+                            <div style="background:rgba(124,212,160,0.08);
+                                        padding:8px 10px; border-radius:8px;
+                                        border:1px solid rgba(124,212,160,0.25);">
+                                <div style="color:#7cd4a0; font-size:0.68rem;
+                                            letter-spacing:1px;">🎯 TP2</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.9rem;">{f_tp2}</div>
+                            </div>
+                            <div style="background:rgba(124,212,160,0.08);
+                                        padding:8px 10px; border-radius:8px;
+                                        border:1px solid rgba(124,212,160,0.25);">
+                                <div style="color:#7cd4a0; font-size:0.68rem;
+                                            letter-spacing:1px;">🎯 TP3</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.9rem;">{f_tp3}</div>
+                            </div>
+                            <div style="background:rgba(230,200,124,0.08);
+                                        padding:8px 10px; border-radius:8px;
+                                        border:1px solid rgba(230,200,124,0.25);">
+                                <div style="color:#e6c87c; font-size:0.68rem;
+                                            letter-spacing:1px;">📊 RR1</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.9rem;">{f_rr1}</div>
+                            </div>
                         </div>
                     </div>""", unsafe_allow_html=True)
     st.markdown("---")
 
+
+# ============================================================
+# LOAD ASSET
+# ============================================================
 
 cur_price, chg = get_spot_price(sym)
 if cur_price is None: st.error(f"تعذر السعر لـ {sp_}."); st.stop()
@@ -3199,7 +3293,6 @@ _rsk = get_risk_sentiment()
 result = generate_signal(df_raw, cur_price, sp_, sym, news_block=ntb, strict_soft=ss_soft)
 df = result["df"]; lv = result["levels"]; sig = result["signal"]; conf = result["confidence"]
 
-# FLIP DETECTION
 flip_result = None
 if sig in ("BUY", "SELL"):
     try:
@@ -3428,7 +3521,7 @@ if sig in ("BUY","SELL") and lv:
         elif cs_conf and cs_conf["warnings"]: st.warning("⚠️ تحذيرات")
         else: st.info("💡 أضف الصفقة")
 
-    # FLIP WATCH
+    # FLIP WATCH with SL/TP + 1-click open
     if flip_result and flip_result.get("flip_signal"):
         flip_sig = flip_result["flip_signal"]
         flip_conf = flip_result["confidence"]
@@ -3437,7 +3530,7 @@ if sig in ("BUY","SELL") and lv:
                       else "#f5c87a" if flip_status == "POSSIBLE_FLIP"
                       else "#7cd4a0")
         st.markdown('<div class="section-title">🔀 Signal Flip Watch '
-                    '<span>متى تنعكس الإشارة؟</span></div>',
+                    '<span>متى تنعكس الإشارة؟ · مع SL/TP</span></div>',
                     unsafe_allow_html=True)
         st.markdown(f"""
         <div style="background:linear-gradient(145deg, #10141c, #0d1017);
@@ -3465,28 +3558,80 @@ if sig in ("BUY","SELL") and lv:
                 </div>
             </div>
         </div>""", unsafe_allow_html=True)
-        with st.expander(f"🔍 تفاصيل الانعكاس ({len(flip_result['triggers'])} مؤشر)",
+
+        with st.expander(f"🔍 تفاصيل الانعكاس + Trade Plan الجديد "
+                         f"({len(flip_result['triggers'])} مؤشر)",
                          expanded=(flip_conf >= 45)):
             for tr in flip_result["triggers"]:
                 st.markdown(f"- {tr['icon']} **{tr['name']}** — قوة {tr['score']}")
-            if flip_result.get("new_levels") and flip_conf >= 45:
+
+            if flip_result.get("new_levels"):
                 nl = flip_result["new_levels"]
+                nl_src = nl.get("sources", {})
+
                 st.markdown("---")
-                st.markdown(f"**🎯 Trade Plan الجديد للـ {flip_sig}:**")
-                fc1, fc2, fc3, fc4, fc5 = st.columns(5)
-                fc1.metric("Entry", fmt_price(nl["entry"], sp_))
-                fc2.metric("SL", fmt_price(nl["stop_loss"], sp_),
-                          help=nl["sources"].get("sl", ""))
-                fc3.metric("TP1", fmt_price(nl["target1"], sp_),
-                          help=nl["sources"].get("tp1", ""))
-                fc4.metric("TP2", fmt_price(nl["target2"], sp_))
-                fc5.metric("RR·TP1", f"1:{nl['risk_reward_1']:.2f}")
+                st.markdown(f"### 🎯 Trade Plan الجديد للـ **{flip_sig}**")
+
+                fa1, fa2, fa3, fa4, fa5 = st.columns(5)
+                fa1.metric("Entry", fmt_price(nl["entry"], sp_))
+                fa2.metric("Stop Loss", fmt_price(nl["stop_loss"], sp_),
+                          help=nl_src.get("sl", ""))
+                fa3.metric("TP1", fmt_price(nl["target1"], sp_),
+                          help=nl_src.get("tp1", ""))
+                fa4.metric("TP2", fmt_price(nl["target2"], sp_),
+                          help=nl_src.get("tp2", ""))
+                fa5.metric("TP3", fmt_price(nl["target3"], sp_),
+                          help=nl_src.get("tp3", ""))
+
+                fr1, fr2, fr3, fr4 = st.columns(4)
+                fr1.metric("RR · TP1", f"1:{nl['risk_reward_1']:.2f}")
+                fr2.metric("RR · TP2", f"1:{nl['risk_reward_2']:.2f}")
+                fr3.metric("RR · TP3", f"1:{nl['risk_reward_3']:.2f}")
+                fr4.metric("SL Source", nl_src.get("sl", "—"))
+
+                st.markdown(f"""
+                <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+                    <span style="background:rgba(245,122,122,0.15); padding:6px 14px;
+                                 border-radius:20px; color:#f57a7a; font-size:0.85rem;
+                                 border:1px solid rgba(245,122,122,0.35); font-weight:600;">
+                        🛑 SL: {nl_src.get('sl','—')}</span>
+                    <span style="background:rgba(230,200,124,0.15); padding:6px 14px;
+                                 border-radius:20px; color:#e6c87c; font-size:0.85rem;
+                                 border:1px solid rgba(230,200,124,0.35);">
+                        🎯 TP1: {nl_src.get('tp1','—')}</span>
+                    <span style="background:rgba(124,212,160,0.12); padding:6px 14px;
+                                 border-radius:20px; color:#7cd4a0; font-size:0.85rem;
+                                 border:1px solid rgba(124,212,160,0.35);">
+                        🎯 TP2: {nl_src.get('tp2','—')}</span>
+                    <span style="background:rgba(124,212,160,0.12); padding:6px 14px;
+                                 border-radius:20px; color:#7cd4a0; font-size:0.85rem;
+                                 border:1px solid rgba(124,212,160,0.35);">
+                        🎯 TP3: {nl_src.get('tp3','—')}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("---")
+
                 if flip_conf >= 70:
-                    st.error(f"⚠️ **يُنصح بالتفكير في دخول {flip_sig}** — "
-                             f"الستوب عند {nl['sources'].get('sl', '?')}")
+                    st.error(f"⚠️ **إشارة قوية للدخول {flip_sig}** — "
+                             f"الستوب عند {nl_src.get('sl', '?')} · "
+                             f"الهدف الأول عند {nl_src.get('tp1', '?')}")
+                    if st.button(f"📌 فتح صفقة {flip_sig} الآن",
+                                 width="stretch", key="open_flip_trade"):
+                        flip_result_data = dict(result)
+                        flip_result_data["signal"] = flip_sig
+                        flip_result_data["levels"] = nl
+                        flip_result_data["trade_grade"] = "A"
+                        flip_result_data["confidence"] = flip_conf
+                        if add_open_position(flip_result_data, sp_, sym, 1.0):
+                            st.success(f"✅ تم فتح صفقة {flip_sig}")
+                            st.rerun()
+                elif flip_conf >= 45:
+                    st.warning(f"⚠️ **احتمال انعكاس** — راقب السعر، "
+                               f"الستوب المقترح: {nl_src.get('sl', '?')}")
                 else:
-                    st.info(f"💡 **راقب السعر** — إن أغلقت الشمعة القادمة "
-                             f"فوق/تحت النقطة الحالية، فقد يتأكد الانعكاس")
+                    st.info(f"💡 **راقب فقط** — إن أكّد السعر الانعكاس، "
+                            f"استخدم SL: {nl_src.get('sl', '?')}")
 
 
 tab_ov, tab_tl, tab_smc, tab_mtf, tab_fnd, tab_prt, tab_ml, tab_flt, tab_cht, tab_cal, tab_jrn, tab_bt = st.tabs([
@@ -3579,20 +3724,6 @@ with tab_tl:
         st.markdown(f"""<div class="tool-card"><div class="tool-name">📉 BB</div>
             <div class="tool-value">{bs_}</div>
             <div class="tool-desc">Width: <b>{bw:.2f}%</b></div></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">💧 Volume</div>', unsafe_allow_html=True)
-    cm = safe_float(l.get("chaikin_mf"), 0)
-    cms = "Accumulation" if cm > 0 else "Distribution"; cmi = "🟢" if cm > 0 else "🔴"
-    va_ = df["volume"].rolling(20).mean().iloc[-1]
-    vn_ = safe_float(l.get("volume"), 0); vr_ = (vn_/va_) if va_ > 0 else 1.0
-    cf1, cf2 = st.columns(2)
-    with cf1:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">💰 CMF</div>
-            <div class="tool-value">{cmi} {cm:+.3f}</div>
-            <div class="tool-desc">{cms}</div></div>""", unsafe_allow_html=True)
-    with cf2:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📊 Volume</div>
-            <div class="tool-value">{vr_:.2f}x</div>
-            <div class="tool-desc">vs 20-avg</div></div>""", unsafe_allow_html=True)
 
 
 with tab_smc:
@@ -3747,16 +3878,62 @@ with tab_prt:
                         unsafe_allow_html=True)
                 flip_i = m.get("flip_info")
                 if flip_i and flip_i.get("flip_signal"):
-                    fi_color = ("#f57a7a" if flip_i["status"] == "STRONG_FLIP" else "#f5c87a")
-                    st.markdown(f"""<div style="margin:6px 0; padding:10px 14px;
-                        background:rgba(245,122,122,0.10); border-radius:10px;
-                        border:1px solid {fi_color}44;">
-                        <span style="color:{fi_color}; font-weight:700; font-size:0.9rem;">
-                            🔀 انعكاس محتمل إلى {flip_i['flip_signal']} 
+                    fi_color = ("#f57a7a" if flip_i["status"] == "STRONG_FLIP"
+                                else "#f5c87a")
+                    nl = flip_i.get("new_levels") or {}
+                    nl_src = nl.get("sources", {}) if nl else {}
+                    flip_sl = fmt_price(nl.get("stop_loss"), p["pair"]) if nl else "—"
+                    flip_tp1 = fmt_price(nl.get("target1"), p["pair"]) if nl else "—"
+                    flip_tp2 = fmt_price(nl.get("target2"), p["pair"]) if nl else "—"
+                    flip_rr1 = f"1:{nl.get('risk_reward_1', 0):.2f}" if nl else "—"
+                    st.markdown(f"""
+                    <div style="margin:8px 0; padding:12px 16px;
+                                background:rgba(245,122,122,0.10);
+                                border-radius:12px;
+                                border:1px solid {fi_color}55;
+                                border-left:4px solid {fi_color};">
+                        <div style="color:{fi_color}; font-weight:700;
+                                    font-size:1rem; margin-bottom:8px;">
+                            🔀 انعكاس إلى <b>{flip_i['flip_signal']}</b> 
                             ({flip_i['confidence']:.0f}%)
-                        </span>
-                        <div style="color:#a0aab8; font-size:0.8rem; margin-top:4px;">
-                            {' · '.join([t['icon'] + ' ' + t['name'] for t in flip_i['triggers'][:3]])}
+                        </div>
+                        <div style="color:#a0aab8; font-size:0.78rem;
+                                    margin-bottom:10px;">
+                            {len(flip_i['triggers'])} مؤشر:
+                            {' · '.join([t['icon'] + ' ' + t['name']
+                                          for t in flip_i['triggers'][:3]])}
+                        </div>
+                        <div style="display:grid;
+                                    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+                                    gap:8px;">
+                            <div style="background:rgba(245,122,122,0.12);
+                                        padding:6px 10px; border-radius:8px;">
+                                <div style="color:#f57a7a; font-size:0.65rem;
+                                            letter-spacing:1px;">🛑 SL</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.85rem;">{flip_sl}</div>
+                            </div>
+                            <div style="background:rgba(230,200,124,0.12);
+                                        padding:6px 10px; border-radius:8px;">
+                                <div style="color:#e6c87c; font-size:0.65rem;
+                                            letter-spacing:1px;">🎯 TP1</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.85rem;">{flip_tp1}</div>
+                            </div>
+                            <div style="background:rgba(124,212,160,0.12);
+                                        padding:6px 10px; border-radius:8px;">
+                                <div style="color:#7cd4a0; font-size:0.65rem;
+                                            letter-spacing:1px;">🎯 TP2</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.85rem;">{flip_tp2}</div>
+                            </div>
+                            <div style="background:rgba(230,200,124,0.12);
+                                        padding:6px 10px; border-radius:8px;">
+                                <div style="color:#e6c87c; font-size:0.65rem;
+                                            letter-spacing:1px;">📊 RR1</div>
+                                <div style="color:#e8edf5; font-weight:700;
+                                            font-size:0.85rem;">{flip_rr1}</div>
+                            </div>
                         </div>
                     </div>""", unsafe_allow_html=True)
                 act1, act2, act3, act4, act5 = st.columns([1, 1, 1, 1, 1])
@@ -3897,6 +4074,16 @@ with tab_cht:
             fig.add_hline(y=lv[k], row=1, col=1, line_dash="dot",
                           line_color=cl, opacity=0.7, annotation_text=lb,
                           annotation_position="right")
+    # ---- Flip lines ----
+    if flip_result and flip_result.get("new_levels"):
+        fnl = flip_result["new_levels"]
+        fig.add_hline(y=fnl["stop_loss"], row=1, col=1, line_dash="dashdot",
+                      line_color="#f57a7a", opacity=0.5,
+                      annotation_text=f"F-SL ({flip_result['flip_signal']})",
+                      annotation_position="left")
+        fig.add_hline(y=fnl["target1"], row=1, col=1, line_dash="dashdot",
+                      line_color="#7cd4a0", opacity=0.5,
+                      annotation_text=f"F-TP1", annotation_position="left")
     fig.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI",
                              line=dict(color="#7cd4a0")), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD",
@@ -3977,6 +4164,6 @@ with tab_bt:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Nearest Level SL · Flip Detection · Live Monitor · Hyper-Tuned ML
+    Flip SL/TP · Nearest Level SL · Live Monitor · Hyper-Tuned ML
 </div>
 """, unsafe_allow_html=True)
