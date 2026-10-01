@@ -1,15 +1,14 @@
 # ============================================================
-# BLACK PYRAMID v2009.1 — NEAREST LEVEL SL EDITION
+# BLACK PYRAMID v2009.2 — FLIP DETECTION EDITION
 # Institutional Analysis Terminal
 #
-# KEY CHANGE (v2009.1):
-#  - Stop Loss الآن عند أقرب نقطة مكتشفة من:
-#    * ICT (IDM, Order Blocks, FVG, Liquidity)
-#    * Technical (Swings, Pivots, Fibonacci, S/R)
-#    * Structural (BSL, SSL, 10-bar H/L)
-#  - كل نقطة تتنافس على القرب من السعر
-#  - SL يظهر مع مصدره الحقيقي (IDM / OB / Swing / Pivot...)
-#  - RR مضغوط: 0.8 / 1.3 / 1.9 (أهداف أقرب)
+# FEATURES:
+#  - SL at Nearest Discovered Level (IDM, OB, FVG, Pivot, Fib, S/R)
+#  - Signal Flip Detection (10 indicators)
+#  - Flip shown in main signal + All Signals table + Portfolio
+#  - ICT Levels + Live Portfolio Monitor
+#  - ML (4 models + Hyperparameter Tuning)
+#  - Fundamentals + Sentiment + Bond Yields + Monte Carlo
 # ============================================================
 
 import os
@@ -61,7 +60,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2009.1-NearestLevel"
+APP_VERSION = "v2009.2-FlipDetection"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -75,7 +74,6 @@ PENALTY_RANGE_REGIME = 10.0
 PENALTY_WEAK_CANDLE = 8.0
 PENALTY_WEEKLY_AGAINST = 6.0
 
-# RR جديدة أقرب
 MIN_RR_TP1 = 0.80
 MIN_RR_TP2 = 1.30
 MIN_RR_TP3 = 1.90
@@ -104,10 +102,10 @@ TUNING_CV_FOLDS = 5
 TUNING_SCORING = "roc_auc"
 TUNING_N_JOBS = -1
 
-# ---- SL NEAREST LEVEL CONFIG ----
-SL_MIN_DIST_ATR = 0.25    # حد أدنى للمسافة (تجنب ضوضاء)
-SL_MAX_DIST_ATR = 1.50    # حد أقصى للمسافة (تجنب بعيد)
-SL_BUFFER_ATR = 0.20      # buffer صغير بعد النقطة المختارة
+# SL NEAREST LEVEL CONFIG
+SL_MIN_DIST_ATR = 0.25
+SL_MAX_DIST_ATR = 1.50
+SL_BUFFER_ATR = 0.20
 
 ML_FEATURE_NAMES = [
     "structure", "trend", "momentum", "volume", "context",
@@ -120,27 +118,21 @@ ML_FEATURE_NAMES = [
 ]
 
 PARAM_GRIDS = {
-    "LogisticRegression": {
-        "C": [0.01, 0.1, 0.5, 1.0, 5.0, 10.0],
-        "solver": ["lbfgs", "liblinear"],
-        "class_weight": [None, "balanced"]},
-    "GradientBoosting": {
-        "n_estimators": [80, 150, 250], "max_depth": [3, 4, 5, 6],
-        "learning_rate": [0.03, 0.05, 0.08, 0.10],
-        "subsample": [0.8, 0.9, 1.0], "min_samples_leaf": [1, 3, 5]},
-    "RandomForest": {
-        "n_estimators": [100, 200, 300], "max_depth": [4, 6, 8, None],
-        "min_samples_split": [2, 5, 10],
-        "class_weight": [None, "balanced"]},
-    "XGBoost": {
-        "n_estimators": [100, 200, 300], "max_depth": [3, 4, 5, 6],
-        "learning_rate": [0.03, 0.05, 0.08, 0.10],
-        "subsample": [0.8, 0.9, 1.0], "colsample_bytree": [0.8, 0.9, 1.0]},
+    "LogisticRegression": {"C": [0.01, 0.1, 0.5, 1.0, 5.0, 10.0],
+                           "solver": ["lbfgs", "liblinear"],
+                           "class_weight": [None, "balanced"]},
+    "GradientBoosting": {"n_estimators": [80, 150, 250], "max_depth": [3, 4, 5, 6],
+                          "learning_rate": [0.03, 0.05, 0.08, 0.10],
+                          "subsample": [0.8, 0.9, 1.0], "min_samples_leaf": [1, 3, 5]},
+    "RandomForest": {"n_estimators": [100, 200, 300], "max_depth": [4, 6, 8, None],
+                      "min_samples_split": [2, 5, 10], "class_weight": [None, "balanced"]},
+    "XGBoost": {"n_estimators": [100, 200, 300], "max_depth": [3, 4, 5, 6],
+                 "learning_rate": [0.03, 0.05, 0.08, 0.10],
+                 "subsample": [0.8, 0.9, 1.0], "colsample_bytree": [0.8, 0.9, 1.0]},
 }
 
-LOGO_CANDIDATES = [
-    "file_000000005cb4824697f509df31f2168a.png",
-    "logo.png", "assets/logo.png", "static/logo.png"]
+LOGO_CANDIDATES = ["file_000000005cb4824697f509df31f2168a.png",
+                    "logo.png", "assets/logo.png", "static/logo.png"]
 
 ASSET_PROFILES = {
     "forex": {"atr_period": 14, "rsi_period": 14, "rsi_ob": 70, "rsi_os": 30,
@@ -181,9 +173,8 @@ YF_SYMBOL_ALTERNATIVES = {
 
 KILL_ZONES = {"London Open": (7, 10), "NY Open": (12, 15), "London Close": (15, 17)}
 
-CENTRAL_BANK_RATES = {
-    "USD": 5.25, "EUR": 4.00, "GBP": 5.25, "JPY": 0.10,
-    "CHF": 1.75, "AUD": 4.35, "NZD": 5.50, "CAD": 4.75}
+CENTRAL_BANK_RATES = {"USD": 5.25, "EUR": 4.00, "GBP": 5.25, "JPY": 0.10,
+                       "CHF": 1.75, "AUD": 4.35, "NZD": 5.50, "CAD": 4.75}
 
 CURRENCY_PAIRS_MAP = {
     "USD": [("EURUSD=X", -1), ("GBPUSD=X", -1), ("AUDUSD=X", -1),
@@ -207,10 +198,6 @@ RISK_OFF_CURRENCIES = {"USD", "JPY", "CHF"}
 RISK_ON_CURRENCIES = {"AUD", "NZD", "CAD"}
 
 
-# ============================================================
-# SECRETS
-# ============================================================
-
 def get_secret(name, default=""):
     try:
         v = st.secrets.get(name, None)
@@ -222,10 +209,6 @@ TWELVE_API_KEY = get_secret("TWELVE_API_KEY")
 FMP_API_KEY = get_secret("FMP_API_KEY")
 
 
-# ============================================================
-# SESSION STATE
-# ============================================================
-
 def init_state():
     defaults = {
         "selected_pair": "XAU/USD (Gold)", "all_signals": None,
@@ -235,15 +218,10 @@ def init_state():
         "show_market_status": False, "recent_results": [], "trade_journal": [],
         "open_positions": [], "ml_model": None, "_ccy_strength_cache": {}}
     for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+        if k not in st.session_state: st.session_state[k] = v
 
 init_state()
 
-
-# ============================================================
-# HELPERS
-# ============================================================
 
 def safe_float(v, default=np.nan):
     try:
@@ -305,10 +283,6 @@ def parse_pair_currencies(pair_name):
     return base, quote
 
 
-# ============================================================
-# KILL SWITCH
-# ============================================================
-
 def check_kill_switch():
     recent = st.session_state.get("recent_results", [])[-MAX_CONSECUTIVE_LOSSES:]
     if len(recent) < MAX_CONSECUTIVE_LOSSES:
@@ -331,10 +305,6 @@ def log_trade_result(result, outcome):
         "confidence": round(result.get("confidence", 0), 1),
         "outcome": outcome})
 
-
-# ============================================================
-# MARKET GUARD & SESSION
-# ============================================================
 
 def is_market_open(pair_name):
     now = datetime.now(timezone.utc)
@@ -412,10 +382,6 @@ def get_todays_events(events, pair_name):
     out.sort(key=lambda x: x.get("time",""))
     return out
 
-
-# ============================================================
-# DATA LAYER
-# ============================================================
 
 def sanitize_yf_symbol(sym):
     s = str(sym).strip().replace("(","").replace(")","")
@@ -619,10 +585,6 @@ def get_bond_bias_for_pair(pair_name, bonds=None):
     return 0.0, 0.0, " · ".join(rr)
 
 
-# ============================================================
-# SENTIMENT
-# ============================================================
-
 def estimate_retail_sentiment(df, profile):
     if df is None or len(df) < 50:
         return {"long_pct": 50, "short_pct": 50, "bias": "NEUTRAL",
@@ -673,10 +635,6 @@ def get_sentiment_bias_for_signal(sentiment, signal):
     return 0.0, ""
 
 
-# ============================================================
-# MONTE CARLO
-# ============================================================
-
 def monte_carlo_simulation(trades_r, n_sims=1000, n_trades=None):
     if not trades_r or len(trades_r) < 5: return None
     if n_trades is None: n_trades = len(trades_r)
@@ -692,10 +650,6 @@ def monte_carlo_simulation(trades_r, n_sims=1000, n_trades=None):
             "mean_dd": float(np.mean(md)), "p95_dd": float(np.percentile(md, 95)),
             "worst_dd": float(np.max(md)), "n_sims": n_sims, "n_trades": n_trades}
 
-
-# ============================================================
-# CORRELATION GUARD
-# ============================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_pair_correlation(s1, s2, days=30):
@@ -838,10 +792,6 @@ def calculate_portfolio_pnl():
             "winners": w, "losers": l, "win_rate": (w/n*100) if n > 0 else 0,
             "detailed": det}
 
-
-# ============================================================
-# ML LAYER
-# ============================================================
 
 def extract_ml_features(result, direction):
     pillars = result.get("pillars", {}); dp = pillars.get(direction, {})
@@ -1119,10 +1069,6 @@ def ml_adjusted_confidence(result, direction, ml_pack):
     return clamp(mw * (prob * 100) + (1 - mw) * fc, 0, 99), prob, "applied"
 
 
-# ============================================================
-# INDICATORS
-# ============================================================
-
 def calc_rsi(series, period=14):
     d = series.diff(); g = d.clip(lower=0); l = -d.clip(upper=0)
     ag = g.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
@@ -1174,10 +1120,6 @@ def calc_session_vwap(df):
     fb = tp.groupby(dt).expanding().mean().reset_index(level=0, drop=True)
     return vw.fillna(fb)
 
-
-# ============================================================
-# SWINGS / STRUCTURE / SMC
-# ============================================================
 
 def find_confirmed_swings(df, order=3):
     out = df.copy(); w = 2*order+1
@@ -1326,10 +1268,6 @@ def smc_quality(df):
     return min(sc, 100.0), rr
 
 
-# ============================================================
-# FEATURE BUILD / MTF
-# ============================================================
-
 def build_features(df, profile, use_rvwap=True):
     out = df.copy()
     out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
@@ -1439,10 +1377,6 @@ def detect_regime(df):
     if bw < 0.015: return "COMPRESSION", 65
     return "RANGE", 55
 
-
-# ============================================================
-# FILTERS
-# ============================================================
 
 @st.cache_data(ttl=180, show_spinner=False)
 def htf_zone_filter(symbol, direction, profile_key):
@@ -1602,10 +1536,6 @@ def weekly_bias(symbol, pair_name):
     except Exception: return "NEUTRAL", 0
 
 
-# ============================================================
-# SCORING / CONFIRMATION
-# ============================================================
-
 PILLAR_WEIGHTS = {"structure": 0.28, "trend": 0.18, "momentum": 0.14,
                   "volume": 0.14, "context": 0.26}
 
@@ -1761,10 +1691,6 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
     return ok, clamp(sc, 0, 100), rs, bl
 
 
-# ============================================================
-# LEVELS — FIBONACCI / PIVOT / S&R
-# ============================================================
-
 def latest_structure_levels(df):
     lo = df.index[df["swing_low"]].tolist(); hi = df.index[df["swing_high"]].tolist()
     sl = float(df.loc[lo[-1], "low"]) if lo else np.nan
@@ -1832,10 +1758,6 @@ def collect_sr_levels(df, lookback=200):
         lv.append(float(w["low"].iloc[-20:].min()))
     return sorted({l for l in lv if np.isfinite(l) and l > 0})
 
-
-# ============================================================
-# ICT LEVEL HELPERS
-# ============================================================
 
 def detect_inducement(df, direction, lookback=50):
     if len(df) < 20: return None
@@ -1935,64 +1857,35 @@ def find_order_block_levels(df, current_price, direction, lookback=100):
     return obs[:3]
 
 
-# ============================================================
-# ⭐ SL NEAREST LEVEL — CORE LOGIC (v2009.1)
-# ============================================================
-
 def calculate_ict_sl_tp(df, direction, current_price, profile):
-    """
-    v2009.1 NEAREST LEVEL SL:
-    SL = أقرب نقطة مكتشفة من كل المصادر (ICT + Technical + Structural)
-    - الحد الأدنى للمسافة: 0.25 ATR (تجنب الضوضاء)
-    - الحد الأقصى للمسافة: 1.5 ATR (تجنب البعيد جداً)
-    - buffer صغير: 0.20 ATR بعد النقطة
-    """
     atr = safe_float(df["atr"].iloc[-1], np.nan)
     if not np.isfinite(atr) or atr <= 0: return None
-
-    # ============================================================
-    # 1. جمع كل النقاط المكتشفة من كل المصادر
-    # ============================================================
-    all_levels = []   # list of (price, name, source_category)
-
-    # A) IDM (ICT Inducement)
+    all_levels = []
     idm = detect_inducement(df, direction)
     if idm is not None and np.isfinite(idm):
         all_levels.append((idm, "IDM (ICT)", "ict"))
-
-    # B) Order Blocks
     obs = find_order_block_levels(df, current_price, direction)
     for ob in obs:
         if direction == "BUY":
             all_levels.append((ob["low"], f"{ob['name']} Low", "ob"))
         else:
             all_levels.append((ob["high"], f"{ob['name']} High", "ob"))
-
-    # C) FVG edges
     fvgs = find_nearest_fvg(df, current_price, direction)
     for fv in fvgs:
         if direction == "BUY":
             all_levels.append((fv["low"], f"{fv['name']} Bottom", "fvg"))
         else:
             all_levels.append((fv["high"], f"{fv['name']} Top", "fvg"))
-
-    # D) Liquidity (BSL/SSL/Equal H/L)
     liq = find_nearest_liquidity(df, current_price, direction)
     for lq in liq:
         all_levels.append((lq["level"], lq["name"], "liq"))
-
-    # E) Swing High / Low
     swing_low, swing_high = latest_structure_levels(df)
     if np.isfinite(swing_low): all_levels.append((swing_low, "Swing Low", "swing"))
     if np.isfinite(swing_high): all_levels.append((swing_high, "Swing High", "swing"))
-
-    # F) BSL / SSL (last swing)
     ssl = safe_float(df["ssl"].iloc[-1], np.nan)
     bsl = safe_float(df["bsl"].iloc[-1], np.nan)
     if np.isfinite(ssl): all_levels.append((ssl, "SSL", "liquidity"))
     if np.isfinite(bsl): all_levels.append((bsl, "BSL", "liquidity"))
-
-    # G) Pivot Points
     pv = calc_pivot_points(df)
     if pv:
         for k, nm in (("s1","Pivot S1"),("s2","Pivot S2"),("s3","Pivot S3"),
@@ -2002,8 +1895,6 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
             lvl = pv.get(k)
             if lvl and np.isfinite(lvl):
                 all_levels.append((lvl, nm, "pivot"))
-
-    # H) Fibonacci (retracement + extension)
     imp = find_impulse_leg(df, direction)
     fibs = fib_levels_from_impulse(imp)
     if fibs:
@@ -2011,97 +1902,58 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
             if np.isfinite(v): all_levels.append((v, f"Fib {k}", "fib"))
         for k, v in fibs["extension"].items():
             if np.isfinite(v): all_levels.append((v, f"Fib ext {k}", "fib"))
-
-    # I) Recent 10-bar high/low
     recent_low = float(df["low"].iloc[-10:].min())
     recent_high = float(df["high"].iloc[-10:].max())
     all_levels.append((recent_low, "10-bar Low", "recent"))
     all_levels.append((recent_high, "10-bar High", "recent"))
-
-    # J) S/R
     for lvl in collect_sr_levels(df, 200):
-        if np.isfinite(lvl):
-            all_levels.append((lvl, "S/R", "sr"))
+        if np.isfinite(lvl): all_levels.append((lvl, "S/R", "sr"))
 
-    # ============================================================
-    # 2. فلترة: احتفظ فقط بالنقاط في الاتجاه الصحيح
-    # ============================================================
     buffer_price = 0.15 * atr
     if direction == "BUY":
-        # نقاط تحت السعر (دعم)
         candidates = [(lvl, nm, src) for lvl, nm, src in all_levels
                       if lvl < current_price - buffer_price]
-        candidates.sort(key=lambda x: x[0], reverse=True)   # الأعلى أولاً (الأقرب)
+        candidates.sort(key=lambda x: x[0], reverse=True)
     else:
-        # نقاط فوق السعر (مقاومة)
         candidates = [(lvl, nm, src) for lvl, nm, src in all_levels
                       if lvl > current_price + buffer_price]
-        candidates.sort(key=lambda x: x[0])                  # الأدنى أولاً (الأقرب)
+        candidates.sort(key=lambda x: x[0])
 
-    # ============================================================
-    # 3. اختر أقرب نقطة تحقق شروط المسافة
-    # ============================================================
     min_dist = SL_MIN_DIST_ATR * atr
     max_dist = SL_MAX_DIST_ATR * atr
+    chosen_level = None; chosen_name = "ATR Fallback"
 
-    chosen_level = None
-    chosen_name = "ATR Fallback"
-
-    # أول مرشح يحقق min_dist (وأقرب من max_dist)
     for lvl, nm, src in candidates:
         dist = abs(current_price - lvl)
         if min_dist <= dist <= max_dist:
-            chosen_level = lvl
-            chosen_name = nm
-            break
-
-    # لو مفيش مرشح مناسب → استخدم الأقرب الذي يحقق min_dist فقط
+            chosen_level = lvl; chosen_name = nm; break
     if chosen_level is None and candidates:
         for lvl, nm, src in candidates:
             dist = abs(current_price - lvl)
             if dist >= min_dist:
-                chosen_level = lvl
-                chosen_name = nm
-                break
-        # لو كلهن قريبين جداً → استخدم الأقرب
+                chosen_level = lvl; chosen_name = nm; break
         if chosen_level is None:
-            chosen_level = candidates[0][0]
-            chosen_name = candidates[0][1]
-
-    # لو مفيش أي مرشح → ATR fallback
+            chosen_level = candidates[0][0]; chosen_name = candidates[0][1]
     if chosen_level is None:
-        if direction == "BUY":
-            chosen_level = current_price - 1.0 * atr
-        else:
-            chosen_level = current_price + 1.0 * atr
+        if direction == "BUY": chosen_level = current_price - 1.0 * atr
+        else: chosen_level = current_price + 1.0 * atr
         chosen_name = "ATR (No levels)"
 
-    # ============================================================
-    # 4. SL = النقطة المختارة ± buffer صغير
-    # ============================================================
     if direction == "BUY":
         sl = chosen_level - SL_BUFFER_ATR * atr
     else:
         sl = chosen_level + SL_BUFFER_ATR * atr
-
-    # ضمان الحد الأدنى للمسافة
     if direction == "BUY":
-        if (current_price - sl) < min_dist:
-            sl = current_price - min_dist
+        if (current_price - sl) < min_dist: sl = current_price - min_dist
     else:
-        if (sl - current_price) < min_dist:
-            sl = current_price + min_dist
+        if (sl - current_price) < min_dist: sl = current_price + min_dist
 
     risk = abs(current_price - sl)
     if risk <= 0: return None
 
-    # ============================================================
-    # 5. TPs — أقرب نقاط في الاتجاه المعاكس (Fibonacci + Pivots + S/R)
-    # ============================================================
     liq_tp = find_nearest_liquidity(df, current_price, direction)
     fvgs_tp = find_nearest_fvg(df, current_price, direction)
     tp_cands = []
-
     if direction == "BUY":
         for lq in liq_tp:
             if lq["level"] > current_price + 0.3 * atr:
@@ -2125,8 +1977,7 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         if np.isfinite(bsl) and bsl > current_price + 0.3 * atr:
             tp_cands.append((bsl, "BSL"))
         for lvl in collect_sr_levels(df, 200):
-            if lvl > current_price + 0.5 * atr:
-                tp_cands.append((lvl, "S/R"))
+            if lvl > current_price + 0.5 * atr: tp_cands.append((lvl, "S/R"))
     else:
         for lq in liq_tp:
             if lq["level"] < current_price - 0.3 * atr:
@@ -2150,41 +2001,33 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         if np.isfinite(ssl) and ssl < current_price - 0.3 * atr:
             tp_cands.append((ssl, "SSL"))
         for lvl in collect_sr_levels(df, 200):
-            if lvl < current_price - 0.5 * atr:
-                tp_cands.append((lvl, "S/R"))
-
+            if lvl < current_price - 0.5 * atr: tp_cands.append((lvl, "S/R"))
     tp_cands.sort(key=lambda x: x[0], reverse=(direction == "SELL"))
 
-    # RR جديدة أقرب
     RR1, RR2, RR3 = MIN_RR_TP1, MIN_RR_TP2, MIN_RR_TP3
     min_t1 = current_price + risk * RR1 if direction == "BUY" else current_price - risk * RR1
     min_t2 = current_price + risk * RR2 if direction == "BUY" else current_price - risk * RR2
     min_t3 = current_price + risk * RR3 if direction == "BUY" else current_price - risk * RR3
-
     valid_t1 = [c for c in tp_cands
                 if (direction == "BUY" and c[0] >= min_t1) or
                    (direction == "SELL" and c[0] <= min_t1)]
     if valid_t1: t1, t1n = valid_t1[0]
     else: t1 = min_t1; t1n = f"{RR1}R"
-
     thr2 = max(min_t2, t1 + 0.3*atr) if direction == "BUY" else min(min_t2, t1 - 0.3*atr)
     valid_t2 = [c for c in tp_cands
                 if (direction == "BUY" and c[0] >= thr2) or
                    (direction == "SELL" and c[0] <= thr2)]
     if valid_t2: t2, t2n = valid_t2[0]
     else: t2 = min_t2; t2n = f"{RR2}R"
-
     thr3 = max(min_t3, t2 + 0.3*atr) if direction == "BUY" else min(min_t3, t2 - 0.3*atr)
     valid_t3 = [c for c in tp_cands
                 if (direction == "BUY" and c[0] >= thr3) or
                    (direction == "SELL" and c[0] <= thr3)]
     if valid_t3: t3, t3n = valid_t3[0]
     else: t3 = min_t3; t3n = f"{RR3}R"
-
     rr1 = abs(t1 - current_price) / risk
     rr2 = abs(t2 - current_price) / risk
     rr3 = abs(t3 - current_price) / risk
-
     return {"entry": current_price, "stop_loss": sl,
             "target1": t1, "target2": t2, "target3": t3, "risk": risk,
             "risk_reward_1": rr1, "risk_reward_2": rr2, "risk_reward_3": rr3,
@@ -2207,10 +2050,6 @@ def validate_levels(signal, levels, profile):
     if levels["risk_reward_3"] < 1.60: return False, "TP3 RR منخفض"
     return True, ""
 
-
-# ============================================================
-# POSITION SIZE / MANAGEMENT
-# ============================================================
 
 def calc_position_size(balance, risk_pct, entry, stop_loss, pair_name):
     if balance <= 0 or risk_pct <= 0: return None
@@ -2251,6 +2090,185 @@ def build_trade_management(signal, levels, profile):
 
 
 # ============================================================
+# SIGNAL FLIP DETECTION
+# ============================================================
+
+def detect_reversal_candle(df):
+    if len(df) < 3: return []
+    last = df.iloc[-1]; prev = df.iloc[-2]
+    body = abs(last["close"] - last["open"])
+    rng = max(last["high"] - last["low"], 1e-12)
+    upper_wick = last["high"] - max(last["close"], last["open"])
+    lower_wick = min(last["close"], last["open"]) - last["low"]
+    patterns = []
+    if lower_wick > 2 * body and upper_wick < body * 0.5:
+        patterns.append(("Hammer", "BULLISH", 75))
+    if upper_wick > 2 * body and lower_wick < body * 0.5:
+        patterns.append(("Shooting Star", "BEARISH", 75))
+    if (prev["close"] < prev["open"] and last["close"] > last["open"]
+        and last["close"] > prev["open"] and last["open"] < prev["close"]):
+        patterns.append(("Bullish Engulfing", "BULLISH", 80))
+    if (prev["close"] > prev["open"] and last["close"] < last["open"]
+        and last["close"] < prev["open"] and last["open"] > prev["close"]):
+        patterns.append(("Bearish Engulfing", "BEARISH", 80))
+    if rng > 0 and body / rng < 0.15:
+        patterns.append(("Doji", "NEUTRAL", 50))
+    if lower_wick > 3 * body and last["close"] > last["open"]:
+        patterns.append(("Bullish Pin Bar", "BULLISH", 70))
+    if upper_wick > 3 * body and last["close"] < last["open"]:
+        patterns.append(("Bearish Pin Bar", "BEARISH", 70))
+    return patterns
+
+
+def check_level_proximity(df, current_price, direction_of_flip, atr):
+    levels = []
+    tolerance = 0.5 * atr
+    if direction_of_flip == "BUY":
+        sw_l = get_last_two_swings(df, "low")
+        if sw_l:
+            for _, lvl in sw_l:
+                if abs(current_price - lvl) < tolerance:
+                    levels.append((lvl, "Swing Low"))
+        pv = calc_pivot_points(df)
+        if pv:
+            for k, nm in (("s1","Pivot S1"), ("s2","Pivot S2"), ("fib_s1","FibPivot S1")):
+                lvl = pv.get(k)
+                if lvl and abs(current_price - lvl) < tolerance:
+                    levels.append((lvl, nm))
+        ssl = safe_float(df["ssl"].iloc[-1], np.nan)
+        if np.isfinite(ssl) and abs(current_price - ssl) < tolerance:
+            levels.append((ssl, "SSL"))
+        obs = find_order_block_levels(df, current_price, "BUY")
+        for ob in obs:
+            if abs(current_price - ob["mid"]) < tolerance:
+                levels.append((ob["mid"], "Bull OB"))
+        imp = find_impulse_leg(df, "BUY")
+        fibs = fib_levels_from_impulse(imp)
+        if fibs:
+            for k in ("0.618", "0.786"):
+                lvl = fibs["retracement"].get(k)
+                if lvl and abs(current_price - lvl) < tolerance:
+                    levels.append((lvl, f"Fib {k}"))
+    else:
+        sw_h = get_last_two_swings(df, "high")
+        if sw_h:
+            for _, lvl in sw_h:
+                if abs(current_price - lvl) < tolerance:
+                    levels.append((lvl, "Swing High"))
+        pv = calc_pivot_points(df)
+        if pv:
+            for k, nm in (("r1","Pivot R1"), ("r2","Pivot R2"), ("fib_r1","FibPivot R1")):
+                lvl = pv.get(k)
+                if lvl and abs(current_price - lvl) < tolerance:
+                    levels.append((lvl, nm))
+        bsl = safe_float(df["bsl"].iloc[-1], np.nan)
+        if np.isfinite(bsl) and abs(current_price - bsl) < tolerance:
+            levels.append((bsl, "BSL"))
+        obs = find_order_block_levels(df, current_price, "SELL")
+        for ob in obs:
+            if abs(current_price - ob["mid"]) < tolerance:
+                levels.append((ob["mid"], "Bear OB"))
+        imp = find_impulse_leg(df, "SELL")
+        fibs = fib_levels_from_impulse(imp)
+        if fibs:
+            for k in ("0.618", "0.786"):
+                lvl = fibs["retracement"].get(k)
+                if lvl and abs(current_price - lvl) < tolerance:
+                    levels.append((lvl, f"Fib {k}"))
+    return levels
+
+
+def detect_signal_flip(df, current_price, original_signal, profile):
+    if original_signal not in ("BUY", "SELL"): return None
+    atr = safe_float(df["atr"].iloc[-1], np.nan)
+    if not np.isfinite(atr) or atr <= 0: return None
+    last = df.iloc[-1]
+    flip_signal = "SELL" if original_signal == "BUY" else "BUY"
+    triggers = []
+    total_score = 0.0
+
+    candles = detect_reversal_candle(df) or []
+    for pat_name, pat_dir, pat_score in candles:
+        if pat_dir == flip_signal:
+            triggers.append({"name": f"شمعة {pat_name}", "score": pat_score, "icon": "🕯️"})
+            total_score += pat_score * 0.3
+
+    level_hits = check_level_proximity(df, current_price, flip_signal, atr)
+    for lvl, lvl_name in level_hits[:2]:
+        triggers.append({"name": f"سعر عند {lvl_name}", "score": 70, "icon": "📍"})
+        total_score += 25
+
+    if flip_signal == "BUY" and safe_bool(last.get("mss_bullish")):
+        triggers.append({"name": "MSS صاعد", "score": 80, "icon": "🔄"}); total_score += 30
+    if flip_signal == "SELL" and safe_bool(last.get("mss_bearish")):
+        triggers.append({"name": "MSS هابط", "score": 80, "icon": "🔄"}); total_score += 30
+
+    if flip_signal == "BUY" and safe_bool(last.get("liquidity_sweep_bullish")):
+        triggers.append({"name": "Liquidity Sweep صاعد", "score": 75, "icon": "💧"}); total_score += 25
+    if flip_signal == "SELL" and safe_bool(last.get("liquidity_sweep_bearish")):
+        triggers.append({"name": "Liquidity Sweep هابط", "score": 75, "icon": "💧"}); total_score += 25
+
+    dv = detect_divergence(df)
+    if flip_signal == "BUY" and dv == "BULLISH":
+        triggers.append({"name": "RSI Divergence صاعد", "score": 70, "icon": "📈"}); total_score += 20
+    if flip_signal == "SELL" and dv == "BEARISH":
+        triggers.append({"name": "RSI Divergence هابط", "score": 70, "icon": "📉"}); total_score += 20
+
+    s_ = structure_state(df)
+    if flip_signal == "BUY" and s_["bullish"] and original_signal == "SELL":
+        triggers.append({"name": "الهيكل انقلب صاعداً", "score": 85, "icon": "🏗️"}); total_score += 35
+    if flip_signal == "SELL" and s_["bearish"] and original_signal == "BUY":
+        triggers.append({"name": "الهيكل انقلب هابطاً", "score": 85, "icon": "🏗️"}); total_score += 35
+
+    rsi = safe_float(last.get("rsi"), 50)
+    if flip_signal == "BUY" and rsi <= 30:
+        triggers.append({"name": f"RSI Oversold ({rsi:.0f})", "score": 65, "icon": "⚡"}); total_score += 15
+    if flip_signal == "SELL" and rsi >= 70:
+        triggers.append({"name": f"RSI Overbought ({rsi:.0f})", "score": 65, "icon": "⚡"}); total_score += 15
+
+    vwap = safe_float(last.get("vwap"), current_price)
+    if flip_signal == "BUY" and current_price > vwap * 1.002:
+        triggers.append({"name": "فوق VWAP", "score": 55, "icon": "📊"}); total_score += 10
+    if flip_signal == "SELL" and current_price < vwap * 0.998:
+        triggers.append({"name": "تحت VWAP", "score": 55, "icon": "📊"}); total_score += 10
+
+    if flip_signal == "BUY" and last["macd"] > last["macd_signal"] and last["macd_histogram"] > 0:
+        triggers.append({"name": "MACD انقلب صاعداً", "score": 60, "icon": "📈"}); total_score += 15
+    if flip_signal == "SELL" and last["macd"] < last["macd_signal"] and last["macd_histogram"] < 0:
+        triggers.append({"name": "MACD انقلب هابطاً", "score": 60, "icon": "📉"}); total_score += 15
+
+    if flip_signal == "BUY" and last["ema20"] > last["ema50"] and original_signal == "SELL":
+        triggers.append({"name": "EMA20 > EMA50", "score": 60, "icon": "📈"}); total_score += 12
+    if flip_signal == "SELL" and last["ema20"] < last["ema50"] and original_signal == "BUY":
+        triggers.append({"name": "EMA20 < EMA50", "score": 60, "icon": "📉"}); total_score += 12
+
+    total_score = clamp(total_score, 0, 100)
+    if total_score < 25 or len(triggers) == 0:
+        return {"flip_signal": None, "confidence": total_score,
+                "triggers": triggers, "status": "NO_FLIP",
+                "message": "الإشارة الأصلية سارية", "new_levels": None}
+
+    if total_score >= 70:
+        status = "STRONG_FLIP"
+        msg = f"🚨 إشارة قوية للانعكاس إلى {flip_signal}"
+    elif total_score >= 45:
+        status = "POSSIBLE_FLIP"
+        msg = f"⚠️ احتمال انعكاس إلى {flip_signal}"
+    else:
+        status = "WEAK_FLIP"
+        msg = f"💡 مؤشرات أولية نحو {flip_signal}"
+
+    new_levels = None
+    try:
+        new_levels = calculate_ict_sl_tp(df, flip_signal, current_price, profile)
+    except Exception: pass
+
+    return {"flip_signal": flip_signal, "confidence": total_score,
+            "triggers": triggers, "status": status,
+            "message": msg, "new_levels": new_levels}
+
+
+# ============================================================
 # DYNAMIC POSITION MONITOR
 # ============================================================
 
@@ -2258,14 +2276,16 @@ def monitor_position(pos):
     dfx = get_historical_data(pos["symbol"], "3mo", "4h")
     if dfx is None or len(dfx) < 50:
         return {"state": "NO_DATA", "action": "بيانات قليلة", "severity": 0,
-                "reversal_signals": [], "suggested_sl": pos.get("stop_loss")}
+                "reversal_signals": [], "suggested_sl": pos.get("stop_loss"),
+                "flip_info": None}
     profile = profile_for(pos["pair"])
     dfx = build_features(dfx, profile)
     last = dfx.iloc[-1]
     cur, _ = get_spot_price(pos["symbol"])
     if cur is None:
         return {"state": "NO_PRICE", "action": "انتظر", "severity": 0,
-                "reversal_signals": [], "suggested_sl": pos.get("stop_loss")}
+                "reversal_signals": [], "suggested_sl": pos.get("stop_loss"),
+                "flip_info": None}
     d = pos["direction"]
     e = pos.get("entry", cur); sl = pos.get("stop_loss", e)
     tp1 = pos.get("target1", e); tp2 = pos.get("target2", e); tp3 = pos.get("target3", e)
@@ -2301,14 +2321,33 @@ def monitor_position(pos):
     if d == "SELL" and cur > vw * 1.002: sigs.append("كسر VWAP"); sev += 15
     if d == "BUY" and last["ema20"] < last["ema50"]: sigs.append("EMA20<50"); sev += 20
     if d == "SELL" and last["ema20"] > last["ema50"]: sigs.append("EMA20>50"); sev += 20
+
+    # FLIP DETECTION
+    flip_info = None
+    try:
+        flip_res = detect_signal_flip(dfx, cur, d, profile)
+        if flip_res and flip_res.get("flip_signal"):
+            flip_info = flip_res
+            if flip_res["status"] == "STRONG_FLIP":
+                sev = max(sev, 80)
+            elif flip_res["status"] == "POSSIBLE_FLIP":
+                sev = max(sev, 55)
+    except Exception: pass
+
     if hs: state = "STOPPED"; action = "تم الإيقاف"; sev = 100
     elif h3: state = "TARGET_HIT"; action = "🎯 TP3 — أغلق"; sev = 5
+    elif sev >= 80 and flip_info and flip_info["status"] == "STRONG_FLIP":
+        state = "FLIP_ALERT"
+        action = f"🔀 انعكاس إلى {flip_info['flip_signal']} ({flip_info['confidence']:.0f}%)"
     elif sev >= 60:
         state = "EXIT_NOW"
         action = f"🛑 خروج فوري — {', '.join(sigs[:3])}"; sev = 90
     elif sev >= 40:
         state = "TREND_CHANGE"
         action = f"⚠️ تغير هيكل — شدد SL"; sev = 70
+    elif flip_info and flip_info["status"] == "POSSIBLE_FLIP":
+        state = "FLIP_WARNING"
+        action = f"⚠️ احتمال انعكاس ({flip_info['confidence']:.0f}%)"
     elif sev >= 25:
         state = "REVERSAL_WARNING"
         action = f"⚡ انعكاس محتمل: {', '.join(sigs[:2])}"; sev = 50
@@ -2320,7 +2359,8 @@ def monitor_position(pos):
     return {"state": state, "action": action, "severity": sev,
             "reversal_signals": sigs, "current_price": cur,
             "r_multiple": r, "hit_tp1": h1, "hit_tp2": h2, "hit_tp3": h3,
-            "hit_sl": hs, "suggested_sl": suggested}
+            "hit_sl": hs, "suggested_sl": suggested,
+            "flip_info": flip_info}
 
 
 def _suggest_sl(pos, dfx, cur, direction):
@@ -2343,10 +2383,8 @@ def _suggest_sl(pos, dfx, cur, direction):
 def update_position_sl(pos_id, new_sl):
     for p in st.session_state.get("open_positions", []):
         if p["id"] == pos_id:
-            p["stop_loss"] = new_sl
-            return True
+            p["stop_loss"] = new_sl; return True
     return False
-
 
 def close_position_with_result(pos_id, outcome):
     pos = None
@@ -2362,7 +2400,6 @@ def close_position_with_result(pos_id, outcome):
         "outcome": outcome})
     close_open_position(pos_id)
     return True
-
 
 def state_color_severity(sev):
     if sev >= 80: return "#f57a7a", "🔴"
@@ -2679,9 +2716,27 @@ def get_all_signals_parallel():
             if p is None or d is None: return None
             r = generate_signal(d, p, pn, sym, skip_external_filters=True)
             lv = r["levels"] or {}
-            return {"الزوج": pn, "الإشارة": r["signal"],
+            flip_sig = "—"; flip_conf = 0; flip_status = "NONE"; flip_icon = ""
+            sig_ = r["signal"]
+            if sig_ in ("BUY", "SELL"):
+                try:
+                    df_feat = r.get("df")
+                    if df_feat is not None and len(df_feat) >= 50:
+                        fl = detect_signal_flip(df_feat, p, sig_, profile_for(pn))
+                        if fl and fl.get("flip_signal"):
+                            flip_sig = fl["flip_signal"]
+                            flip_conf = round(fl["confidence"], 0)
+                            flip_status = fl["status"]
+                            if fl["status"] == "STRONG_FLIP": flip_icon = "🚨"
+                            elif fl["status"] == "POSSIBLE_FLIP": flip_icon = "⚠️"
+                            else: flip_icon = "💡"
+                except Exception: pass
+            return {"الزوج": pn, "الإشارة": sig_,
                     "الثقة": round(r["confidence"], 1),
-                    "BUY": round(r["buy_score"], 1), "SELL": round(r["sell_score"], 1),
+                    "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
+                    "Flip%": flip_conf if flip_conf > 0 else "—",
+                    "BUY": round(r["buy_score"], 1),
+                    "SELL": round(r["sell_score"], 1),
                     "MTF": r["mtf_bias"], "Weekly": r["weekly_bias"],
                     "Regime": r["regime"],
                     "Fund": f"B{r.get('fund_buy',0):.0f}/S{r.get('fund_sell',0):.0f}",
@@ -2693,7 +2748,8 @@ def get_all_signals_parallel():
                     "SL": fmt_price(lv.get("stop_loss"), pn),
                     "SLsrc": lv.get("sources", {}).get("sl", "—"),
                     "TP1": fmt_price(lv.get("target1"), pn),
-                    "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0}
+                    "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0,
+                    "_flip_status": flip_status}
         except Exception: return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(one, p, s): (p, i) for i, (p, s) in enumerate(PAIRS.items())}
@@ -2704,9 +2760,14 @@ def get_all_signals_parallel():
             except Exception: pass
     if not results: return pd.DataFrame()
     out = pd.DataFrame(results)
-    o = {"BUY":0, "SELL":1, "WAIT":2}
-    out["_o"] = out["الإشارة"].map(o).fillna(3)
-    out = out.sort_values(["_o","الثقة"], ascending=[True,False]).drop(columns="_o")
+    def sort_key(row):
+        status = row.get("_flip_status", "NONE")
+        sig = row["الإشارة"]
+        fp = {"STRONG_FLIP": 0, "POSSIBLE_FLIP": 1, "WEAK_FLIP": 2, "NONE": 3}.get(status, 3)
+        sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
+        return (fp, sp_, -float(row.get("Flip%", 0) or 0))
+    out["_sort"] = out.apply(lambda r: sort_key(r), axis=1)
+    out = out.sort_values("_sort").drop(columns=["_sort", "_flip_status"])
     return out
 
 
@@ -2730,7 +2791,7 @@ def event_risk_message(events, pair_name):
 
 
 # ============================================================
-# UI CONFIG
+# UI
 # ============================================================
 
 st.set_page_config(page_title=f"BLACK PYRAMID {APP_VERSION}",
@@ -2874,10 +2935,6 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 """, unsafe_allow_html=True)
 
 
-# ============================================================
-# HERO
-# ============================================================
-
 _logo = load_logo_b64()
 hl, hr = st.columns([1.15, 1.6])
 with hl:
@@ -2890,7 +2947,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">NEAREST LEVEL</span>
+                <span class="hero-badge-balanced">FLIP WATCH</span>
             </div>
         </div>""", unsafe_allow_html=True)
     else:
@@ -2900,7 +2957,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">NEAREST LEVEL</span>
+                <span class="hero-badge-balanced">FLIP WATCH</span>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -2996,22 +3053,15 @@ if st.session_state.show_market_status:
                 <div class="tool-desc">{mst['overall']}</div></div>""", unsafe_allow_html=True)
 
 
-# ============================================================
-# SIDEBAR
-# ============================================================
-
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
     st.markdown("**🎯 SL Mode: أقرب نقطة**")
-    st.caption(f"• Min dist: {SL_MIN_DIST_ATR} ATR")
-    st.caption(f"• Max dist: {SL_MAX_DIST_ATR} ATR")
-    st.caption(f"• Buffer: {SL_BUFFER_ATR} ATR")
+    st.caption(f"• Min: {SL_MIN_DIST_ATR} ATR · Max: {SL_MAX_DIST_ATR} ATR")
     st.markdown("---")
     st.markdown("**🧠 ML Model**")
-    if not SKLEARN_AVAILABLE:
-        st.caption("⚠️ sklearn غير مثبت")
+    if not SKLEARN_AVAILABLE: st.caption("⚠️ sklearn غير مثبت")
     elif st.session_state.get("ml_model"):
         mp = st.session_state.ml_model
         st.success(f"✅ {mp.get('model_name','?')}")
@@ -3045,10 +3095,6 @@ with st.sidebar:
         st.cache_data.clear(); st.rerun()
 
 
-# ============================================================
-# CONTROL BAR
-# ============================================================
-
 st.markdown('<div class="section-title">🎯 Analysis Control <span>اختر الأصل</span></div>',
             unsafe_allow_html=True)
 cc1, cc2, cc3 = st.columns([2.2, 1, 1])
@@ -3074,21 +3120,69 @@ if ana1:
     st.cache_data.clear(); st.rerun()
 
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-    st.markdown('<div class="section-title">🌐 All Assets</div>', unsafe_allow_html=True)
-    r1, r2 = st.columns([4, 1])
+    st.markdown('<div class="section-title">🌐 All Assets <span>مع Flip Detection</span></div>',
+                unsafe_allow_html=True)
+    r1, r2, r3 = st.columns([3, 1, 1])
     with r1:
-        st.success(f"✅ {len(st.session_state.all_signals)} أصول.")
+        n_flips = 0
+        if "🔄 Flip" in st.session_state.all_signals.columns:
+            n_flips = (st.session_state.all_signals["🔄 Flip"] != "—").sum()
+        if n_flips > 0:
+            st.warning(f"✅ {len(st.session_state.all_signals)} أصول · "
+                       f"🔄 **{n_flips} فيها إشارة انعكاس**")
+        else:
+            st.success(f"✅ {len(st.session_state.all_signals)} أصول.")
     with r2:
+        show_flips_only = st.checkbox("🔄 Flip فقط", value=False,
+                                       key="filter_flip_only")
+    with r3:
         if st.button("🗑️ مسح", width="stretch", key="clr_all"):
             st.session_state.all_signals = None; st.rerun()
-    st.dataframe(st.session_state.all_signals, hide_index=True,
-                 width="stretch", height=440)
+    df_show = st.session_state.all_signals.copy()
+    if show_flips_only and "🔄 Flip" in df_show.columns:
+        df_show = df_show[df_show["🔄 Flip"] != "—"]
+    st.dataframe(df_show, hide_index=True, width="stretch", height=460)
+    
+    if "🔄 Flip" in st.session_state.all_signals.columns:
+        flips_df = st.session_state.all_signals[
+            st.session_state.all_signals["🔄 Flip"] != "—"]
+        if not flips_df.empty:
+            with st.expander(f"🔀 {len(flips_df)} إشارات Flip مكتشفة", expanded=True):
+                for _, row in flips_df.iterrows():
+                    flip_txt = row["🔄 Flip"]
+                    flip_conf = row.get("Flip%", 0)
+                    pair_name = row["الزوج"]
+                    if "🚨" in flip_txt:
+                        color = "#f57a7a"; label = "STRONG"
+                    elif "⚠️" in flip_txt:
+                        color = "#f5c87a"; label = "POSSIBLE"
+                    else:
+                        color = "#7cd4a0"; label = "WATCH"
+                    st.markdown(f"""
+                    <div style="margin:6px 0; padding:10px 16px;
+                                background:linear-gradient(145deg, #10141c, #0d1017);
+                                border-radius:12px;
+                                border:1px solid {color}44;
+                                border-left:4px solid {color};
+                                display:flex; justify-content:space-between;
+                                align-items:center; flex-wrap:wrap; gap:10px;">
+                        <div>
+                            <span style="color:#e6c87c; font-weight:700;
+                                         font-size:0.95rem;">{pair_name}</span>
+                            <span style="color:#7d879c; font-size:0.8rem;
+                                         margin-left:8px;">
+                                الأصل: {row['الإشارة']}</span>
+                        </div>
+                        <div>
+                            <span style="color:{color}; font-weight:700;
+                                         font-size:0.95rem;">{flip_txt}</span>
+                            <span style="color:#a0aab8; font-size:0.85rem;
+                                         margin-left:10px;">
+                                ثقة {flip_conf}% · {label}</span>
+                        </div>
+                    </div>""", unsafe_allow_html=True)
     st.markdown("---")
 
-
-# ============================================================
-# LOAD ASSET
-# ============================================================
 
 cur_price, chg = get_spot_price(sym)
 if cur_price is None: st.error(f"تعذر السعر لـ {sp_}."); st.stop()
@@ -3105,11 +3199,16 @@ _rsk = get_risk_sentiment()
 result = generate_signal(df_raw, cur_price, sp_, sym, news_block=ntb, strict_soft=ss_soft)
 df = result["df"]; lv = result["levels"]; sig = result["signal"]; conf = result["confidence"]
 
+# FLIP DETECTION
+flip_result = None
+if sig in ("BUY", "SELL"):
+    try:
+        flip_result = detect_signal_flip(df, cur_price, sig, profile_for(sp_))
+    except Exception:
+        flip_result = None
 
-# ============================================================
-# STATUS BANNERS
-# ============================================================
 
+# Status banners
 mo_, mm_ = is_market_open(sp_)
 if not mo_: st.error(f"🚫 **{mm_}**")
 kb_, cs_ = check_kill_switch()
@@ -3124,15 +3223,13 @@ if sig in ("BUY","SELL") and st.session_state.get("open_positions"):
         st.warning("⚠️ **Correlation Warnings:**")
         for w in corr_c["warnings"]: st.markdown(f"- {w}")
 
-# Auto-monitor urgent alerts
 if st.session_state.get("open_positions"):
     urgent_alerts = []
     for p in st.session_state.open_positions:
         m = p.get("_monitor")
         if m is None:
             try:
-                m = monitor_position(p)
-                p["_monitor"] = m
+                m = monitor_position(p); p["_monitor"] = m
             except Exception: m = None
         if m and m.get("severity", 0) >= 60:
             urgent_alerts.append((p, m))
@@ -3140,10 +3237,21 @@ if st.session_state.get("open_positions"):
         for p, m in urgent_alerts:
             st.error(f"⚠️ **#{p['id']} {p['pair']}** — {m['action']}")
 
+# FLIP BANNER
+if flip_result and flip_result.get("flip_signal"):
+    flip_sig = flip_result["flip_signal"]
+    flip_conf = flip_result["confidence"]
+    flip_status = flip_result["status"]
+    if flip_status == "STRONG_FLIP":
+        st.error(f"🚨 **FLIP ALERT** — إشارة قوية للانعكاس إلى **{flip_sig}** "
+                 f"(ثقة {flip_conf:.0f}%) · {len(flip_result['triggers'])} مؤشر")
+    elif flip_status == "POSSIBLE_FLIP":
+        st.warning(f"⚠️ **Possible Flip** — قد يتحول إلى **{flip_sig}** "
+                   f"(ثقة {flip_conf:.0f}%) · {len(flip_result['triggers'])} مؤشر")
+    else:
+        st.info(f"💡 **Flip Watch** — مؤشرات أولية نحو **{flip_sig}** "
+                f"(ثقة {flip_conf:.0f}%)")
 
-# ============================================================
-# MAIN GRID
-# ============================================================
 
 c_sig, c_stat = st.columns([1.6, 1])
 with c_sig:
@@ -3159,6 +3267,20 @@ with c_sig:
         mlb = f'<div class="signal-meta" style="margin-top:8px; color:{mc_};">🎓 ML Win: <b>{mlp_*100:.1f}%</b></div>'
     elif mls_ == "no_model":
         mlb = '<div class="signal-meta" style="margin-top:8px; color:#6b7488;">🎓 ML: Not trained</div>'
+    flip_badge = ""
+    if flip_result and flip_result.get("flip_signal"):
+        flip_sig_ = flip_result["flip_signal"]; flip_conf_ = flip_result["confidence"]
+        flip_status_ = flip_result["status"]
+        if flip_status_ == "STRONG_FLIP":
+            flip_badge = (f'<div style="margin-top:10px; padding:8px 14px; '
+                          f'background:rgba(245,122,122,0.12); border-radius:12px; '
+                          f'border:1px solid rgba(245,122,122,0.35); color:#f57a7a; '
+                          f'font-weight:700;">🚨 FLIP → {flip_sig_} ({flip_conf_:.0f}%)</div>')
+        elif flip_status_ == "POSSIBLE_FLIP":
+            flip_badge = (f'<div style="margin-top:10px; padding:8px 14px; '
+                          f'background:rgba(245,200,122,0.10); border-radius:12px; '
+                          f'border:1px solid rgba(245,200,122,0.35); color:#f5c87a; '
+                          f'font-weight:600;">⚠️ احتمالي → {flip_sig_} ({flip_conf_:.0f}%)</div>')
     st.markdown(f"""
     <div class="signal-card">
         <div class="signal-meta">BLACK PYRAMID · {sp_}</div>
@@ -3169,6 +3291,7 @@ with c_sig:
             Execution: <b style="color:{ec_};">{result['execution_status']}</b>
             &nbsp;·&nbsp; {result['execution_reason']}
         </div>
+        {flip_badge}
         {mlb}
     </div>""", unsafe_allow_html=True)
 
@@ -3200,10 +3323,6 @@ if sadv and sadv != "None":
     if not ss_soft: st.info(f"💡 **Advisories:** {sadv}")
     else: st.warning(f"⚠️ **Strict ({result['soft_penalties']:.1f}):** {sadv}")
 
-
-# ============================================================
-# TRADE PLAN
-# ============================================================
 
 if sig in ("BUY","SELL") and lv:
     src = lv.get("sources", {})
@@ -3238,11 +3357,11 @@ if sig in ("BUY","SELL") and lv:
             🎯 TP3: {src.get('tp3','—')}</span>
     </div>""", unsafe_allow_html=True)
 
-    with st.expander("🔍 التفاصيل: من أين جاء SL؟ · ICT · OB · FVG · Liquidity", expanded=False):
+    with st.expander("🔍 التفاصيل: من أين جاء SL؟", expanded=False):
         if lv.get("sl_level_price"):
-            st.markdown(f"**SL Level Price:** `{fmt_price(lv['sl_level_price'], sp_)}` ← {src.get('sl','—')}")
+            st.markdown(f"**SL Level:** `{fmt_price(lv['sl_level_price'], sp_)}` ← {src.get('sl','—')}")
         if lv.get("idm"):
-            st.markdown(f"**IDM (Inducement):** `{fmt_price(lv['idm'], sp_)}`")
+            st.markdown(f"**IDM:** `{fmt_price(lv['idm'], sp_)}`")
         if lv.get("obs"):
             st.markdown("**Order Blocks:**")
             for ob in lv["obs"][:3]:
@@ -3252,7 +3371,7 @@ if sig in ("BUY","SELL") and lv:
             for fv in lv["fvgs"][:3]:
                 st.markdown(f"- {fv['name']}: `{fmt_price(fv['low'], sp_)} → {fmt_price(fv['high'], sp_)}`")
         if lv.get("liq"):
-            st.markdown("**Liquidity Levels:**")
+            st.markdown("**Liquidity:**")
             for lq in lv["liq"][:3]:
                 st.markdown(f"- {lq['name']}: `{fmt_price(lq['level'], sp_)}`")
 
@@ -3309,10 +3428,66 @@ if sig in ("BUY","SELL") and lv:
         elif cs_conf and cs_conf["warnings"]: st.warning("⚠️ تحذيرات")
         else: st.info("💡 أضف الصفقة")
 
+    # FLIP WATCH
+    if flip_result and flip_result.get("flip_signal"):
+        flip_sig = flip_result["flip_signal"]
+        flip_conf = flip_result["confidence"]
+        flip_status = flip_result["status"]
+        flip_color = ("#f57a7a" if flip_status == "STRONG_FLIP"
+                      else "#f5c87a" if flip_status == "POSSIBLE_FLIP"
+                      else "#7cd4a0")
+        st.markdown('<div class="section-title">🔀 Signal Flip Watch '
+                    '<span>متى تنعكس الإشارة؟</span></div>',
+                    unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="background:linear-gradient(145deg, #10141c, #0d1017);
+                    padding:18px 22px; border-radius:16px;
+                    border:1px solid {flip_color}44; border-left:4px solid {flip_color};">
+            <div style="display:flex; justify-content:space-between; align-items:center;
+                        flex-wrap:wrap; gap:12px;">
+                <div>
+                    <div style="color:#7d879c; font-size:0.75rem; letter-spacing:1px;
+                                text-transform:uppercase;">Flip Signal</div>
+                    <div style="color:{flip_color}; font-size:1.8rem; font-weight:800;
+                                letter-spacing:2px; margin-top:4px;">{flip_sig}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="color:#7d879c; font-size:0.75rem; letter-spacing:1px;
+                                text-transform:uppercase;">Confidence</div>
+                    <div style="color:{flip_color}; font-size:1.6rem; font-weight:800;
+                                margin-top:4px;">{flip_conf:.0f}%</div>
+                </div>
+                <div style="flex:1; text-align:right;">
+                    <div style="color:#e8edf5; font-size:0.95rem;">{flip_result['message']}</div>
+                    <div style="color:#8892a5; font-size:0.82rem; margin-top:4px;">
+                        {len(flip_result['triggers'])} مؤشر داعم
+                    </div>
+                </div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+        with st.expander(f"🔍 تفاصيل الانعكاس ({len(flip_result['triggers'])} مؤشر)",
+                         expanded=(flip_conf >= 45)):
+            for tr in flip_result["triggers"]:
+                st.markdown(f"- {tr['icon']} **{tr['name']}** — قوة {tr['score']}")
+            if flip_result.get("new_levels") and flip_conf >= 45:
+                nl = flip_result["new_levels"]
+                st.markdown("---")
+                st.markdown(f"**🎯 Trade Plan الجديد للـ {flip_sig}:**")
+                fc1, fc2, fc3, fc4, fc5 = st.columns(5)
+                fc1.metric("Entry", fmt_price(nl["entry"], sp_))
+                fc2.metric("SL", fmt_price(nl["stop_loss"], sp_),
+                          help=nl["sources"].get("sl", ""))
+                fc3.metric("TP1", fmt_price(nl["target1"], sp_),
+                          help=nl["sources"].get("tp1", ""))
+                fc4.metric("TP2", fmt_price(nl["target2"], sp_))
+                fc5.metric("RR·TP1", f"1:{nl['risk_reward_1']:.2f}")
+                if flip_conf >= 70:
+                    st.error(f"⚠️ **يُنصح بالتفكير في دخول {flip_sig}** — "
+                             f"الستوب عند {nl['sources'].get('sl', '?')}")
+                else:
+                    st.info(f"💡 **راقب السعر** — إن أغلقت الشمعة القادمة "
+                             f"فوق/تحت النقطة الحالية، فقد يتأكد الانعكاس")
 
-# ============================================================
-# TABS
-# ============================================================
 
 tab_ov, tab_tl, tab_smc, tab_mtf, tab_fnd, tab_prt, tab_ml, tab_flt, tab_cht, tab_cal, tab_jrn, tab_bt = st.tabs([
     "📊 Overview","🧰 Tools","🏛️ SMC","⏱️ MTF",
@@ -3337,7 +3512,6 @@ with tab_ov:
     gc1.metric("Score", f"{result['confirmation_score']:.1f}/100")
     gc2.metric("Gate", "✅ PASS" if result["confirmation_ok"] else "⚠️ SOFT")
     gc3.metric("Raw/Eff", f"{result['raw_confidence']:.1f} / {result['confidence']:.1f}")
-
     if lv and lv.get("sources"):
         st.markdown('<div class="section-title">🎯 Sources <span>من أين كل مستوى؟</span></div>',
                     unsafe_allow_html=True)
@@ -3440,28 +3614,6 @@ with tab_smc:
             st.markdown(f"""<div class="tool-card"><div class="tool-name">{nm}</div>
                 <div class="tool-value">{ic_}</div>
                 <div class="tool-desc">{stt}</div></div>""", unsafe_allow_html=True)
-    cols2 = st.columns(4)
-    with cols2[0]:
-        obb = safe_bool(l.get("order_block_bullish")); obe = safe_bool(l.get("order_block_bearish"))
-        ic_ = "🟢" if obb else "🔴" if obe else "⚪"
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📦 OB</div>
-            <div class="tool-value">{ic_}</div>
-            <div class="tool-desc">{'Bull' if obb else 'Bear' if obe else 'None'}</div></div>""",
-            unsafe_allow_html=True)
-    with cols2[1]:
-        ip = safe_bool(l.get("in_premium")); id_ = safe_bool(l.get("in_discount"))
-        ic_ = "🔴" if ip else "🟢" if id_ else "🟡"
-        st_ = "Premium" if ip else "Discount" if id_ else "Eq"
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⚖️ P/D</div>
-            <div class="tool-value">{ic_} {st_}</div></div>""", unsafe_allow_html=True)
-    with cols2[2]:
-        bv = safe_float(l.get("bsl"))
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⬆️ BSL</div>
-            <div class="tool-value">{fmt_price(bv, sp_)}</div></div>""", unsafe_allow_html=True)
-    with cols2[3]:
-        sv = safe_float(l.get("ssl"))
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⬇️ SSL</div>
-            <div class="tool-value">{fmt_price(sv, sp_)}</div></div>""", unsafe_allow_html=True)
 
 
 with tab_mtf:
@@ -3476,12 +3628,6 @@ with tab_mtf:
                 <div class="tool-value" style="color:{cl};">{ic_} {bias}</div>
                 <div class="tool-desc">Strength: <b>{info['strength']}/10</b></div></div>""",
                 unsafe_allow_html=True)
-    fm = result["mtf_bias"]; fi = "🟢" if fm == "BULLISH" else "🔴" if fm == "BEARISH" else "🟡"
-    st.markdown(f"""<div class="tool-card" style="margin-top:20px;">
-        <div class="tool-name">🎯 Consensus</div>
-        <div class="tool-value">{fi} {fm}</div>
-        <div class="tool-desc">Confidence: <b>{result['mtf_conf']:.1f}%</b></div></div>""",
-        unsafe_allow_html=True)
 
 
 with tab_fnd:
@@ -3499,13 +3645,6 @@ with tab_fnd:
                 st.markdown(f"""<div class="tool-card"><div class="tool-name">{cy}</div>
                     <div class="tool-value" style="color:{cl}; font-size:1.1rem;">{scr:+.0f}</div>
                     <div class="tool-desc">{stn}</div></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">🏦 Rates</div>', unsafe_allow_html=True)
-    bb, qq = parse_pair_currencies(sp_)
-    if bb and qq and bb in CENTRAL_BANK_RATES and qq in CENTRAL_BANK_RATES:
-        r1, r2, r3 = st.columns(3)
-        r1.metric(f"{bb} Rate", f"{CENTRAL_BANK_RATES[bb]:.2f}%")
-        r2.metric(f"{qq} Rate", f"{CENTRAL_BANK_RATES[qq]:.2f}%")
-        r3.metric("Diff", f"{_rd:+.2f}%")
     st.markdown('<div class="section-title">📊 Bond Yields</div>', unsafe_allow_html=True)
     _bd = get_bond_yields()
     if _bd["us10y"] is not None:
@@ -3513,8 +3652,7 @@ with tab_fnd:
         b1.metric("US10Y", f"{_bd['us10y']:.2f}%", delta=f"{_bd['us10y_change']:+.2f}")
         b2.metric("US5Y", f"{_bd['us5y']:.2f}%" if _bd['us5y'] else "N/A")
         b3.metric("US30Y", f"{_bd['us30y']:.2f}%" if _bd['us30y'] else "N/A")
-        b4.metric("Curve", f"{_bd['curve_10y_5y']:+.2f}%" if _bd['curve_10y_5y'] else "N/A",
-                  help=_bd["curve_state"])
+        b4.metric("Curve", f"{_bd['curve_10y_5y']:+.2f}%" if _bd['curve_10y_5y'] else "N/A")
     st.markdown('<div class="section-title">🌊 Risk (VIX)</div>', unsafe_allow_html=True)
     if _rsk and _rsk.get("vix") is not None:
         r1, r2, r3, r4 = st.columns(4)
@@ -3522,14 +3660,6 @@ with tab_fnd:
         r2.metric("20-avg", f"{_rsk.get('vix_avg', 0):.2f}")
         r3.metric("Change", f"{_rsk.get('vix_change', 0):+.2f}%")
         r4.metric("State", _rsk["vix_state"])
-    st.markdown('<div class="section-title">👥 Sentiment</div>', unsafe_allow_html=True)
-    _st = estimate_retail_sentiment(df, profile_for(sp_))
-    if _st:
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Long %", f"{_st['long_pct']:.0f}%")
-        s2.metric("Short %", f"{_st['short_pct']:.0f}%")
-        s3.metric("Bias", _st["bias"])
-        s4.metric("Contrarian", _st["contrarian"])
 
 
 with tab_prt:
@@ -3548,8 +3678,7 @@ with tab_prt:
                         except Exception: pass
                 st.success("✅ تم التحديث"); st.rerun()
         with uc2:
-            st.caption("💡 حدّث حالة كل صفقة (ICT + Indicators + Reversal)")
-
+            st.caption("💡 حدّث حالة كل صفقة (ICT + Indicators + Flip + Reversal)")
         pnl = calculate_portfolio_pnl()
         pm1, pm2, pm3, pm4, pm5 = st.columns(5)
         pm1.metric("Positions", pnl["total_positions"])
@@ -3559,7 +3688,6 @@ with tab_prt:
                    delta_color="normal" if pnl["total_r"] >= 0 else "inverse")
         pm4.metric("✅", pnl["winners"])
         pm5.metric("❌", pnl["losers"])
-
         for it in pnl["detailed"]:
             p = it["pos"]; pd_ = it["pnl"]
             m = p.get("_monitor")
@@ -3617,6 +3745,20 @@ with tab_prt:
                         <span style="color:#f57a7a; font-size:0.82rem;">
                         ⚠️ {', '.join(m['reversal_signals'])}</span></div>""",
                         unsafe_allow_html=True)
+                flip_i = m.get("flip_info")
+                if flip_i and flip_i.get("flip_signal"):
+                    fi_color = ("#f57a7a" if flip_i["status"] == "STRONG_FLIP" else "#f5c87a")
+                    st.markdown(f"""<div style="margin:6px 0; padding:10px 14px;
+                        background:rgba(245,122,122,0.10); border-radius:10px;
+                        border:1px solid {fi_color}44;">
+                        <span style="color:{fi_color}; font-weight:700; font-size:0.9rem;">
+                            🔀 انعكاس محتمل إلى {flip_i['flip_signal']} 
+                            ({flip_i['confidence']:.0f}%)
+                        </span>
+                        <div style="color:#a0aab8; font-size:0.8rem; margin-top:4px;">
+                            {' · '.join([t['icon'] + ' ' + t['name'] for t in flip_i['triggers'][:3]])}
+                        </div>
+                    </div>""", unsafe_allow_html=True)
                 act1, act2, act3, act4, act5 = st.columns([1, 1, 1, 1, 1])
                 with act1:
                     sug = m.get("suggested_sl")
@@ -3639,7 +3781,6 @@ with tab_prt:
                     if st.button("🗑️", width="stretch", key=f"del_{p['id']}"):
                         close_open_position(p["id"]); st.rerun()
                 st.markdown("<hr style='margin:14px 0; opacity:0.3;'>", unsafe_allow_html=True)
-
         st.markdown('<div class="section-title">🌍 Exposure</div>', unsafe_allow_html=True)
         exp = get_portfolio_exposure()
         if exp:
@@ -3654,24 +3795,6 @@ with tab_prt:
                         <div class="tool-value" style="color:{cl}; font-size:1.1rem;">{n:+.1f}</div>
                         <div class="tool-desc">{sn} · {ex['count']}</div></div>""",
                         unsafe_allow_html=True)
-
-        st.markdown('<div class="section-title">🔗 Correlation</div>', unsafe_allow_html=True)
-        us = list({p["symbol"] for p in ops})
-        if len(us) >= 2:
-            try:
-                m_, ss = build_correlation_matrix(tuple(us))
-                pn_ = [next((p["pair"] for p in ops if p["symbol"] == s), s) for s in ss]
-                fc = go.Figure(data=go.Heatmap(z=m_, x=pn_, y=pn_,
-                    colorscale=[[0, "#f57a7a"], [0.5, "#0d1017"], [1, "#7cd4a0"]],
-                    zmid=0, zmin=-1, zmax=1, text=np.round(m_, 2),
-                    texttemplate="%{text}", textfont={"size": 12, "color": "white"},
-                    colorbar=dict(title="Corr")))
-                fc.update_layout(height=400, template="plotly_dark",
-                    paper_bgcolor="#0a0d13", plot_bgcolor="#0a0d13",
-                    font=dict(family="Inter", color="#c8d2e8"),
-                    margin=dict(l=20, r=20, t=20, b=20))
-                st.plotly_chart(fc, width="stretch")
-            except Exception as e: st.warning(f"Corr fail: {e}")
     st.markdown("---")
     if st.button("🗑️ Clear All Positions", width="stretch", key="clr_pos"):
         st.session_state.open_positions = []; st.rerun()
@@ -3693,9 +3816,8 @@ with tab_ml:
         else:
             nt = 0
             st.warning("⚠️ اذهب إلى Backtest tab أولاً.")
-        st.markdown("**⚙️ Tuning**")
         tc1, tc2, tc3 = st.columns(3)
-        with tc1: ut = st.checkbox("🎯 تفعيل Tuning", value=False, key="ut")
+        with tc1: ut = st.checkbox("🎯 Tuning", value=False, key="ut")
         with tc2: tm = st.selectbox("طريقة", ["randomized","grid"], index=0, key="tm", disabled=not ut)
         with tc3: ti = st.number_input("محاولات", 5, 100, 20, 5, key="ti", disabled=not ut or tm == "grid")
         tr1, tr2 = st.columns(2)
@@ -3718,11 +3840,9 @@ with tab_ml:
                             st.session_state.ml_model = mp; st.rerun()
         mp = st.session_state.get("ml_model")
         if mp:
-            st.markdown('<div class="section-title">🏆 Model Comparison</div>', unsafe_allow_html=True)
             rows = []
             for name, d in mp.get("all_models", {}).items():
-                if d.get("error"):
-                    rows.append({"Model": name, "AUC": "❌", "Acc": "-"})
+                if d.get("error"): rows.append({"Model": name, "AUC": "❌", "Acc": "-"})
                 else:
                     bg = "🏆" if name == mp["model_name"] else ""
                     rows.append({"Model": f"{name} {bg}", "AUC": f"{d['auc']:.3f}",
@@ -3734,18 +3854,6 @@ with tab_ml:
             pm3.metric("Accuracy", f"{mp['accuracy']*100:.1f}%")
             pm4.metric("F1", f"{mp['f1']:.3f}")
             pm5.metric("Samples", f"{mp['n_total']}")
-            st.markdown('<div class="section-title">⭐ Importance</div>', unsafe_allow_html=True)
-            imp = mp["importance"]; coefs = mp["coefficients"]
-            topf = list(imp.keys())[:15]
-            fi_ = go.Figure(data=go.Bar(
-                x=[imp[n] for n in topf], y=topf, orientation="h",
-                marker=dict(color=["#7cd4a0" if coefs.get(n, 0) > 0 else "#f57a7a" for n in topf])))
-            fi_.update_layout(height=500, template="plotly_dark",
-                paper_bgcolor="#0a0d13", plot_bgcolor="#0a0d13",
-                font=dict(family="Inter", color="#c8d2e2"),
-                margin=dict(l=20, r=20, t=20, b=20),
-                yaxis=dict(autorange="reversed"))
-            st.plotly_chart(fi_, width="stretch")
 
 
 with tab_flt:
@@ -3781,7 +3889,7 @@ with tab_cht:
     if lv and lv.get("sl_level_price"):
         fig.add_hline(y=lv["sl_level_price"], row=1, col=1, line_dash="dash",
                       line_color="#f5c87a", opacity=0.8,
-                      annotation_text=f"SL Level: {lv['sources']['sl']}",
+                      annotation_text=f"SL: {lv['sources']['sl']}",
                       annotation_position="left")
     if lv:
         for k, cl, lb in [("stop_loss","#f57a7a","SL"), ("target1","#7cd4a0","TP1"),
@@ -3791,18 +3899,10 @@ with tab_cht:
                           annotation_position="right")
     fig.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI",
                              line=dict(color="#7cd4a0")), row=2, col=1)
-    _pr = profile_for(sp_)
-    fig.add_hline(y=_pr["rsi_ob"], row=2, col=1, line_dash="dash",
-                  line_color="#f57a7a", opacity=0.5)
-    fig.add_hline(y=_pr["rsi_os"], row=2, col=1, line_dash="dash",
-                  line_color="#7cd4a0", opacity=0.5)
     fig.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD",
                              line=dict(color="#7cd4a0")), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Sig",
                              line=dict(color="#f5c87a")), row=3, col=1)
-    colors = ["#7cd4a0" if v >= 0 else "#f57a7a" for v in df["macd_histogram"].fillna(0)]
-    fig.add_trace(go.Bar(x=df.index, y=df["macd_histogram"], name="Hist",
-                          marker_color=colors), row=3, col=1)
     fig.update_layout(height=850, template="plotly_dark",
         xaxis_rangeslider_visible=False,
         paper_bgcolor="#0a0d13", plot_bgcolor="#0a0d13",
@@ -3813,16 +3913,15 @@ with tab_cht:
 
 
 with tab_cal:
-    st.markdown('<div class="section-title">📅 Economic Calendar</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📅 Calendar</div>', unsafe_allow_html=True)
     if st.button("🔄 Update Calendar", width="stretch"):
         st.session_state.economic_events = get_fmp_economic_calendar()
     if st.session_state.economic_events:
         st.caption(event_risk_message(st.session_state.economic_events, sp_))
         rows = [{"Country": e.get("country",""), "Event": e.get("event",""),
-                 "Impact": e.get("impact",""), "Date": e.get("date",""),
-                 "Time": e.get("time","")} for e in st.session_state.economic_events[:20]]
+                 "Impact": e.get("impact",""), "Date": e.get("date","")}
+                for e in st.session_state.economic_events[:20]]
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    else: st.info("اضغط Update.")
 
 
 with tab_jrn:
@@ -3867,13 +3966,8 @@ with tab_bt:
             b3.metric("Total R", f"{bt['total_R']:.2f}")
             b4.metric("Expectancy", f"{bt['expectancy']:.3f}R")
             b5.metric("PF", f"{bt['profit_factor']:.2f}")
-            b6, b7, b8 = st.columns(3)
-            b6.metric("Max DD", f"{bt['max_drawdown']:.2f}R")
-            b7.metric("Sharpe", f"{bt['sharpe']:.2f}")
-            b8.metric("Avg R", f"{bt['avg_r']:.3f}")
             mc = bt.get("monte_carlo")
             if mc:
-                st.markdown("**🎲 Monte Carlo**")
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Mean", f"{mc['mean_final']:.2f}R")
                 m2.metric("Median", f"{mc['median_final']:.2f}R")
@@ -3883,6 +3977,6 @@ with tab_bt:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Nearest Level SL · ICT Monitor · Hyper-Tuned ML
+    Nearest Level SL · Flip Detection · Live Monitor · Hyper-Tuned ML
 </div>
 """, unsafe_allow_html=True)
