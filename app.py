@@ -1,13 +1,13 @@
 # ============================================================
-# BLACK PYRAMID v2009.6 — ENTRY CONFIRMATION EDITION
+# BLACK PYRAMID v2009.7 — CONFLICT-AWARE EDITION
 # Institutional Analysis Terminal
 #
-# v2009.6 CHANGELOG:
-#  - NEW: Entry Confirmation System (10 checks)
-#  - Verdict: ENTER_NOW / WAIT_RETRACE / WAIT_CLOSE / NO_ENTRY
-#  - Shown in main page + All Signals table
+# v2009.7 CHANGELOG:
+#  - Enhanced Flip Warning Banner (Conflict Detection)
+#  - Trade Plan Invalidation Warning
+#  - Signal Card Conflict Border
+#  - Entry Confirmation adjusted with Flip penalty
 #  - Static SL, no trailing, analysis only
-#  - Removed: Portfolio Action, Position Size, Management
 # ============================================================
 
 import os
@@ -59,7 +59,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2009.6-EntryConfirm"
+APP_VERSION = "v2009.7-ConflictAware"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -100,6 +100,11 @@ TUNING_N_JOBS = -1
 SL_MIN_DIST_ATR = 0.25
 SL_MAX_DIST_ATR = 1.50
 SL_BUFFER_ATR = 0.20
+
+# Flip penalties for Entry Confirmation
+FLIP_PENALTY_STRONG = 50
+FLIP_PENALTY_POSSIBLE = 30
+FLIP_PENALTY_WEAK = 15
 
 ML_FEATURE_NAMES = [
     "structure", "trend", "momentum", "volume", "context",
@@ -2066,25 +2071,11 @@ def detect_signal_flip(df, current_price, original_signal, profile):
 
 
 # ============================================================
-# ENTRY CONFIRMATION SYSTEM
+# ENTRY CONFIRMATION (with Flip Penalty)
 # ============================================================
 
-def entry_confirmation_score(df, direction, levels, pair_name):
-    """
-    10 فحوصات لتأكيد الدخول:
-    1. شمعة مؤكدة (15)
-    2. الهيكل يدعم (15)
-    3. فوليوم (10)
-    4. زخم RSI + MACD (10)
-    5. ليس Overextended (10)
-    6. جلسة نشطة (5)
-    7. لا Divergence ضد (10)
-    8. VWAP متوافق (5)
-    9. BOS/MSS حديث (10)
-    10. منطقة دخول ممتازة (10)
-    """
+def entry_confirmation_score(df, direction, levels, pair_name, flip_result=None):
     if df is None or len(df) < 50: return None
-
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else last
     atr = safe_float(last.get("atr"), 0)
@@ -2093,7 +2084,7 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     checks = []
     total = 0
 
-    # 1. Candle Close Confirmation
+    # 1. Candle
     if direction == "BUY":
         candle_ok = float(last["close"]) > float(last["open"]) and \
                     float(last["close"]) > float(prev["close"])
@@ -2101,18 +2092,15 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         candle_ok = float(last["close"]) < float(last["open"]) and \
                     float(last["close"]) < float(prev["close"])
     if candle_ok:
-        checks.append({"name": "شمعة مؤكدة", "pass": True, "score": 15, "icon": "🕯️"})
-        total += 15
+        checks.append({"name": "شمعة مؤكدة", "pass": True, "score": 15, "icon": "🕯️"}); total += 15
     else:
         checks.append({"name": "شمعة غير مؤكدة", "pass": False, "score": 0, "icon": "🕯️"})
 
-    # 2. Structure Support
+    # 2. Structure
     s_ = structure_state(df)
-    struct_ok = (direction == "BUY" and s_["bullish"]) or \
-                (direction == "SELL" and s_["bearish"])
+    struct_ok = (direction == "BUY" and s_["bullish"]) or (direction == "SELL" and s_["bearish"])
     if struct_ok:
-        checks.append({"name": "الهيكل يدعم", "pass": True, "score": 15, "icon": "🏗️"})
-        total += 15
+        checks.append({"name": "الهيكل يدعم", "pass": True, "score": 15, "icon": "🏗️"}); total += 15
     else:
         checks.append({"name": "الهيكل ضد", "pass": False, "score": 0, "icon": "🏗️"})
 
@@ -2120,11 +2108,9 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     vol_avg = df["volume"].rolling(20).mean().iloc[-1]
     vol_now = safe_float(last.get("volume"), 0)
     if vol_avg > 0 and vol_now > vol_avg * 1.15:
-        checks.append({"name": "فوليوم قوي", "pass": True, "score": 10, "icon": "📊"})
-        total += 10
+        checks.append({"name": "فوليوم قوي", "pass": True, "score": 10, "icon": "📊"}); total += 10
     elif vol_avg > 0 and vol_now > vol_avg:
-        checks.append({"name": "فوليوم عادي", "pass": True, "score": 5, "icon": "📊"})
-        total += 5
+        checks.append({"name": "فوليوم عادي", "pass": True, "score": 5, "icon": "📊"}); total += 5
     else:
         checks.append({"name": "فوليوم ضعيف", "pass": False, "score": 0, "icon": "📊"})
 
@@ -2132,14 +2118,11 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     rsi = safe_float(last.get("rsi"), 50)
     macd_ok = (direction == "BUY" and last["macd_histogram"] > 0) or \
               (direction == "SELL" and last["macd_histogram"] < 0)
-    rsi_ok = (direction == "BUY" and 50 <= rsi <= 72) or \
-             (direction == "SELL" and 28 <= rsi <= 50)
+    rsi_ok = (direction == "BUY" and 50 <= rsi <= 72) or (direction == "SELL" and 28 <= rsi <= 50)
     if macd_ok and rsi_ok:
-        checks.append({"name": "زخم متوافق", "pass": True, "score": 10, "icon": "⚡"})
-        total += 10
+        checks.append({"name": "زخم متوافق", "pass": True, "score": 10, "icon": "⚡"}); total += 10
     elif macd_ok or rsi_ok:
-        checks.append({"name": "زخم جزئي", "pass": True, "score": 5, "icon": "⚡"})
-        total += 5
+        checks.append({"name": "زخم جزئي", "pass": True, "score": 5, "icon": "⚡"}); total += 5
     else:
         checks.append({"name": "زخم ضد", "pass": False, "score": 0, "icon": "⚡"})
 
@@ -2148,44 +2131,38 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     if ema20 > 0:
         dist = abs(float(last["close"]) - ema20) / atr
         if dist < 1.5:
-            checks.append({"name": "قريب من EMA20", "pass": True, "score": 10, "icon": "📍"})
-            total += 10
+            checks.append({"name": "قريب من EMA20", "pass": True, "score": 10, "icon": "📍"}); total += 10
         elif dist < 2.5:
-            checks.append({"name": "متوسط البعد", "pass": True, "score": 5, "icon": "📍"})
-            total += 5
+            checks.append({"name": "متوسط البعد", "pass": True, "score": 5, "icon": "📍"}); total += 5
         else:
             checks.append({"name": "Overextended", "pass": False, "score": 0, "icon": "📍"})
     else:
         checks.append({"name": "EMA20 غير متاح", "pass": False, "score": 0, "icon": "📍"})
 
-    # 6. Session Active
+    # 6. Session
     h = datetime.now(timezone.utc).hour
     asset = asset_type_from_name(pair_name)
     active = (7 <= h <= 21) or asset == "crypto"
     if active:
-        checks.append({"name": "جلسة نشطة", "pass": True, "score": 5, "icon": "🕐"})
-        total += 5
+        checks.append({"name": "جلسة نشطة", "pass": True, "score": 5, "icon": "🕐"}); total += 5
     else:
         checks.append({"name": "خارج الجلسات", "pass": False, "score": 0, "icon": "🕐"})
 
-    # 7. No Divergence Against
+    # 7. Divergence
     dv = detect_divergence(df)
-    div_ok = (direction == "BUY" and dv != "BEARISH") or \
-             (direction == "SELL" and dv != "BULLISH")
+    div_ok = (direction == "BUY" and dv != "BEARISH") or (direction == "SELL" and dv != "BULLISH")
     if div_ok:
-        checks.append({"name": "لا Divergence ضد", "pass": True, "score": 10, "icon": "🔄"})
-        total += 10
+        checks.append({"name": "لا Divergence ضد", "pass": True, "score": 10, "icon": "🔄"}); total += 10
     else:
         checks.append({"name": "Divergence ضد", "pass": False, "score": 0, "icon": "🔄"})
 
-    # 8. VWAP position
+    # 8. VWAP
     vwap = safe_float(last.get("vwap"), 0)
     if vwap > 0:
         vwap_ok = (direction == "BUY" and last["close"] > vwap) or \
                   (direction == "SELL" and last["close"] < vwap)
         if vwap_ok:
-            checks.append({"name": "VWAP متوافق", "pass": True, "score": 5, "icon": "📉"})
-            total += 5
+            checks.append({"name": "VWAP متوافق", "pass": True, "score": 5, "icon": "📉"}); total += 5
         else:
             checks.append({"name": "VWAP ضد", "pass": False, "score": 0, "icon": "📉"})
     else:
@@ -2200,12 +2177,11 @@ def entry_confirmation_score(df, direction, levels, pair_name):
             bos_ok = bool(df["bos_bearish"].iloc[-5:].any())
     except Exception: pass
     if bos_ok:
-        checks.append({"name": "BOS حديث", "pass": True, "score": 10, "icon": "🔓"})
-        total += 10
+        checks.append({"name": "BOS حديث", "pass": True, "score": 10, "icon": "🔓"}); total += 10
     else:
         checks.append({"name": "لا BOS حديث", "pass": False, "score": 0, "icon": "🔓"})
 
-    # 10. Entry Zone Quality
+    # 10. Entry Zone
     zone_ok = False
     if levels:
         e = safe_float(levels.get("entry"), 0)
@@ -2216,23 +2192,56 @@ def entry_confirmation_score(df, direction, levels, pair_name):
             if total_move > 0 and (current_dist / total_move) < 0.30:
                 zone_ok = True
     if zone_ok:
-        checks.append({"name": "منطقة دخول ممتازة", "pass": True, "score": 10, "icon": "🎯"})
-        total += 10
+        checks.append({"name": "منطقة دخول ممتازة", "pass": True, "score": 10, "icon": "🎯"}); total += 10
     else:
-        checks.append({"name": "منطقة دخول متوسطة", "pass": True, "score": 3, "icon": "🎯"})
-        total += 3
+        checks.append({"name": "منطقة دخول متوسطة", "pass": True, "score": 3, "icon": "🎯"}); total += 3
 
-    # Verdict
-    if total >= 80:
+    # ============ FLIP ADJUSTMENT ============
+    flip_penalty = 0
+    flip_warning = ""
+    flip_severity = "NONE"
+
+    if flip_result and flip_result.get("flip_signal"):
+        flip_sig = flip_result["flip_signal"]
+        flip_status = flip_result.get("status", "NONE")
+        flip_conf = flip_result.get("confidence", 0)
+
+        if flip_sig != direction:
+            if flip_status == "STRONG_FLIP":
+                flip_penalty = FLIP_PENALTY_STRONG
+                flip_severity = "CRITICAL"
+                flip_warning = (f"🚨 **تحذير حرج**: Flip قوي إلى {flip_sig} "
+                                f"({flip_conf:.0f}%) ضد {direction} — خصم {FLIP_PENALTY_STRONG} نقطة")
+            elif flip_status == "POSSIBLE_FLIP":
+                flip_penalty = FLIP_PENALTY_POSSIBLE
+                flip_severity = "HIGH"
+                flip_warning = (f"⚠️ **تحذير**: احتمال Flip إلى {flip_sig} "
+                                f"({flip_conf:.0f}%) ضد {direction} — خصم {FLIP_PENALTY_POSSIBLE} نقطة")
+            elif flip_status == "WEAK_FLIP":
+                flip_penalty = FLIP_PENALTY_WEAK
+                flip_severity = "MEDIUM"
+                flip_warning = (f"💡 مؤشرات Flip أولية إلى {flip_sig} "
+                                f"({flip_conf:.0f}%) — خصم {FLIP_PENALTY_WEAK} نقطة")
+        else:
+            flip_warning = f"✅ Flip يدعم {direction}"
+
+    final_total = max(0, min(total - flip_penalty, 100))
+
+    if flip_severity == "CRITICAL":
+        verdict = "NO_ENTRY"; vtext = "🚨 لا تدخل — Flip قوي ضدك"; vcolor = "#f57a7a"
+    elif final_total >= 80:
         verdict = "ENTER_NOW"; vtext = "🟢 ادخل الآن"; vcolor = "#7cd4a0"
-    elif total >= 60:
+    elif final_total >= 60:
         verdict = "WAIT_RETRACE"; vtext = "🟡 انتظر ارتداد"; vcolor = "#f5c87a"
-    elif total >= 40:
+    elif final_total >= 40:
         verdict = "WAIT_CLOSE"; vtext = "🟠 انتظر إغلاق الشمعة"; vcolor = "#f5a87a"
     else:
         verdict = "NO_ENTRY"; vtext = "🔴 لا تدخل الآن"; vcolor = "#f57a7a"
 
-    return {"score": total, "verdict": verdict, "verdict_text": vtext,
+    return {"score": final_total, "raw_score": total,
+            "flip_penalty": flip_penalty, "flip_warning": flip_warning,
+            "flip_severity": flip_severity,
+            "verdict": verdict, "verdict_text": vtext,
             "verdict_color": vcolor, "checks": checks}
 
 
@@ -2525,6 +2534,7 @@ def get_all_signals_parallel():
             flip_sig = "—"; flip_conf = 0; flip_status = "NONE"; flip_icon = ""
             flip_sl = "—"; flip_tp1 = "—"; flip_tp2 = "—"; flip_tp3 = "—"
             flip_rr1 = "—"; flip_sl_src = "—"
+            fl = None
             ec_score = 0; ec_verdict = "—"; ec_color = "#6b7488"
 
             if sig_ in ("BUY", "SELL"):
@@ -2549,11 +2559,11 @@ def get_all_signals_parallel():
                                 flip_sl_src = nl.get("sources", {}).get("sl", "—")
                 except Exception: pass
 
-                # Entry Confirmation
                 try:
                     df_feat = r.get("df")
                     if df_feat is not None and lv:
-                        ec = entry_confirmation_score(df_feat, sig_, lv, pn)
+                        ec = entry_confirmation_score(
+                            df_feat, sig_, lv, pn, flip_result=fl)
                         if ec:
                             ec_score = ec["score"]
                             ec_verdict = ec["verdict_text"]
@@ -2610,7 +2620,6 @@ def get_all_signals_parallel():
         fp = {"STRONG_FLIP": 0, "POSSIBLE_FLIP": 1, "WEAK_FLIP": 2, "NONE": 3}.get(status, 3)
         sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
         flip_val = _safe_flip_num(row.get("Flip%", 0))
-        # Sort by entry confirmation first (higher = better)
         return (-ec_score, fp, sp_, -flip_val)
     out["_sort"] = out.apply(sort_key, axis=1)
     out = out.sort_values("_sort").drop(columns=["_sort", "_flip_status", "_ec_score", "_ec_color"])
@@ -2793,7 +2802,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">ENTRY CONFIRM</span>
+                <span class="hero-badge-balanced">CONFLICT-AWARE</span>
             </div>
         </div>""", unsafe_allow_html=True)
     else:
@@ -2803,7 +2812,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">ENTRY CONFIRM</span>
+                <span class="hero-badge-balanced">CONFLICT-AWARE</span>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -2903,10 +2912,10 @@ with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
-    st.markdown("**🎯 Entry Confirm**")
-    st.caption("• 10 checks")
-    st.caption("• Verdict: ENTER/WAIT/NO")
-    st.caption("• SL: Static")
+    st.markdown("**🎯 Entry + Conflict**")
+    st.caption("• 10 entry checks")
+    st.caption("• Flip penalty: -50/-30/-15")
+    st.caption("• Static SL")
     st.markdown("---")
     st.markdown("**🧠 ML Model**")
     if not SKLEARN_AVAILABLE: st.caption("⚠️ sklearn غير مثبت")
@@ -3009,32 +3018,161 @@ if sig in ("BUY", "SELL"):
 entry_confirm = None
 if sig in ("BUY", "SELL") and lv:
     try:
-        entry_confirm = entry_confirmation_score(df, sig, lv, sp_)
+        entry_confirm = entry_confirmation_score(
+            df, sig, lv, sp_, flip_result=flip_result)
     except Exception:
         entry_confirm = None
 
 mo_, mm_ = is_market_open(sp_)
 if not mo_: st.error(f"🚫 **{mm_}**")
 
-if flip_result and flip_result.get("flip_signal"):
+# ============================================
+# FLIP WARNING BANNER (Enhanced)
+# ============================================
+if flip_result and flip_result.get("flip_signal") and sig in ("BUY", "SELL"):
     flip_sig = flip_result["flip_signal"]
     flip_conf = flip_result["confidence"]
     flip_status = flip_result["status"]
-    if flip_status == "STRONG_FLIP":
-        st.error(f"🚨 **FLIP ALERT** — إشارة قوية للانعكاس إلى **{flip_sig}** "
-                 f"(ثقة {flip_conf:.0f}%) · {len(flip_result['triggers'])} مؤشر")
-    elif flip_status == "POSSIBLE_FLIP":
-        st.warning(f"⚠️ **Possible Flip** — قد يتحول إلى **{flip_sig}** "
-                   f"(ثقة {flip_conf:.0f}%) · {len(flip_result['triggers'])} مؤشر")
+    triggers_count = len(flip_result["triggers"])
+
+    is_conflict = (flip_sig != sig)
+
+    if is_conflict:
+        if flip_status == "STRONG_FLIP":
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg, rgba(245,122,122,0.18), rgba(245,122,122,0.08));
+                        padding:24px 30px; border-radius:18px;
+                        border:3px solid #f57a7a;
+                        box-shadow:0 0 40px rgba(245,122,122,0.35);
+                        margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between;
+                            align-items:center; flex-wrap:wrap; gap:20px;">
+                    <div style="flex:1; min-width:280px;">
+                        <div style="color:#f57a7a; font-size:1.1rem; font-weight:700;
+                                    letter-spacing:2px; margin-bottom:6px;">
+                            🚨 CONFLICT DETECTED
+                        </div>
+                        <div style="color:#e8edf5; font-size:1.6rem; font-weight:800;
+                                    margin-bottom:8px;">
+                            الإشارة الأصلية <span style="color:#7cd4a0;">{sig}</span>
+                            ↔
+                            الانعكاس المحتمل <span style="color:#f57a7a;">{flip_sig}</span>
+                        </div>
+                        <div style="color:#a0aab8; font-size:0.95rem; line-height:1.6;">
+                            نظام الانعكاس يرصد إشارة قوية معاكسة بـ 
+                            <b style="color:#f57a7a;">{flip_conf:.0f}%</b> ثقة 
+                            من <b>{triggers_count}</b> مؤشر.
+                            <br>⚠️ <b>يُنصح بعدم الدخول في الإشارة الأصلية</b>
+                        </div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="color:#7d879c; font-size:0.7rem;
+                                    letter-spacing:1.5px;">FLIP CONFIDENCE</div>
+                        <div style="color:#f57a7a; font-size:3rem; font-weight:900;
+                                    line-height:1; margin-top:8px;">
+                            {flip_conf:.0f}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif flip_status == "POSSIBLE_FLIP":
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg, rgba(245,200,122,0.15), rgba(245,200,122,0.05));
+                        padding:20px 26px; border-radius:16px;
+                        border:2px solid #f5c87a;
+                        margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between;
+                            align-items:center; flex-wrap:wrap; gap:16px;">
+                    <div>
+                        <div style="color:#f5c87a; font-size:1rem; font-weight:700;
+                                    letter-spacing:2px;">
+                            ⚠️ POSSIBLE CONFLICT
+                        </div>
+                        <div style="color:#e8edf5; font-size:1.3rem; font-weight:700;
+                                    margin-top:6px;">
+                            إشارة معاكسة إلى <span style="color:#f5c87a;">{flip_sig}</span>
+                            بـ {flip_conf:.0f}% ثقة
+                        </div>
+                        <div style="color:#a0aab8; font-size:0.88rem; margin-top:6px;">
+                            {triggers_count} مؤشر يدعم الانعكاس — 
+                            <b>انتظر تأكيد أفضل قبل الدخول</b>
+                        </div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="color:#f5c87a; font-size:2.2rem; font-weight:800;">
+                            {flip_conf:.0f}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style="background:rgba(124,212,160,0.08);
+                        padding:14px 20px; border-radius:12px;
+                        border-left:4px solid #7cd4a0;
+                        margin-bottom:14px;">
+                <span style="color:#7cd4a0; font-weight:700;">
+                    💡 Flip Watch
+                </span>
+                <span style="color:#a0aab8; margin-left:10px;">
+                    مؤشرات أولية نحو <b>{flip_sig}</b> ({flip_conf:.0f}%) 
+                    من {triggers_count} مؤشر — راقب السعر
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.info(f"💡 **Flip Watch** — مؤشرات أولية نحو **{flip_sig}** "
-                f"(ثقة {flip_conf:.0f}%)")
+        st.markdown(f"""
+        <div style="background:rgba(124,212,160,0.10);
+                    padding:14px 20px; border-radius:12px;
+                    border-left:4px solid #7cd4a0;
+                    margin-bottom:14px;">
+            <span style="color:#7cd4a0; font-weight:700;">
+                ✅ Flip يدعم الإشارة
+            </span>
+            <span style="color:#a0aab8; margin-left:10px;">
+                اتجاه الانعكاس ({flip_sig}) متوافق مع {sig} 
+                — {triggers_count} مؤشر داعم
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 c_sig, c_stat = st.columns([1.6, 1])
 with c_sig:
     sc_ = ("#7cd4a0" if sig == "BUY"
            else "#f57a7a" if sig == "SELL" else "#f5c87a")
+
+    # ---- Conflict badge calculation ----
+    conflict_badge_top = ""
+    card_border_color = "rgba(255,255,255,0.06)"
+    card_glow = ""
+    if flip_result and flip_result.get("flip_signal") and sig in ("BUY", "SELL"):
+        flip_sig_top = flip_result["flip_signal"]
+        flip_status_top = flip_result.get("status", "NONE")
+        if flip_sig_top != sig:
+            if flip_status_top == "STRONG_FLIP":
+                card_border_color = "#f57a7a"
+                card_glow = "box-shadow: 0 0 30px rgba(245,122,122,0.4), 0 20px 50px rgba(0,0,0,0.6);"
+                conflict_badge_top = (
+                    '<div style="background:rgba(245,122,122,0.20); '
+                    'padding:8px 16px; border-radius:10px; margin-top:12px; '
+                    'border:1px solid rgba(245,122,122,0.4); display:inline-block;">'
+                    '<span style="color:#f57a7a; font-weight:800; font-size:0.9rem;">'
+                    '🚨 معرض للانعكاس — راجع Flip قبل الدخول</span></div>'
+                )
+            elif flip_status_top == "POSSIBLE_FLIP":
+                card_border_color = "#f5c87a"
+                card_glow = "box-shadow: 0 0 20px rgba(245,200,122,0.25), 0 20px 50px rgba(0,0,0,0.6);"
+                conflict_badge_top = (
+                    '<div style="background:rgba(245,200,122,0.15); '
+                    'padding:8px 16px; border-radius:10px; margin-top:12px; '
+                    'border:1px solid rgba(245,200,122,0.35); display:inline-block;">'
+                    '<span style="color:#f5c87a; font-weight:700; font-size:0.9rem;">'
+                    '⚠️ احتمال انعكاس — توخ الحذر</span></div>'
+                )
+
     ec_ = ("#7cd4a0" if result["execution_status"] == "EXECUTE"
            else "#f5c87a" if result["execution_status"] in ("WATCH","WAIT") else "#f57a7a")
     mlp_ = result.get("ml_probability")
@@ -3045,22 +3183,9 @@ with c_sig:
         mlb = f'<div class="signal-meta" style="margin-top:8px; color:{mc_};">🎓 ML Win: <b>{mlp_*100:.1f}%</b></div>'
     elif mls_ == "no_model":
         mlb = '<div class="signal-meta" style="margin-top:8px; color:#6b7488;">🎓 ML: Not trained</div>'
-    flip_badge = ""
-    if flip_result and flip_result.get("flip_signal"):
-        flip_sig_ = flip_result["flip_signal"]; flip_conf_ = flip_result["confidence"]
-        flip_status_ = flip_result["status"]
-        if flip_status_ == "STRONG_FLIP":
-            flip_badge = (f'<div style="margin-top:10px; padding:8px 14px; '
-                          f'background:rgba(245,122,122,0.12); border-radius:12px; '
-                          f'border:1px solid rgba(245,122,122,0.35); color:#f57a7a; '
-                          f'font-weight:700;">🚨 FLIP → {flip_sig_} ({flip_conf_:.0f}%)</div>')
-        elif flip_status_ == "POSSIBLE_FLIP":
-            flip_badge = (f'<div style="margin-top:10px; padding:8px 14px; '
-                          f'background:rgba(245,200,122,0.10); border-radius:12px; '
-                          f'border:1px solid rgba(245,200,122,0.35); color:#f5c87a; '
-                          f'font-weight:600;">⚠️ احتمالي → {flip_sig_} ({flip_conf_:.0f}%)</div>')
+
     st.markdown(f"""
-    <div class="signal-card">
+    <div class="signal-card" style="border:2px solid {card_border_color}; {card_glow}">
         <div class="signal-meta">BLACK PYRAMID · {sp_}</div>
         <div class="signal-value" style="color:{sc_};">{sig}</div>
         <div class="signal-conf">Confidence: <b>{conf:.1f}%</b></div>
@@ -3069,7 +3194,7 @@ with c_sig:
             Execution: <b style="color:{ec_};">{result['execution_status']}</b>
             &nbsp;·&nbsp; {result['execution_reason']}
         </div>
-        {flip_badge}
+        {conflict_badge_top}
         {mlb}
     </div>""", unsafe_allow_html=True)
 
@@ -3112,8 +3237,40 @@ if entry_confirm and sig in ("BUY", "SELL"):
     ec_text = entry_confirm["verdict_text"]
 
     st.markdown('<div class="section-title">🎯 تأكيد الدخول '
-                '<span>Entry Confirmation · 10 فحوصات</span></div>',
+                '<span>Entry Confirmation · 10 فحوصات + Flip Check</span></div>',
                 unsafe_allow_html=True)
+
+    # ---- FLIP WARNING ----
+    if entry_confirm.get("flip_severity") and entry_confirm["flip_severity"] != "NONE":
+        severity = entry_confirm["flip_severity"]
+        flip_warn = entry_confirm["flip_warning"]
+        if severity == "CRITICAL":
+            st.error(f"""
+            ╔══════════════════════════════════════════════╗
+            ║  🚨 تحذير حرج — لا تدخل!                   ║
+            ╚══════════════════════════════════════════════╝
+            {flip_warn}
+            """)
+        elif severity == "HIGH":
+            st.warning(f"⚠️ {flip_warn}")
+        elif severity == "MEDIUM":
+            st.info(f"💡 {flip_warn}")
+
+    # عرض السكورات الفعلية
+    raw = entry_confirm.get("raw_score", ec_score)
+    pen = entry_confirm.get("flip_penalty", 0)
+    if pen > 0:
+        st.markdown(f"""
+        <div style="background:rgba(255,255,255,0.03); padding:10px 16px;
+                    border-radius:10px; margin-bottom:12px;
+                    border-left:3px solid {ec_color};">
+            <span style="color:#7d879c; font-size:0.85rem;">
+                النتيجة الأولية: <b>{raw}</b> — 
+                خصم Flip: <b style="color:#f57a7a;">-{pen}</b> — 
+                النتيجة النهائية: <b style="color:{ec_color};">{ec_score}</b>
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown(f"""
     <div style="background:linear-gradient(145deg, #10141c, #0d1017);
@@ -3187,11 +3344,62 @@ if entry_confirm and sig in ("BUY", "SELL"):
 
 
 # ============================================================
-# TRADE PLAN
+# TRADE PLAN (with Invalidation Warning)
 # ============================================================
 
 if sig in ("BUY","SELL") and lv:
     src = lv.get("sources", {})
+
+    # ---- Trade Plan Invalidation Check ----
+    plan_invalidated = False
+    invalidation_reason = ""
+    if flip_result and flip_result.get("flip_signal"):
+        flip_sig_tp = flip_result["flip_signal"]
+        flip_status_tp = flip_result.get("status", "NONE")
+        flip_conf_tp = flip_result.get("confidence", 0)
+
+        if flip_sig_tp != sig:
+            if flip_status_tp == "STRONG_FLIP":
+                plan_invalidated = True
+                invalidation_reason = f"انعكاس قوي إلى {flip_sig_tp} ({flip_conf_tp:.0f}%)"
+            elif flip_status_tp == "POSSIBLE_FLIP":
+                plan_invalidated = True
+                invalidation_reason = f"انعكاس محتمل إلى {flip_sig_tp} ({flip_conf_tp:.0f}%)"
+            elif flip_status_tp == "WEAK_FLIP":
+                plan_invalidated = False
+                invalidation_reason = f"مؤشرات أولية نحو {flip_sig_tp}"
+
+    if plan_invalidated:
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg, rgba(245,122,122,0.20), rgba(245,122,122,0.10));
+                    padding:18px 24px; border-radius:14px;
+                    border:2px dashed #f57a7a;
+                    margin-bottom:16px;">
+            <div style="color:#f57a7a; font-size:1.15rem; font-weight:800;
+                        letter-spacing:1px;">
+                ⚠️ هذا الـ Trade Plan معرّض للإلغاء
+            </div>
+            <div style="color:#e8edf5; font-size:0.95rem; margin-top:8px;">
+                {invalidation_reason} — يُنصح بعدم الاعتماد على هذه المستويات
+                حتى يتضح اتجاه السوق
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif invalidation_reason:
+        st.markdown(f"""
+        <div style="background:rgba(245,200,122,0.10);
+                    padding:12px 18px; border-radius:12px;
+                    border-left:4px solid #f5c87a;
+                    margin-bottom:14px;">
+            <span style="color:#f5c87a; font-weight:600;">
+                💡 {invalidation_reason}
+            </span>
+            <span style="color:#a0aab8; margin-left:8px;">
+                — راجع الـ Trade Plan بحذر
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown('<div class="section-title">🎯 Trade Plan <span>أقرب نقطة مكتشفة · STATIC SL</span></div>',
                 unsafe_allow_html=True)
     l1, l2, l3, l4, l5 = st.columns(5)
@@ -3672,6 +3880,6 @@ with tab_bt:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Entry Confirmation · Flip Detection · Static SL · Analysis Only
+    Conflict-Aware · Entry Confirmation · Static SL · Analysis Only
 </div>
 """, unsafe_allow_html=True)
