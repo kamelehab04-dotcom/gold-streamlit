@@ -1,13 +1,13 @@
 # ============================================================
-# BLACK PYRAMID v2009.5 — SIGNAL INFO EDITION
+# BLACK PYRAMID v2009.6 — ENTRY CONFIRMATION EDITION
 # Institutional Analysis Terminal
 #
-# v2009.5 CHANGELOG:
-#  - REMOVED: Portfolio Action, Position Size, Management
-#  - REMOVED: Portfolio Tab, Sidebar Portfolio, Kill Switch
-#  - REMOVED: FLIP "open trade" button (display only)
-#  - STATIC SL: الستوب ثابت لا يتحرك
-#  - Pure Analysis Terminal: إشارات + معلومات فقط
+# v2009.6 CHANGELOG:
+#  - NEW: Entry Confirmation System (10 checks)
+#  - Verdict: ENTER_NOW / WAIT_RETRACE / WAIT_CLOSE / NO_ENTRY
+#  - Shown in main page + All Signals table
+#  - Static SL, no trailing, analysis only
+#  - Removed: Portfolio Action, Position Size, Management
 # ============================================================
 
 import os
@@ -59,7 +59,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2009.5-SignalInfo"
+APP_VERSION = "v2009.6-EntryConfirm"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -2065,6 +2065,177 @@ def detect_signal_flip(df, current_price, original_signal, profile):
             "message": msg, "new_levels": new_levels}
 
 
+# ============================================================
+# ENTRY CONFIRMATION SYSTEM
+# ============================================================
+
+def entry_confirmation_score(df, direction, levels, pair_name):
+    """
+    10 فحوصات لتأكيد الدخول:
+    1. شمعة مؤكدة (15)
+    2. الهيكل يدعم (15)
+    3. فوليوم (10)
+    4. زخم RSI + MACD (10)
+    5. ليس Overextended (10)
+    6. جلسة نشطة (5)
+    7. لا Divergence ضد (10)
+    8. VWAP متوافق (5)
+    9. BOS/MSS حديث (10)
+    10. منطقة دخول ممتازة (10)
+    """
+    if df is None or len(df) < 50: return None
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else last
+    atr = safe_float(last.get("atr"), 0)
+    if atr <= 0: return None
+
+    checks = []
+    total = 0
+
+    # 1. Candle Close Confirmation
+    if direction == "BUY":
+        candle_ok = float(last["close"]) > float(last["open"]) and \
+                    float(last["close"]) > float(prev["close"])
+    else:
+        candle_ok = float(last["close"]) < float(last["open"]) and \
+                    float(last["close"]) < float(prev["close"])
+    if candle_ok:
+        checks.append({"name": "شمعة مؤكدة", "pass": True, "score": 15, "icon": "🕯️"})
+        total += 15
+    else:
+        checks.append({"name": "شمعة غير مؤكدة", "pass": False, "score": 0, "icon": "🕯️"})
+
+    # 2. Structure Support
+    s_ = structure_state(df)
+    struct_ok = (direction == "BUY" and s_["bullish"]) or \
+                (direction == "SELL" and s_["bearish"])
+    if struct_ok:
+        checks.append({"name": "الهيكل يدعم", "pass": True, "score": 15, "icon": "🏗️"})
+        total += 15
+    else:
+        checks.append({"name": "الهيكل ضد", "pass": False, "score": 0, "icon": "🏗️"})
+
+    # 3. Volume
+    vol_avg = df["volume"].rolling(20).mean().iloc[-1]
+    vol_now = safe_float(last.get("volume"), 0)
+    if vol_avg > 0 and vol_now > vol_avg * 1.15:
+        checks.append({"name": "فوليوم قوي", "pass": True, "score": 10, "icon": "📊"})
+        total += 10
+    elif vol_avg > 0 and vol_now > vol_avg:
+        checks.append({"name": "فوليوم عادي", "pass": True, "score": 5, "icon": "📊"})
+        total += 5
+    else:
+        checks.append({"name": "فوليوم ضعيف", "pass": False, "score": 0, "icon": "📊"})
+
+    # 4. Momentum
+    rsi = safe_float(last.get("rsi"), 50)
+    macd_ok = (direction == "BUY" and last["macd_histogram"] > 0) or \
+              (direction == "SELL" and last["macd_histogram"] < 0)
+    rsi_ok = (direction == "BUY" and 50 <= rsi <= 72) or \
+             (direction == "SELL" and 28 <= rsi <= 50)
+    if macd_ok and rsi_ok:
+        checks.append({"name": "زخم متوافق", "pass": True, "score": 10, "icon": "⚡"})
+        total += 10
+    elif macd_ok or rsi_ok:
+        checks.append({"name": "زخم جزئي", "pass": True, "score": 5, "icon": "⚡"})
+        total += 5
+    else:
+        checks.append({"name": "زخم ضد", "pass": False, "score": 0, "icon": "⚡"})
+
+    # 5. Not Overextended
+    ema20 = safe_float(last.get("ema20"), 0)
+    if ema20 > 0:
+        dist = abs(float(last["close"]) - ema20) / atr
+        if dist < 1.5:
+            checks.append({"name": "قريب من EMA20", "pass": True, "score": 10, "icon": "📍"})
+            total += 10
+        elif dist < 2.5:
+            checks.append({"name": "متوسط البعد", "pass": True, "score": 5, "icon": "📍"})
+            total += 5
+        else:
+            checks.append({"name": "Overextended", "pass": False, "score": 0, "icon": "📍"})
+    else:
+        checks.append({"name": "EMA20 غير متاح", "pass": False, "score": 0, "icon": "📍"})
+
+    # 6. Session Active
+    h = datetime.now(timezone.utc).hour
+    asset = asset_type_from_name(pair_name)
+    active = (7 <= h <= 21) or asset == "crypto"
+    if active:
+        checks.append({"name": "جلسة نشطة", "pass": True, "score": 5, "icon": "🕐"})
+        total += 5
+    else:
+        checks.append({"name": "خارج الجلسات", "pass": False, "score": 0, "icon": "🕐"})
+
+    # 7. No Divergence Against
+    dv = detect_divergence(df)
+    div_ok = (direction == "BUY" and dv != "BEARISH") or \
+             (direction == "SELL" and dv != "BULLISH")
+    if div_ok:
+        checks.append({"name": "لا Divergence ضد", "pass": True, "score": 10, "icon": "🔄"})
+        total += 10
+    else:
+        checks.append({"name": "Divergence ضد", "pass": False, "score": 0, "icon": "🔄"})
+
+    # 8. VWAP position
+    vwap = safe_float(last.get("vwap"), 0)
+    if vwap > 0:
+        vwap_ok = (direction == "BUY" and last["close"] > vwap) or \
+                  (direction == "SELL" and last["close"] < vwap)
+        if vwap_ok:
+            checks.append({"name": "VWAP متوافق", "pass": True, "score": 5, "icon": "📉"})
+            total += 5
+        else:
+            checks.append({"name": "VWAP ضد", "pass": False, "score": 0, "icon": "📉"})
+    else:
+        checks.append({"name": "VWAP غير متاح", "pass": False, "score": 0, "icon": "📉"})
+
+    # 9. Recent BOS/MSS
+    bos_ok = False
+    try:
+        if direction == "BUY" and "bos_bullish" in df.columns:
+            bos_ok = bool(df["bos_bullish"].iloc[-5:].any())
+        elif direction == "SELL" and "bos_bearish" in df.columns:
+            bos_ok = bool(df["bos_bearish"].iloc[-5:].any())
+    except Exception: pass
+    if bos_ok:
+        checks.append({"name": "BOS حديث", "pass": True, "score": 10, "icon": "🔓"})
+        total += 10
+    else:
+        checks.append({"name": "لا BOS حديث", "pass": False, "score": 0, "icon": "🔓"})
+
+    # 10. Entry Zone Quality
+    zone_ok = False
+    if levels:
+        e = safe_float(levels.get("entry"), 0)
+        tp1 = safe_float(levels.get("target1"), 0)
+        if e > 0 and tp1 > 0:
+            total_move = abs(tp1 - e)
+            current_dist = abs(float(last["close"]) - e)
+            if total_move > 0 and (current_dist / total_move) < 0.30:
+                zone_ok = True
+    if zone_ok:
+        checks.append({"name": "منطقة دخول ممتازة", "pass": True, "score": 10, "icon": "🎯"})
+        total += 10
+    else:
+        checks.append({"name": "منطقة دخول متوسطة", "pass": True, "score": 3, "icon": "🎯"})
+        total += 3
+
+    # Verdict
+    if total >= 80:
+        verdict = "ENTER_NOW"; vtext = "🟢 ادخل الآن"; vcolor = "#7cd4a0"
+    elif total >= 60:
+        verdict = "WAIT_RETRACE"; vtext = "🟡 انتظر ارتداد"; vcolor = "#f5c87a"
+    elif total >= 40:
+        verdict = "WAIT_CLOSE"; vtext = "🟠 انتظر إغلاق الشمعة"; vcolor = "#f5a87a"
+    else:
+        verdict = "NO_ENTRY"; vtext = "🔴 لا تدخل الآن"; vcolor = "#f57a7a"
+
+    return {"score": total, "verdict": verdict, "verdict_text": vtext,
+            "verdict_color": vcolor, "checks": checks}
+
+
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
@@ -2349,10 +2520,13 @@ def get_all_signals_parallel():
             if p is None or d is None: return None
             r = generate_signal(d, p, pn, sym, skip_external_filters=True)
             lv = r["levels"] or {}
+            sig_ = r["signal"]
+
             flip_sig = "—"; flip_conf = 0; flip_status = "NONE"; flip_icon = ""
             flip_sl = "—"; flip_tp1 = "—"; flip_tp2 = "—"; flip_tp3 = "—"
             flip_rr1 = "—"; flip_sl_src = "—"
-            sig_ = r["signal"]
+            ec_score = 0; ec_verdict = "—"; ec_color = "#6b7488"
+
             if sig_ in ("BUY", "SELL"):
                 try:
                     df_feat = r.get("df")
@@ -2374,9 +2548,22 @@ def get_all_signals_parallel():
                                 flip_rr1 = f"1:{nl['risk_reward_1']:.2f}"
                                 flip_sl_src = nl.get("sources", {}).get("sl", "—")
                 except Exception: pass
+
+                # Entry Confirmation
+                try:
+                    df_feat = r.get("df")
+                    if df_feat is not None and lv:
+                        ec = entry_confirmation_score(df_feat, sig_, lv, pn)
+                        if ec:
+                            ec_score = ec["score"]
+                            ec_verdict = ec["verdict_text"]
+                            ec_color = ec["verdict_color"]
+                except Exception: pass
+
             return {
                 "الزوج": pn, "الإشارة": sig_,
                 "الثقة": round(r["confidence"], 1),
+                "🎯 تأكيد": f"{ec_verdict} ({ec_score})" if ec_verdict != "—" else "—",
                 "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
                 "Flip%": flip_conf if flip_conf > 0 else "—",
                 "🛑 F-SL": flip_sl,
@@ -2398,7 +2585,9 @@ def get_all_signals_parallel():
                 "SLsrc": lv.get("sources", {}).get("sl", "—"),
                 "TP1": fmt_price(lv.get("target1"), pn),
                 "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0,
-                "_flip_status": flip_status}
+                "_flip_status": flip_status,
+                "_ec_score": ec_score,
+                "_ec_color": ec_color}
         except Exception: return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(one, p, s): (p, i) for i, (p, s) in enumerate(PAIRS.items())}
@@ -2417,12 +2606,14 @@ def get_all_signals_parallel():
     def sort_key(row):
         status = row.get("_flip_status", "NONE")
         sig = row["الإشارة"]
+        ec_score = row.get("_ec_score", 0)
         fp = {"STRONG_FLIP": 0, "POSSIBLE_FLIP": 1, "WEAK_FLIP": 2, "NONE": 3}.get(status, 3)
         sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
         flip_val = _safe_flip_num(row.get("Flip%", 0))
-        return (fp, sp_, -flip_val)
+        # Sort by entry confirmation first (higher = better)
+        return (-ec_score, fp, sp_, -flip_val)
     out["_sort"] = out.apply(sort_key, axis=1)
-    out = out.sort_values("_sort").drop(columns=["_sort", "_flip_status"])
+    out = out.sort_values("_sort").drop(columns=["_sort", "_flip_status", "_ec_score", "_ec_color"])
     return out
 
 
@@ -2602,7 +2793,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">ANALYSIS ONLY</span>
+                <span class="hero-badge-balanced">ENTRY CONFIRM</span>
             </div>
         </div>""", unsafe_allow_html=True)
     else:
@@ -2612,7 +2803,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">ANALYSIS ONLY</span>
+                <span class="hero-badge-balanced">ENTRY CONFIRM</span>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -2712,9 +2903,10 @@ with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
-    st.markdown("**🎯 SL Mode: أقرب نقطة**")
-    st.caption(f"• Min: {SL_MIN_DIST_ATR} ATR · Max: {SL_MAX_DIST_ATR} ATR")
-    st.caption("• STATIC: الستوب ثابت")
+    st.markdown("**🎯 Entry Confirm**")
+    st.caption("• 10 checks")
+    st.caption("• Verdict: ENTER/WAIT/NO")
+    st.caption("• SL: Static")
     st.markdown("---")
     st.markdown("**🧠 ML Model**")
     if not SKLEARN_AVAILABLE: st.caption("⚠️ sklearn غير مثبت")
@@ -2762,124 +2954,33 @@ if ana1:
 
 
 if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-    st.markdown('<div class="section-title">🌐 All Assets <span>مع Flip SL/TP</span></div>',
+    st.markdown('<div class="section-title">🌐 All Assets <span>مرتبة حسب تأكيد الدخول</span></div>',
                 unsafe_allow_html=True)
     r1, r2, r3 = st.columns([3, 1, 1])
     with r1:
         n_flips = 0
         if "🔄 Flip" in st.session_state.all_signals.columns:
             n_flips = (st.session_state.all_signals["🔄 Flip"] != "—").sum()
-        n_strong = 0
-        if "Flip%" in st.session_state.all_signals.columns:
-            flip_vals = st.session_state.all_signals["Flip%"].apply(
-                lambda x: x if isinstance(x, (int, float)) else 0)
-            n_strong = (flip_vals >= 70).sum()
-        if n_flips > 0:
+        n_strong_ec = 0
+        if "🎯 تأكيد" in st.session_state.all_signals.columns:
+            n_strong_ec = st.session_state.all_signals["🎯 تأكيد"].apply(
+                lambda x: isinstance(x, str) and "ادخل الآن" in x).sum()
+        if n_flips > 0 or n_strong_ec > 0:
             st.warning(f"✅ {len(st.session_state.all_signals)} أصول · "
-                       f"🔄 **{n_flips} فيها Flip** · 🚨 **{n_strong} قوية**")
+                       f"🎯 **{n_strong_ec} ادخل الآن** · "
+                       f"🔄 **{n_flips} Flip**")
         else:
             st.success(f"✅ {len(st.session_state.all_signals)} أصول.")
     with r2:
-        show_flips_only = st.checkbox("🔄 Flip فقط", value=False,
-                                       key="filter_flip_only")
+        filter_ec = st.checkbox("🎯 ادخل الآن فقط", value=False, key="filter_ec")
     with r3:
         if st.button("🗑️ مسح", width="stretch", key="clr_all"):
             st.session_state.all_signals = None; st.rerun()
     df_show = st.session_state.all_signals.copy()
-    if show_flips_only and "🔄 Flip" in df_show.columns:
-        df_show = df_show[df_show["🔄 Flip"] != "—"]
+    if filter_ec and "🎯 تأكيد" in df_show.columns:
+        df_show = df_show[df_show["🎯 تأكيد"].apply(
+            lambda x: isinstance(x, str) and "ادخل الآن" in x)]
     st.dataframe(df_show, hide_index=True, width="stretch", height=460)
-
-    if "🔄 Flip" in st.session_state.all_signals.columns:
-        flips_df = st.session_state.all_signals[
-            st.session_state.all_signals["🔄 Flip"] != "—"]
-        if not flips_df.empty:
-            with st.expander(f"🔀 {len(flips_df)} إشارات Flip · مع SL/TP", expanded=True):
-                for _, row in flips_df.iterrows():
-                    flip_txt = row["🔄 Flip"]
-                    flip_conf = row.get("Flip%", 0)
-                    pair_name = row["الزوج"]
-                    orig_sig = row["الإشارة"]
-                    if "🚨" in flip_txt: color = "#f57a7a"; label = "STRONG"
-                    elif "⚠️" in flip_txt: color = "#f5c87a"; label = "POSSIBLE"
-                    else: color = "#7cd4a0"; label = "WATCH"
-                    f_sl = row.get("🛑 F-SL", "—")
-                    f_tp1 = row.get("🎯 F-TP1", "—")
-                    f_tp2 = row.get("🎯 F-TP2", "—")
-                    f_tp3 = row.get("🎯 F-TP3", "—")
-                    f_rr1 = row.get("F-RR1", "—")
-                    f_src = row.get("SL Src", "—")
-                    st.markdown(f"""
-                    <div style="margin:10px 0; padding:14px 18px;
-                                background:linear-gradient(145deg, #10141c, #0d1017);
-                                border-radius:14px;
-                                border:1px solid {color}44;
-                                border-left:4px solid {color};">
-                        <div style="display:flex; justify-content:space-between;
-                                    align-items:center; flex-wrap:wrap; gap:10px;
-                                    margin-bottom:10px;">
-                            <div>
-                                <span style="color:#e6c87c; font-weight:700;
-                                             font-size:1.05rem;">{pair_name}</span>
-                                <span style="color:#7d879c; font-size:0.8rem;
-                                             margin-left:10px;">
-                                    الأصل: {orig_sig}</span>
-                            </div>
-                            <div>
-                                <span style="color:{color}; font-weight:700;
-                                             font-size:1rem;">{flip_txt}</span>
-                                <span style="color:#a0aab8; font-size:0.85rem;
-                                             margin-left:10px;">
-                                    ثقة {flip_conf}% · {label}</span>
-                            </div>
-                        </div>
-                        <div style="display:grid;
-                                    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-                                    gap:8px;">
-                            <div style="background:rgba(245,122,122,0.08);
-                                        padding:8px 10px; border-radius:8px;
-                                        border:1px solid rgba(245,122,122,0.25);">
-                                <div style="color:#f57a7a; font-size:0.68rem;
-                                            letter-spacing:1px;">🛑 SL</div>
-                                <div style="color:#e8edf5; font-weight:700;
-                                            font-size:0.9rem;">{f_sl}</div>
-                                <div style="color:#7d879c; font-size:0.68rem;">
-                                    {f_src}</div>
-                            </div>
-                            <div style="background:rgba(230,200,124,0.08);
-                                        padding:8px 10px; border-radius:8px;
-                                        border:1px solid rgba(230,200,124,0.25);">
-                                <div style="color:#e6c87c; font-size:0.68rem;
-                                            letter-spacing:1px;">🎯 TP1</div>
-                                <div style="color:#e8edf5; font-weight:700;
-                                            font-size:0.9rem;">{f_tp1}</div>
-                            </div>
-                            <div style="background:rgba(124,212,160,0.08);
-                                        padding:8px 10px; border-radius:8px;
-                                        border:1px solid rgba(124,212,160,0.25);">
-                                <div style="color:#7cd4a0; font-size:0.68rem;
-                                            letter-spacing:1px;">🎯 TP2</div>
-                                <div style="color:#e8edf5; font-weight:700;
-                                            font-size:0.9rem;">{f_tp2}</div>
-                            </div>
-                            <div style="background:rgba(124,212,160,0.08);
-                                        padding:8px 10px; border-radius:8px;
-                                        border:1px solid rgba(124,212,160,0.25);">
-                                <div style="color:#7cd4a0; font-size:0.68rem;
-                                            letter-spacing:1px;">🎯 TP3</div>
-                                <div style="color:#e8edf5; font-weight:700;
-                                            font-size:0.9rem;">{f_tp3}</div>
-                            </div>
-                            <div style="background:rgba(230,200,124,0.08);
-                                        padding:8px 10px; border-radius:8px;
-                                        border:1px solid rgba(230,200,124,0.25);">
-                                <div style="color:#e6c87c; font-size:0.68rem;
-                                            letter-spacing:1px;">📊 RR1</div>
-                                <div style="color:#e8edf5; font-weight:700;
-                                            font-size:0.9rem;">{f_rr1}</div>
-                            </div>
-                        </div>
-                    </div>""", unsafe_allow_html=True)
     st.markdown("---")
 
 
@@ -2904,6 +3005,13 @@ if sig in ("BUY", "SELL"):
         flip_result = detect_signal_flip(df, cur_price, sig, profile_for(sp_))
     except Exception:
         flip_result = None
+
+entry_confirm = None
+if sig in ("BUY", "SELL") and lv:
+    try:
+        entry_confirm = entry_confirmation_score(df, sig, lv, sp_)
+    except Exception:
+        entry_confirm = None
 
 mo_, mm_ = is_market_open(sp_)
 if not mo_: st.error(f"🚫 **{mm_}**")
@@ -2995,7 +3103,91 @@ if sadv and sadv != "None":
 
 
 # ============================================================
-# TRADE PLAN (Display only — no action)
+# ENTRY CONFIRMATION DISPLAY
+# ============================================================
+
+if entry_confirm and sig in ("BUY", "SELL"):
+    ec_score = entry_confirm["score"]
+    ec_color = entry_confirm["verdict_color"]
+    ec_text = entry_confirm["verdict_text"]
+
+    st.markdown('<div class="section-title">🎯 تأكيد الدخول '
+                '<span>Entry Confirmation · 10 فحوصات</span></div>',
+                unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(145deg, #10141c, #0d1017);
+                padding:22px 26px; border-radius:18px;
+                border:2px solid {ec_color};
+                display:flex; justify-content:space-between; align-items:center;
+                flex-wrap:wrap; gap:16px; margin-bottom:18px;">
+        <div style="flex:1; min-width:200px;">
+            <div style="color:#7d879c; font-size:0.75rem; letter-spacing:1px;
+                        text-transform:uppercase;">Verdict</div>
+            <div style="color:{ec_color}; font-size:2rem; font-weight:800;
+                        margin-top:6px; letter-spacing:1px;">{ec_text}</div>
+        </div>
+        <div style="text-align:center; min-width:140px;">
+            <div style="color:#7d879c; font-size:0.75rem; letter-spacing:1px;
+                        text-transform:uppercase;">Confirmation Score</div>
+            <div style="color:{ec_color}; font-size:2.5rem; font-weight:800;
+                        margin-top:4px;">{ec_score}<span style="font-size:1rem;
+                        color:#6b7488;">/100</span></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div style="background:rgba(255,255,255,0.05); border-radius:12px;
+                height:14px; overflow:hidden; margin-bottom:18px;">
+        <div style="width:{ec_score}%; height:100%;
+                    background:linear-gradient(90deg, {ec_color}88, {ec_color});
+                    border-radius:12px; transition:width 0.5s;"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    check_cols = st.columns(5)
+    for i, ch in enumerate(entry_confirm["checks"]):
+        with check_cols[i % 5]:
+            pass_color = "#7cd4a0" if ch["pass"] else "#f57a7a"
+            pass_icon = "✅" if ch["pass"] else "❌"
+            st.markdown(f"""
+            <div style="background:linear-gradient(145deg, #10141c, #0d1017);
+                        padding:12px 14px; border-radius:12px;
+                        border:1px solid {pass_color}44;
+                        text-align:center; height:100%;
+                        margin-bottom:10px;">
+                <div style="font-size:1.3rem;">{ch['icon']}</div>
+                <div style="color:#e8edf5; font-size:0.78rem; font-weight:600;
+                            margin-top:6px; line-height:1.2;">{ch['name']}</div>
+                <div style="color:{pass_color}; font-size:0.85rem; font-weight:700;
+                            margin-top:6px;">{pass_icon} {ch['score']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    if entry_confirm["verdict"] == "ENTER_NOW":
+        st.success(f"✅ **تأكيد الدخول مكتمل** — {ec_score}/100 · "
+                   f"ادخل الصفقة الآن ({sig})")
+    elif entry_confirm["verdict"] == "WAIT_RETRACE":
+        st.warning(f"⚠️ **انتظر ارتداد بسيط** — {ec_score}/100 · "
+                   f"افضل منطقة دخول: {fmt_price(lv.get('entry'), sp_) if lv else '—'}")
+    elif entry_confirm["verdict"] == "WAIT_CLOSE":
+        st.info(f"⏳ **انتظر إغلاق الشمعة القادمة** — {ec_score}/100 · "
+                f"الشمعة الحالية غير مؤكدة")
+    else:
+        st.error(f"🚫 **لا تدخل الآن** — {ec_score}/100 · "
+                 f"انتظر تأكيد أفضل")
+
+    with st.expander("🔍 تفاصيل الفحوصات", expanded=False):
+        for ch in entry_confirm["checks"]:
+            icon = "✅" if ch["pass"] else "❌"
+            st.markdown(f"- {icon} {ch['icon']} **{ch['name']}** — {ch['score']}/15")
+
+    st.markdown("---")
+
+
+# ============================================================
+# TRADE PLAN
 # ============================================================
 
 if sig in ("BUY","SELL") and lv:
@@ -3053,7 +3245,6 @@ if sig in ("BUY","SELL") and lv:
             for lq in lv["liq"][:3]:
                 st.markdown(f"- {lq['name']}: `{fmt_price(lq['level'], sp_)}`")
 
-    # FLIP WATCH (display only — no button)
     if flip_result and flip_result.get("flip_signal"):
         flip_sig = flip_result["flip_signal"]
         flip_conf = flip_result["confidence"]
@@ -3116,26 +3307,6 @@ if sig in ("BUY","SELL") and lv:
                 fr2.metric("RR · TP2", f"1:{nl['risk_reward_2']:.2f}")
                 fr3.metric("RR · TP3", f"1:{nl['risk_reward_3']:.2f}")
                 fr4.metric("SL Source", nl_src.get("sl", "—"))
-                st.markdown(f"""
-                <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-                    <span style="background:rgba(245,122,122,0.15); padding:6px 14px;
-                                 border-radius:20px; color:#f57a7a; font-size:0.85rem;
-                                 border:1px solid rgba(245,122,122,0.35); font-weight:600;">
-                        🛑 SL: {nl_src.get('sl','—')}</span>
-                    <span style="background:rgba(230,200,124,0.15); padding:6px 14px;
-                                 border-radius:20px; color:#e6c87c; font-size:0.85rem;
-                                 border:1px solid rgba(230,200,124,0.35);">
-                        🎯 TP1: {nl_src.get('tp1','—')}</span>
-                    <span style="background:rgba(124,212,160,0.12); padding:6px 14px;
-                                 border-radius:20px; color:#7cd4a0; font-size:0.85rem;
-                                 border:1px solid rgba(124,212,160,0.35);">
-                        🎯 TP2: {nl_src.get('tp2','—')}</span>
-                    <span style="background:rgba(124,212,160,0.12); padding:6px 14px;
-                                 border-radius:20px; color:#7cd4a0; font-size:0.85rem;
-                                 border:1px solid rgba(124,212,160,0.35);">
-                        🎯 TP3: {nl_src.get('tp3','—')}</span>
-                </div>
-                """, unsafe_allow_html=True)
                 st.markdown("---")
                 if flip_conf >= 70:
                     st.error(f"⚠️ **إشارة قوية للانعكاس إلى {flip_sig}** — "
@@ -3501,6 +3672,6 @@ with tab_bt:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Analysis Only · Static SL · Flip Detection · Hyper-Tuned ML
+    Entry Confirmation · Flip Detection · Static SL · Analysis Only
 </div>
 """, unsafe_allow_html=True)
