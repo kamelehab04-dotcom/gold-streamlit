@@ -1,15 +1,17 @@
 # ============================================================
-# BLACK PYRAMID v2010.0 — PRODUCTION RELEASE
+# BLACK PYRAMID v2010.1 — FINAL VERIFIED
 # Institutional Analysis Terminal
 #
-# v2010.0 CHANGELOG:
-#  - 80% Confidence Gate (live only, backtest bypasses)
-#  - Dual Independent Signals (Original + Flip) — full parity
-#  - Pending Signals tab (75-79% early warning)
-#  - Trade Plan dimmed when gate fails
-#  - All 9 bug fixes from review applied
-#  - Unified A_MIN=80 to match gate
-#  - Removed deprecated constants
+# v2010.1 CHANGELOG (review round 2):
+#  - FIX #1: Grade uses FINAL ec (matches gate)
+#  - FIX #2: Entry Zone uses HTF context (was always passing)
+#  - FIX #3: Flip card handles missing new_levels
+#  - FIX #4: Pending tab guarded against missing columns
+#  - FIX #5: Trade Plan warning replaced fake dimming
+#  - FIX #6: accent param now used in section title
+#  - FIX #7: Flip card shows raw strength + converted
+#  - FIX #8 (new): Removed unused dimmed CSS
+#  - FIX #9 (new): Backtest also uses ec for grade
 # ============================================================
 
 import os
@@ -61,15 +63,14 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2010.0"
+APP_VERSION = "v2010.1"
 
-# ⭐ Unified with MIN_EMIT_CONFIDENCE
 A_PLUS_MIN = 85.0
-A_MIN = 80.0            # matches gate
+A_MIN = 80.0
 B_MIN = 72.0
 C_MIN = 65.0
 MIN_SIGNAL_GAP = 15
-MIN_EMIT_CONFIDENCE = 80.0   # 🔒 Gate threshold
+MIN_EMIT_CONFIDENCE = 80.0
 
 PENALTY_MTF_AGAINST = 12.0
 PENALTY_RANGE_REGIME = 10.0
@@ -103,10 +104,6 @@ TUNING_N_JOBS = -1
 SL_MIN_DIST_ATR = 0.25
 SL_MAX_DIST_ATR = 1.50
 SL_BUFFER_ATR = 0.20
-
-# Deprecated (kept for backward compat, no longer used):
-# MIN_CONFIDENCE = 72.0
-# MIN_CONFIRMATION_SCORE = 65.0
 
 ML_FEATURE_NAMES = [
     "structure", "trend", "momentum", "volume", "context",
@@ -1983,7 +1980,6 @@ def check_level_proximity(df, current_price, direction_of_flip, atr):
 
 
 def detect_signal_flip(df, current_price, original_signal, profile):
-    """Independent Flip signal engine."""
     if original_signal not in ("BUY", "SELL"): return None
     atr = safe_float(df["atr"].iloc[-1], np.nan)
     if not np.isfinite(atr) or atr <= 0: return None
@@ -2180,17 +2176,18 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     else:
         checks.append({"name": "لا BOS حديث", "pass": False, "score": 0, "icon": "🔓"})
 
-    # 10. Entry Zone (FIXED)
+    # 10. Entry Zone (proper — uses HTF context, not self-distance)
     zone_ok = False
-    if levels:
-        e = safe_float(levels.get("entry"), 0)
-        sl = safe_float(levels.get("stop_loss"), 0)
-        risk_lvl = abs(e - sl) if e and sl else 0
-        if e > 0 and risk_lvl > 0:
-            current_price = float(last["close"])
-            dist_from_entry = abs(current_price - e)
-            if dist_from_entry <= 0.30 * risk_lvl:
-                zone_ok = True
+    if direction == "BUY":
+        if safe_bool(last.get("in_discount")):
+            zone_ok = True
+        elif safe_bool(last.get("fvg_bullish")) or safe_bool(last.get("order_block_bullish")):
+            zone_ok = True
+    else:
+        if safe_bool(last.get("in_premium")):
+            zone_ok = True
+        elif safe_bool(last.get("fvg_bearish")) or safe_bool(last.get("order_block_bearish")):
+            zone_ok = True
     if zone_ok:
         checks.append({"name": "منطقة دخول ممتازة", "pass": True, "score": 10, "icon": "🎯"}); total += 10
     else:
@@ -2213,7 +2210,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
 
 def compute_flip_grade(conf_pct, ec_score):
-    """Grade based on confidence + entry confirmation."""
     if conf_pct >= 85 and ec_score >= 85: return "A+"
     if conf_pct >= 80 and ec_score >= 80: return "A"
     if conf_pct >= 72 and ec_score >= 65: return "B"
@@ -2222,7 +2218,6 @@ def compute_flip_grade(conf_pct, ec_score):
 
 
 def passes_confidence_gate(signal_conf, entry_score=None):
-    """🔒 Gate: requires BOTH >= 80%."""
     if signal_conf < MIN_EMIT_CONFIDENCE:
         return False, f"الثقة {signal_conf:.1f}% < {MIN_EMIT_CONFIDENCE:.0f}%"
     if entry_score is not None and entry_score < MIN_EMIT_CONFIDENCE:
@@ -2358,11 +2353,12 @@ def generate_signal(df, current_price, pair_name, symbol,
                "fund_sell": sc.get("fund_sell", 0), "df": df}
         ec, mlprob, mlstat = ml_adjusted_confidence(rfm, signal, mlp)
         ec = clamp(ec, 0, 99)
-    # Grade assignment (unified with gate)
-    if rc >= A_PLUS_MIN and cs >= 85: tg = "A+"
-    elif rc >= A_MIN and cs >= 80: tg = "A"
-    elif rc >= B_MIN and cs >= 65: tg = "B"
-    elif rc >= C_MIN and cs >= 50: tg = "C"
+
+    # ⭐ FIX #1 + #9: Grade uses FINAL ec (matches gate for both live & backtest)
+    if ec >= A_PLUS_MIN and cs >= 85: tg = "A+"
+    elif ec >= A_MIN and cs >= 80: tg = "A"
+    elif ec >= B_MIN and cs >= 65: tg = "B"
+    elif ec >= C_MIN and cs >= 50: tg = "C"
     else: tg = "WAIT"
 
     # ⭐ Execution status
@@ -2552,7 +2548,7 @@ def get_all_signals_parallel():
                 orig_gate = "✅" if orig_gate_ok else "❌"
 
             # --- Flip ---
-            flip_sig = "—"; flip_conf = 0; flip_status = "NONE"; flip_icon = ""
+            flip_sig = "—"; flip_conf_raw = 0; flip_status = "NONE"; flip_icon = ""
             flip_sl = "—"; flip_tp1 = "—"; flip_tp2 = "—"; flip_tp3 = "—"
             flip_rr1 = "—"; flip_sl_src = "—"
             flip_ec_score = 0; flip_ec_verdict = "—"; flip_grade_col = "—"
@@ -2564,11 +2560,14 @@ def get_all_signals_parallel():
                     fl = detect_signal_flip(r.get("df"), p, sig_, profile_for(pn))
                     if fl and fl.get("flip_signal"):
                         flip_sig = fl["flip_signal"]
-                        flip_conf = round(fl["confidence"], 0)
+                        flip_conf_raw = round(fl["confidence"], 0)
                         flip_status = fl["status"]
                         if fl["status"] == "STRONG_FLIP": flip_icon = "🚨"
                         elif fl["status"] == "POSSIBLE_FLIP": flip_icon = "⚠️"
                         else: flip_icon = "💡"
+                        # ⭐ FIX #3: always compute conversion
+                        flip_confidence_pct = round(clamp(
+                            50 + fl["confidence"] * 0.5, 50, 95), 1)
                         nl = fl.get("new_levels")
                         if nl:
                             flip_sl = fmt_price(nl["stop_loss"], pn)
@@ -2577,8 +2576,6 @@ def get_all_signals_parallel():
                             flip_tp3 = fmt_price(nl["target3"], pn)
                             flip_rr1 = f"1:{nl['risk_reward_1']:.2f}"
                             flip_sl_src = nl.get("sources", {}).get("sl", "—")
-                            flip_confidence_pct = round(clamp(
-                                50 + fl["confidence"] * 0.5, 50, 95), 1)
                             fc = entry_confirmation_score(
                                 r.get("df"), flip_sig, nl, pn)
                             if fc:
@@ -2586,9 +2583,9 @@ def get_all_signals_parallel():
                                 flip_ec_verdict = fc["verdict_text"]
                                 flip_grade_col = compute_flip_grade(
                                     flip_confidence_pct, fc["score"])
-                            flip_gate_ok, _ = passes_confidence_gate(
-                                flip_confidence_pct, flip_ec_score)
-                            flip_gate = "✅" if flip_gate_ok else "❌"
+                        flip_gate_ok, _ = passes_confidence_gate(
+                            flip_confidence_pct, flip_ec_score)
+                        flip_gate = "✅" if flip_gate_ok else "❌"
                 except Exception: pass
 
             return {
@@ -2598,6 +2595,7 @@ def get_all_signals_parallel():
                 "🚦 أصلي": orig_gate,
                 "Grade": r.get("trade_grade", "WAIT"),
                 "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
+                "Flip Raw": flip_conf_raw if flip_conf_raw > 0 else "—",
                 "Flip Conf%": flip_confidence_pct if flip_confidence_pct > 0 else "—",
                 "Flip Status": flip_status if flip_status != "NONE" else "—",
                 "🎯 Flip تأكيد": f"{flip_ec_verdict} ({flip_ec_score})" if flip_ec_score > 0 else "—",
@@ -2742,14 +2740,17 @@ def render_entry_checks(ec, prefix=""):
             """, unsafe_allow_html=True)
 
 
-def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c", dimmed=False):
+def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c",
+                      dimmed=False):
     if not levels: return
     src = levels.get("sources", {})
-    st.markdown(f'<div class="section-title">{title} '
+    if dimmed:
+        st.warning("🔒 **البوابة فشلت — الـ Trade Plan ده للمرجعية فقط.** "
+                   "لا تُتداول به حتى يعبر البوابة.")
+    # ⭐ FIX #6: use accent in section title
+    st.markdown(f'<div class="section-title" style="color:{accent};">{title} '
                 f'<span>Static SL · RR validated</span></div>',
                 unsafe_allow_html=True)
-    if dimmed:
-        st.markdown('<div class="dimmed-plan">', unsafe_allow_html=True)
     l1, l2, l3, l4, l5 = st.columns(5)
     l1.metric("Entry", fmt_price(levels["entry"], pair_name))
     l2.metric("Stop Loss", fmt_price(levels["stop_loss"], pair_name),
@@ -2782,8 +2783,6 @@ def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c", d
                      border:1px solid rgba(124,212,160,0.35);">
             🎯 TP3: {src.get('tp3','—')}</span>
     </div>""", unsafe_allow_html=True)
-    if dimmed:
-        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2905,8 +2904,6 @@ hr { border: none; height: 1px;
     margin-top: 40px; font-size: 0.85rem; letter-spacing: 0.5px; }
 details { background: #0d1017 !important; border-radius: 16px !important;
     border: 1px solid rgba(255,255,255,0.05) !important; }
-.dimmed-plan div[data-testid="stMetric"] { opacity: 0.35 !important;
-    filter: grayscale(85%) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -3123,18 +3120,20 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
 
     st.dataframe(df_show, hide_index=True, width="stretch", height=460)
 
-    # ⭐ Pending tab (75-79%)
-    pending = df_full[
-        (df_full["🚦 أصلي"] == "❌") &
-        (df_full["الثقة"] >= 75) &
-        (df_full["الثقة"] < MIN_EMIT_CONFIDENCE)
-    ]
-    if not pending.empty:
-        with st.expander(f"⏸️ إشارات قريبة من البوابة ({len(pending)}) — 75-79%"):
-            st.caption("متابعة فقط — لا تُتداول حتى تعبر البوابة")
-            st.dataframe(
-                pending[["الزوج","الإشارة","الثقة","🎯 تأكيد","Grade"]].reset_index(drop=True),
-                hide_index=True, width="stretch")
+    # ⭐ FIX #4: Pending tab with column guard
+    if "🚦 أصلي" in df_full.columns and "الثقة" in df_full.columns:
+        pending = df_full[
+            (df_full["🚦 أصلي"] == "❌") &
+            (df_full["الثقة"] >= 75) &
+            (df_full["الثقة"] < MIN_EMIT_CONFIDENCE)
+        ]
+        if not pending.empty:
+            with st.expander(f"⏸️ إشارات قريبة من البوابة ({len(pending)}) — 75-79%"):
+                st.caption("متابعة فقط — لا تُتداول حتى تعبر البوابة")
+                cols_ok = [c for c in ["الزوج","الإشارة","الثقة","🎯 تأكيد","Grade"]
+                           if c in pending.columns]
+                st.dataframe(pending[cols_ok].reset_index(drop=True),
+                             hide_index=True, width="stretch")
 
     st.markdown("---")
 
@@ -3170,10 +3169,10 @@ orig_ec_score = orig_confirm["score"] if orig_confirm else 0
 orig_ec_text = orig_confirm["verdict_text"] if orig_confirm else "—"
 orig_ec_color = orig_confirm["verdict_color"] if orig_confirm else "#6b7488"
 
-# ⭐ Original gate
+# Original gate
 orig_gate_ok, orig_gate_msg = passes_confidence_gate(conf, orig_ec_score)
 
-# ⭐ Flip
+# ⭐ FIX #3: Flip — always compute confidence_pct, only check levels for confirm
 flip_result = None; flip_confirm = None; flip_grade = None
 flip_confidence_pct = 0
 flip_gate_ok = False; flip_gate_msg = ""
@@ -3182,19 +3181,20 @@ flip_ec_score = 0; flip_ec_text = "—"; flip_ec_color = "#6b7488"
 if sig in ("BUY","SELL"):
     try:
         flip_result = detect_signal_flip(df, cur_price, sig, profile_for(sp_))
-        if flip_result and flip_result.get("flip_signal") and flip_result.get("new_levels"):
+        if flip_result and flip_result.get("flip_signal"):
             flip_confidence_pct = round(clamp(
                 50 + flip_result["confidence"] * 0.5, 50, 95), 1)
-            flip_confirm = entry_confirmation_score(
-                df, flip_result["flip_signal"], flip_result["new_levels"], sp_)
-            if flip_confirm:
-                flip_ec_score = flip_confirm["score"]
-                flip_ec_text = flip_confirm["verdict_text"]
-                flip_ec_color = flip_confirm["verdict_color"]
-                flip_grade = compute_flip_grade(
+            if flip_result.get("new_levels"):
+                flip_confirm = entry_confirmation_score(
+                    df, flip_result["flip_signal"], flip_result["new_levels"], sp_)
+                if flip_confirm:
+                    flip_ec_score = flip_confirm["score"]
+                    flip_ec_text = flip_confirm["verdict_text"]
+                    flip_ec_color = flip_confirm["verdict_color"]
+                    flip_grade = compute_flip_grade(
+                        flip_confidence_pct, flip_ec_score)
+                flip_gate_ok, flip_gate_msg = passes_confidence_gate(
                     flip_confidence_pct, flip_ec_score)
-            flip_gate_ok, flip_gate_msg = passes_confidence_gate(
-                flip_confidence_pct, flip_ec_score)
     except Exception:
         flip_result = None
         flip_confirm = None
@@ -3202,7 +3202,9 @@ if sig in ("BUY","SELL"):
 mo_, mm_ = is_market_open(sp_)
 if not mo_: st.error(f"🚫 **{mm_}**")
 
-has_flip = bool(flip_result and flip_result.get("flip_signal") and sig in ("BUY","SELL"))
+# ⭐ FIX #3: has_flip requires both signal AND levels (so card has content)
+has_flip = bool(flip_result and flip_result.get("flip_signal")
+                and flip_result.get("new_levels") and sig in ("BUY","SELL"))
 
 
 # ============================================
@@ -3230,13 +3232,15 @@ if has_flip:
             _vt = f"🔒 {flip_gate_msg}"; _vc = "#f57a7a"
         else:
             _vt = flip_ec_text; _vc = flip_ec_color
+        # ⭐ FIX #7: show raw strength + converted
         render_signal_card(
             title=f"إشارة Flip · Gate {'✅' if flip_gate_ok else '❌'}",
             direction=flip_result["flip_signal"],
             confidence=flip_confidence_pct,
             grade=flip_grade or "WAIT",
             verdict_text=_vt, verdict_color=_vc,
-            subtitle=f"Flip strength: {flip_result['confidence']:.0f}% · {len(flip_result['triggers'])} triggers")
+            subtitle=(f"Raw: {flip_result['confidence']:.0f}/100 · "
+                      f"{len(flip_result['triggers'])} triggers"))
 
     # Comparison
     combined_orig = orig_ec_score * 0.6 + conf * 0.4
@@ -3323,17 +3327,9 @@ if sig in ("BUY","SELL") and lv and orig_confirm:
     else:
         st.error(f"🚫 لا تدخل الآن — {orig_confirm['score']}/100")
 
-    if not orig_gate_ok:
-        st.warning(f"🔒 **البوابة فشلت:** {orig_gate_msg}. "
-                   "الـ Trade Plan التالي للمرجعية فقط.")
-        with st.expander("🎯 Trade Plan (reference only — dimmed)", expanded=False):
-            render_trade_plan(lv, sp_,
-                             title=f"🅰️ Trade Plan — Original {sig}",
-                             accent="#6b7488", dimmed=True)
-    else:
-        render_trade_plan(lv, sp_,
-                         title=f"🅰️ Trade Plan — Original {sig}",
-                         accent="#e6c87c")
+    render_trade_plan(lv, sp_,
+                     title=f"🅰️ Trade Plan — Original {sig}",
+                     accent="#e6c87c", dimmed=(not orig_gate_ok))
 
     st.markdown("---")
 
@@ -3385,17 +3381,9 @@ if has_flip:
             st.error(f"🚫 Flip غير مؤكد — {flip_confirm['score']}/100")
 
     if flip_levels:
-        if not flip_gate_ok:
-            st.warning(f"🔒 **بوابة Flip فشلت:** {flip_gate_msg}. "
-                       "الـ Trade Plan التالي للمرجعية فقط.")
-            with st.expander("🎯 Flip Trade Plan (reference only)", expanded=False):
-                render_trade_plan(flip_levels, sp_,
-                                 title=f"🅱️ Trade Plan — Flip {flip_sig_name}",
-                                 accent="#6b7488", dimmed=True)
-        else:
-            render_trade_plan(flip_levels, sp_,
-                             title=f"🅱️ Trade Plan — Flip {flip_sig_name}",
-                             accent=flip_color_banner)
+        render_trade_plan(flip_levels, sp_,
+                         title=f"🅱️ Trade Plan — Flip {flip_sig_name}",
+                         accent=flip_color_banner, dimmed=(not flip_gate_ok))
 
     st.markdown("---")
 
