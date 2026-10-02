@@ -8,6 +8,7 @@
 #  - Signal Card Conflict Border
 #  - Entry Confirmation adjusted with Flip penalty
 #  - Static SL, no trailing, analysis only
+#  - ⭐ NEW: Full Flip Entry Confirmation (10 checks + Grade + Verdict)
 # ============================================================
 
 import os
@@ -59,7 +60,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2009.7-ConflictAware"
+APP_VERSION = "v2009.7-FlipConfirm"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -101,7 +102,6 @@ SL_MIN_DIST_ATR = 0.25
 SL_MAX_DIST_ATR = 1.50
 SL_BUFFER_ATR = 0.20
 
-# Flip penalties for Entry Confirmation
 FLIP_PENALTY_STRONG = 50
 FLIP_PENALTY_POSSIBLE = 30
 FLIP_PENALTY_WEAK = 15
@@ -2071,6 +2071,19 @@ def detect_signal_flip(df, current_price, original_signal, profile):
 
 
 # ============================================================
+# ⭐ FLIP GRADE HELPER (NEW)
+# ============================================================
+
+def compute_flip_grade(flip_conf, ec_score):
+    """Grade للـ FLIP بناءً على قوة الانعكاس + تأكيد الدخول"""
+    if flip_conf >= 70 and ec_score >= 80: return "A+"
+    if flip_conf >= 60 and ec_score >= 70: return "A"
+    if flip_conf >= 45 and ec_score >= 60: return "B"
+    if flip_conf >= 30 and ec_score >= 50: return "C"
+    return "WAIT"
+
+
+# ============================================================
 # ENTRY CONFIRMATION (with Flip Penalty)
 # ============================================================
 
@@ -2536,6 +2549,10 @@ def get_all_signals_parallel():
             flip_rr1 = "—"; flip_sl_src = "—"
             fl = None
             ec_score = 0; ec_verdict = "—"; ec_color = "#6b7488"
+            # ⭐ NEW
+            flip_ec_score = 0
+            flip_ec_verdict = "—"
+            flip_grade_col = "—"
 
             if sig_ in ("BUY", "SELL"):
                 try:
@@ -2570,12 +2587,27 @@ def get_all_signals_parallel():
                             ec_color = ec["verdict_color"]
                 except Exception: pass
 
+                # ⭐ NEW: Flip confirmation
+                if fl and fl.get("flip_signal") and fl.get("new_levels"):
+                    try:
+                        fc = entry_confirmation_score(
+                            r.get("df"), fl["flip_signal"],
+                            fl["new_levels"], pn, flip_result=None)
+                        if fc:
+                            flip_ec_score = fc["score"]
+                            flip_ec_verdict = fc["verdict_text"]
+                            flip_grade_col = compute_flip_grade(
+                                fl["confidence"], fc["score"])
+                    except Exception: pass
+
             return {
                 "الزوج": pn, "الإشارة": sig_,
                 "الثقة": round(r["confidence"], 1),
                 "🎯 تأكيد": f"{ec_verdict} ({ec_score})" if ec_verdict != "—" else "—",
                 "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
                 "Flip%": flip_conf if flip_conf > 0 else "—",
+                "🎯 Flip Confirm": f"{flip_ec_verdict} ({flip_ec_score})" if flip_ec_score > 0 else "—",
+                "Flip Grade": flip_grade_col,
                 "🛑 F-SL": flip_sl,
                 "🎯 F-TP1": flip_tp1,
                 "🎯 F-TP2": flip_tp2,
@@ -2802,7 +2834,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">CONFLICT-AWARE</span>
+                <span class="hero-badge-balanced">FLIP CONFIRM</span>
             </div>
         </div>""", unsafe_allow_html=True)
     else:
@@ -2812,7 +2844,7 @@ with hl:
             <div class="hero-sub" style="margin-top: 8px;">
                 Institutional Analysis Terminal
                 <span class="hero-badge">{APP_VERSION}</span>
-                <span class="hero-badge-balanced">CONFLICT-AWARE</span>
+                <span class="hero-badge-balanced">FLIP CONFIRM</span>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -3015,6 +3047,29 @@ if sig in ("BUY", "SELL"):
     except Exception:
         flip_result = None
 
+# ============================================
+# ⭐ FLIP CONFIRMATION (mirror of original)
+# ============================================
+flip_confirmation = None
+flip_grade = None
+if flip_result and flip_result.get("flip_signal") and flip_result.get("new_levels"):
+    try:
+        flip_confirmation = entry_confirmation_score(
+            df,
+            flip_result["flip_signal"],
+            flip_result["new_levels"],
+            sp_,
+            flip_result=None
+        )
+        if flip_confirmation:
+            flip_grade = compute_flip_grade(
+                flip_result["confidence"],
+                flip_confirmation["score"]
+            )
+    except Exception:
+        flip_confirmation = None
+        flip_grade = None
+
 entry_confirm = None
 if sig in ("BUY", "SELL") and lv:
     try:
@@ -3144,7 +3199,6 @@ with c_sig:
     sc_ = ("#7cd4a0" if sig == "BUY"
            else "#f57a7a" if sig == "SELL" else "#f5c87a")
 
-    # ---- Conflict badge calculation ----
     conflict_badge_top = ""
     card_border_color = "rgba(255,255,255,0.06)"
     card_glow = ""
@@ -3240,7 +3294,6 @@ if entry_confirm and sig in ("BUY", "SELL"):
                 '<span>Entry Confirmation · 10 فحوصات + Flip Check</span></div>',
                 unsafe_allow_html=True)
 
-    # ---- FLIP WARNING ----
     if entry_confirm.get("flip_severity") and entry_confirm["flip_severity"] != "NONE":
         severity = entry_confirm["flip_severity"]
         flip_warn = entry_confirm["flip_warning"]
@@ -3256,7 +3309,6 @@ if entry_confirm and sig in ("BUY", "SELL"):
         elif severity == "MEDIUM":
             st.info(f"💡 {flip_warn}")
 
-    # عرض السكورات الفعلية
     raw = entry_confirm.get("raw_score", ec_score)
     pen = entry_confirm.get("flip_penalty", 0)
     if pen > 0:
@@ -3350,7 +3402,6 @@ if entry_confirm and sig in ("BUY", "SELL"):
 if sig in ("BUY","SELL") and lv:
     src = lv.get("sources", {})
 
-    # ---- Trade Plan Invalidation Check ----
     plan_invalidated = False
     invalidation_reason = ""
     if flip_result and flip_result.get("flip_signal"):
@@ -3453,6 +3504,9 @@ if sig in ("BUY","SELL") and lv:
             for lq in lv["liq"][:3]:
                 st.markdown(f"- {lq['name']}: `{fmt_price(lq['level'], sp_)}`")
 
+    # ============================================
+    # ⭐ SIGNAL FLIP WATCH (with Entry Confirmation)
+    # ============================================
     if flip_result and flip_result.get("flip_signal"):
         flip_sig = flip_result["flip_signal"]
         flip_conf = flip_result["confidence"]
@@ -3461,7 +3515,7 @@ if sig in ("BUY","SELL") and lv:
                       else "#f5c87a" if flip_status == "POSSIBLE_FLIP"
                       else "#7cd4a0")
         st.markdown('<div class="section-title">🔀 Signal Flip Watch '
-                    '<span>متى تنعكس الإشارة؟ · مع SL/TP</span></div>',
+                    '<span>متى تنعكس الإشارة؟ · مع SL/TP + Entry Confirmation</span></div>',
                     unsafe_allow_html=True)
         st.markdown(f"""
         <div style="background:linear-gradient(145deg, #10141c, #0d1017);
@@ -3489,6 +3543,93 @@ if sig in ("BUY","SELL") and lv:
                 </div>
             </div>
         </div>""", unsafe_allow_html=True)
+
+        # ⭐ FLIP ENTRY CONFIRMATION BLOCK
+        if flip_confirmation:
+            fc_score = flip_confirmation["score"]
+            fc_color = flip_confirmation["verdict_color"]
+            fc_text = flip_confirmation["verdict_text"]
+            flip_sig_name = flip_result["flip_signal"]
+            flip_conf_val = flip_result["confidence"]
+
+            st.markdown(f"""
+            <div style="background:linear-gradient(145deg, #10141c, #0d1017);
+                        padding:20px 24px; border-radius:16px;
+                        border:2px solid {fc_color};
+                        margin-top:16px; margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between;
+                            align-items:center; flex-wrap:wrap; gap:16px;">
+                    <div>
+                        <div style="color:#7d879c; font-size:0.72rem;
+                                    letter-spacing:1.5px; text-transform:uppercase;">
+                            🎯 FLIP Entry Confirmation · {flip_sig_name}
+                        </div>
+                        <div style="color:{fc_color}; font-size:1.6rem; font-weight:800;
+                                    margin-top:6px; letter-spacing:1px;">
+                            {fc_text}
+                        </div>
+                        <div style="color:#a0aab8; font-size:0.85rem; margin-top:6px;">
+                            Grade: <b style="color:#e6c87c;">{flip_grade or '—'}</b>
+                            &nbsp;·&nbsp;
+                            Flip Conf: <b style="color:{flip_color};">{flip_conf_val:.0f}%</b>
+                        </div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="color:#7d879c; font-size:0.7rem;
+                                    letter-spacing:1.5px;">FLIP CONFIRM</div>
+                        <div style="color:{fc_color}; font-size:2.6rem;
+                                    font-weight:900; line-height:1; margin-top:6px;">
+                            {fc_score}<span style="font-size:1rem;
+                            color:#6b7488;">/100</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+            <div style="background:rgba(255,255,255,0.05); border-radius:12px;
+                        height:12px; overflow:hidden; margin-bottom:16px;">
+                <div style="width:{fc_score}%; height:100%;
+                            background:linear-gradient(90deg, {fc_color}88, {fc_color});
+                            border-radius:12px;"></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            fc_cols = st.columns(5)
+            for i, ch in enumerate(flip_confirmation["checks"]):
+                with fc_cols[i % 5]:
+                    pass_color = "#7cd4a0" if ch["pass"] else "#f57a7a"
+                    pass_icon = "✅" if ch["pass"] else "❌"
+                    st.markdown(f"""
+                    <div style="background:linear-gradient(145deg, #10141c, #0d1017);
+                                padding:10px 12px; border-radius:10px;
+                                border:1px solid {pass_color}44;
+                                text-align:center; margin-bottom:8px;">
+                        <div style="font-size:1.15rem;">{ch['icon']}</div>
+                        <div style="color:#e8edf5; font-size:0.72rem; font-weight:600;
+                                    margin-top:4px; line-height:1.15;">{ch['name']}</div>
+                        <div style="color:{pass_color}; font-size:0.78rem;
+                                    font-weight:700; margin-top:4px;">{pass_icon} {ch['score']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            if flip_confirmation["verdict"] == "ENTER_NOW":
+                st.success(f"🚀 **الـ FLIP مؤكد بالكامل** — Grade {flip_grade} · "
+                           f"ادخل {flip_sig_name} فوراً ({fc_score}/100)")
+            elif flip_confirmation["verdict"] == "WAIT_RETRACE":
+                nl = flip_result.get("new_levels") or {}
+                entry_lvl = fmt_price(nl.get("entry"), sp_)
+                st.warning(f"⏳ **الـ FLIP يحتاج ارتداد** — Grade {flip_grade} · "
+                           f"أفضل دخول قرب {entry_lvl} ({fc_score}/100)")
+            elif flip_confirmation["verdict"] == "WAIT_CLOSE":
+                st.info(f"⏰ **انتظر إغلاق الشمعة القادمة** قبل تأكيد الـ FLIP "
+                        f"— Grade {flip_grade} ({fc_score}/100)")
+            else:
+                st.error(f"🚫 **الـ FLIP مش مؤكد بعد** — Grade {flip_grade} · "
+                         f"لا تدخل عكس الإشارة الأصلية ({fc_score}/100)")
+
+            st.markdown("---")
 
         with st.expander(f"🔍 تفاصيل الانعكاس + Trade Plan الجديد "
                          f"({len(flip_result['triggers'])} مؤشر)",
@@ -3880,6 +4021,6 @@ with tab_bt:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Conflict-Aware · Entry Confirmation · Static SL · Analysis Only
+    Conflict-Aware · Entry Confirmation · Flip Confirmation · Static SL · Analysis Only
 </div>
 """, unsafe_allow_html=True)
