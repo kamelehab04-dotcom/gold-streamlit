@@ -1,13 +1,13 @@
 # ============================================================
-# BLACK PYRAMID v2009.5 — SIGNAL INFO EDITION
+# BLACK PYRAMID v2009.6 — SIGNAL INFO EDITION
 # Institutional Analysis Terminal
 #
-# v2009.5 CHANGELOG:
-#  - REMOVED: Portfolio Action, Position Size, Management
-#  - REMOVED: Portfolio Tab, Sidebar Portfolio, Kill Switch
-#  - REMOVED: FLIP "open trade" button (display only)
-#  - STATIC SL: الستوب ثابت لا يتحرك
-#  - Pure Analysis Terminal: إشارات + معلومات فقط
+# v2009.6 CHANGELOG:
+#  - NEW: Entry Confirmation — تأكيد الدخول من أفضل نقطة مكتشفة
+#  - NEW: Best Entry Zone Finder (OB/FVG/IDM/Liq/Fib/Pivot/VWAP/Swing)
+#  - NEW: Confirmation Triggers (BOS/MSS/Sweep/Candle/Disp/Div/VWAP)
+#  - NEW: Side-by-side Original + Flip confirmation blocks
+#  - Keeps v2009.5 features: Static SL, Flip Detection, Signal Info only
 # ============================================================
 
 import os
@@ -59,7 +59,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2009.5-SignalInfo"
+APP_VERSION = "v2009.6-SignalInfo"
 
 A_PLUS_MIN = 85.0
 A_MIN = 78.0
@@ -2065,6 +2065,302 @@ def detect_signal_flip(df, current_price, original_signal, profile):
             "message": msg, "new_levels": new_levels}
 
 
+# ============================================================
+# ENTRY CONFIRMATION — Best Discovered Point System
+# ============================================================
+
+def find_best_entry_zone(df, direction, current_price, profile):
+    """يبحث عن أفضل منطقة دخول من أقرب/أنقى نقطة مكتشفة (ICT + Indicators)"""
+    atr = safe_float(df["atr"].iloc[-1], np.nan)
+    if not np.isfinite(atr) or atr <= 0: return None
+    l = df.iloc[-1]
+    candidates = []
+
+    # Order Blocks
+    try:
+        for ob in find_order_block_levels(df, current_price, direction):
+            candidates.append({"type": "OB", "name": ob["name"],
+                "low": ob["low"], "high": ob["high"], "mid": ob["mid"],
+                "dist": abs(current_price - ob["mid"]) / atr, "quality": 95})
+    except Exception: pass
+
+    # Fair Value Gaps
+    try:
+        for fv in find_nearest_fvg(df, current_price, direction):
+            candidates.append({"type": "FVG", "name": fv["name"],
+                "low": fv["low"], "high": fv["high"], "mid": fv["mid"],
+                "dist": abs(current_price - fv["mid"]) / atr, "quality": 82})
+    except Exception: pass
+
+    # IDM (Inducement)
+    try:
+        idm = detect_inducement(df, direction)
+        if idm is not None and np.isfinite(idm):
+            candidates.append({"type": "IDM", "name": "IDM (ICT)",
+                "low": idm, "high": idm, "mid": idm,
+                "dist": abs(current_price - idm) / atr, "quality": 90})
+    except Exception: pass
+
+    # Liquidity Levels
+    try:
+        for lq in find_nearest_liquidity(df, current_price, direction):
+            candidates.append({"type": "Liq", "name": lq["name"],
+                "low": lq["level"], "high": lq["level"], "mid": lq["level"],
+                "dist": abs(current_price - lq["level"]) / atr, "quality": 78})
+    except Exception: pass
+
+    # Fib Retracement (OTE zone)
+    try:
+        imp = find_impulse_leg(df, direction)
+        fibs = fib_levels_from_impulse(imp)
+        if fibs:
+            for k, q in (("0.618", 92), ("0.786", 85), ("0.500", 72)):
+                lvl = fibs["retracement"].get(k)
+                if lvl and np.isfinite(lvl):
+                    candidates.append({"type": "Fib", "name": f"Fib {k}",
+                        "low": lvl, "high": lvl, "mid": lvl,
+                        "dist": abs(current_price - lvl) / atr, "quality": q})
+    except Exception: pass
+
+    # Pivot Points
+    try:
+        pv = calc_pivot_points(df)
+        if pv:
+            keys = (("s1","Pivot S1",72), ("s2","Pivot S2",66),
+                    ("r1","Pivot R1",72), ("r2","Pivot R2",66),
+                    ("fib_s1","FibPivot S1",70), ("fib_r1","FibPivot R1",70),
+                    ("fib_s2","FibPivot S2",64), ("fib_r2","FibPivot R2",64))
+            for k, nm, q in keys:
+                lvl = pv.get(k)
+                if lvl and np.isfinite(lvl):
+                    candidates.append({"type": "Pivot", "name": nm,
+                        "low": lvl, "high": lvl, "mid": lvl,
+                        "dist": abs(current_price - lvl) / atr, "quality": q})
+    except Exception: pass
+
+    # VWAP
+    try:
+        vwap = safe_float(l.get("vwap"), np.nan)
+        if np.isfinite(vwap) and vwap > 0:
+            candidates.append({"type": "VWAP", "name": "VWAP",
+                "low": vwap, "high": vwap, "mid": vwap,
+                "dist": abs(current_price - vwap) / atr, "quality": 70})
+    except Exception: pass
+
+    # Swing level
+    try:
+        sw_l, sw_h = latest_structure_levels(df)
+        if direction == "BUY" and np.isfinite(sw_l):
+            candidates.append({"type": "Swing", "name": "Swing Low",
+                "low": sw_l, "high": sw_l, "mid": sw_l,
+                "dist": abs(current_price - sw_l) / atr, "quality": 75})
+        if direction == "SELL" and np.isfinite(sw_h):
+            candidates.append({"type": "Swing", "name": "Swing High",
+                "low": sw_h, "high": sw_h, "mid": sw_h,
+                "dist": abs(current_price - sw_h) / atr, "quality": 75})
+    except Exception: pass
+
+    if not candidates: return None
+
+    # Keep zones on correct side of price
+    if direction == "BUY":
+        valid = [c for c in candidates if c["mid"] <= current_price + 0.6 * atr]
+    else:
+        valid = [c for c in candidates if c["mid"] >= current_price - 0.6 * atr]
+    if not valid: valid = candidates
+
+    # Score: closeness + quality
+    for c in valid:
+        proximity = max(0.0, 100.0 - c["dist"] * 35.0)
+        c["score"] = c["quality"] * 0.55 + proximity * 0.45
+
+    valid.sort(key=lambda x: x["score"], reverse=True)
+    return valid[0]
+
+
+def confirm_entry_signal(df, direction, current_price, profile):
+    """يؤكد دخول الصفقة من أفضل نقطة مكتشفة مع فحص الـ triggers"""
+    best = find_best_entry_zone(df, direction, current_price, profile)
+    if best is None:
+        return {"status": "NO_ZONE", "label": "لا منطقة",
+                "reason": "لا توجد نقطة دخول مكتشفة", "score": 0.0,
+                "triggers": [], "zone": None, "dist_atr": None,
+                "in_zone": False, "near_zone": False,
+                "color": "#8892a5", "icon": "⚪",
+                "entry_price": current_price, "atr": None}
+
+    atr = safe_float(df["atr"].iloc[-1], np.nan)
+    if not np.isfinite(atr) or atr <= 0:
+        return {"status": "NO_DATA", "label": "بيانات ناقصة",
+                "reason": "ATR غير صالح", "score": 0.0, "triggers": [],
+                "zone": best, "dist_atr": None, "in_zone": False,
+                "near_zone": False, "color": "#8892a5", "icon": "⚪",
+                "entry_price": best["mid"], "atr": None}
+
+    l = df.iloc[-1]
+    tol = 0.30
+    zl = min(best["low"], best["high"]) - tol * atr
+    zh = max(best["low"], best["high"]) + tol * atr
+    in_zone = zl <= current_price <= zh
+    dist_atr = abs(current_price - best["mid"]) / atr
+    near_zone = dist_atr <= 0.60
+
+    triggers = []; score = 0.0
+    if candle_confirmation(df, direction):
+        triggers.append({"name": "شمعة تأكيد", "icon": "🕯️", "weight": 20}); score += 20
+    if direction == "BUY" and safe_bool(l.get("bos_bullish")):
+        triggers.append({"name": "BOS صاعد", "icon": "🚀", "weight": 28}); score += 28
+    if direction == "SELL" and safe_bool(l.get("bos_bearish")):
+        triggers.append({"name": "BOS هابط", "icon": "🚀", "weight": 28}); score += 28
+    if direction == "BUY" and safe_bool(l.get("mss_bullish")):
+        triggers.append({"name": "MSS صاعد", "icon": "🔄", "weight": 30}); score += 30
+    if direction == "SELL" and safe_bool(l.get("mss_bearish")):
+        triggers.append({"name": "MSS هابط", "icon": "🔄", "weight": 30}); score += 30
+    if direction == "BUY" and safe_bool(l.get("liquidity_sweep_bullish")):
+        triggers.append({"name": "Liquidity Sweep صاعد", "icon": "💧", "weight": 22}); score += 22
+    if direction == "SELL" and safe_bool(l.get("liquidity_sweep_bearish")):
+        triggers.append({"name": "Liquidity Sweep هابط", "icon": "💧", "weight": 22}); score += 22
+    try:
+        disp, dmsg = displacement_check(df, direction)
+        if disp:
+            triggers.append({"name": dmsg, "icon": "⚡", "weight": 18}); score += 18
+    except Exception: pass
+    if direction == "BUY" and safe_bool(l.get("fvg_bullish")):
+        triggers.append({"name": "FVG صاعد", "icon": "📦", "weight": 15}); score += 15
+    if direction == "SELL" and safe_bool(l.get("fvg_bearish")):
+        triggers.append({"name": "FVG هابط", "icon": "📦", "weight": 15}); score += 15
+    try:
+        dv = detect_divergence(df)
+        if direction == "BUY" and dv == "BULLISH":
+            triggers.append({"name": "RSI Divergence صاعد", "icon": "📈", "weight": 18}); score += 18
+        if direction == "SELL" and dv == "BEARISH":
+            triggers.append({"name": "RSI Divergence هابط", "icon": "📉", "weight": 18}); score += 18
+    except Exception: pass
+    vwap = safe_float(l.get("vwap"), np.nan)
+    if np.isfinite(vwap) and vwap > 0:
+        if direction == "BUY" and current_price > vwap:
+            triggers.append({"name": "فوق VWAP", "icon": "📊", "weight": 10}); score += 10
+        if direction == "SELL" and current_price < vwap:
+            triggers.append({"name": "تحت VWAP", "icon": "📊", "weight": 10}); score += 10
+
+    score = clamp(score, 0, 100)
+
+    if in_zone and score >= 55:
+        status, label = "READY", "دخول مؤكد"
+        color, icon = "#7cd4a0", "✅"
+        reason = f"السعر داخل {best['name']} مع {len(triggers)} تأكيد داعم"
+    elif in_zone and score >= 25:
+        status, label = "PARTIAL", "تأكيد جزئي"
+        color, icon = "#f5c87a", "⚠️"
+        reason = f"السعر داخل {best['name']} · يحتاج مزيد تأكيد"
+    elif in_zone:
+        status, label = "IN_ZONE", "داخل المنطقة"
+        color, icon = "#f5c87a", "🟡"
+        reason = f"داخل {best['name']} لكن بدون trigger واضح"
+    elif near_zone:
+        status, label = "NEAR", "قريب جداً"
+        color, icon = "#e6c87c", "🎯"
+        reason = f"على بعد {dist_atr:.2f} ATR من {best['name']} · استعد"
+    else:
+        if direction == "BUY" and current_price < best["mid"]:
+            status, label = "BELOW", "تحت المنطقة"
+            color, icon = "#f5c87a", "⬇️"
+            reason = f"السعر تحت {best['name']} · انتظر العودة للأعلى"
+        elif direction == "SELL" and current_price > best["mid"]:
+            status, label = "ABOVE", "فوق المنطقة"
+            color, icon = "#f5c87a", "⬆️"
+            reason = f"السعر فوق {best['name']} · انتظر العودة للأسفل"
+        else:
+            status, label = "WAIT_PULLBACK", "انتظر ارتداد"
+            color, icon = "#8892a5", "⏳"
+            reason = f"انتظر ارتداد السعر إلى {best['name']}"
+
+    return {"status": status, "label": label, "reason": reason,
+            "score": score, "triggers": triggers, "zone": best,
+            "dist_atr": dist_atr, "in_zone": in_zone, "near_zone": near_zone,
+            "color": color, "icon": icon, "entry_price": best["mid"],
+            "atr": atr}
+
+
+def render_entry_confirmation(conf_data, direction, pair_name, title):
+    """يعرض بلوك تأكيد الدخول"""
+    if conf_data is None: return
+    z = conf_data.get("zone")
+    c = conf_data.get("color", "#8892a5")
+    icon = conf_data.get("icon", "⚪")
+    label = conf_data.get("label", "—")
+    score = conf_data.get("score", 0)
+    reason = conf_data.get("reason", "")
+    dist = conf_data.get("dist_atr")
+    triggers = conf_data.get("triggers", [])
+    status = conf_data.get("status", "WAIT")
+    dir_color = "#7cd4a0" if direction == "BUY" else "#f57a7a"
+
+    status_ar = {"READY": "✅ READY", "PARTIAL": "⚠️ PARTIAL",
+                 "IN_ZONE": "🟡 IN ZONE", "NEAR": "🎯 NEAR",
+                 "BELOW": "⬇️ BELOW", "ABOVE": "⬆️ ABOVE",
+                 "WAIT_PULLBACK": "⏳ WAIT", "NO_ZONE": "⚪ NO ZONE",
+                 "NO_DATA": "⚪ NO DATA"}.get(status, status)
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(145deg, #10141c, #0d1017);
+                padding:16px 18px; border-radius:16px;
+                border:1px solid {c}44; border-left:4px solid {c};
+                margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between;
+                    align-items:center; flex-wrap:wrap; gap:8px;">
+            <div>
+                <div style="color:#7d879c; font-size:0.68rem;
+                            letter-spacing:1.5px; text-transform:uppercase;">
+                    {title}</div>
+                <div style="color:{dir_color}; font-size:1.35rem;
+                            font-weight:800; letter-spacing:2px;
+                            margin-top:2px;">{direction}</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="color:{c}; font-size:1.05rem; font-weight:700;">
+                    {icon} {label}</div>
+                <div style="color:#8892a5; font-size:0.75rem; margin-top:2px;">
+                    {status_ar} · Score {score:.0f}/100</div>
+            </div>
+        </div>
+        <div style="margin-top:10px; padding:8px 12px;
+                    background:rgba(255,255,255,0.02); border-radius:10px;">
+            <div style="color:#e8edf5; font-size:0.83rem;">{reason}</div>
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+    if z:
+        za, zb, zc = st.columns(3)
+        with za:
+            st.markdown(f"""<div class="metric-card" style="padding:10px 14px;">
+                <div class="metric-label">🎯 أفضل نقطة</div>
+                <div class="metric-value" style="font-size:1rem;">{z['name']}</div>
+                <div class="metric-sub">Quality {z['quality']}/100</div>
+            </div>""", unsafe_allow_html=True)
+        with zb:
+            st.markdown(f"""<div class="metric-card" style="padding:10px 14px;">
+                <div class="metric-label">💵 سعر الدخول المقترح</div>
+                <div class="metric-value" style="font-size:1rem;">
+                    {fmt_price(conf_data.get('entry_price', 0), pair_name)}</div>
+                <div class="metric-sub">Mid of zone</div>
+            </div>""", unsafe_allow_html=True)
+        with zc:
+            dist_txt = f"{dist:.2f} ATR" if dist is not None else "—"
+            st.markdown(f"""<div class="metric-card" style="padding:10px 14px;">
+                <div class="metric-label">📏 المسافة</div>
+                <div class="metric-value" style="font-size:1rem;">{dist_txt}</div>
+                <div class="metric-sub">
+                    {'داخل' if conf_data.get('in_zone') else 'قريب' if conf_data.get('near_zone') else 'بعيد'}
+                </div>
+            </div>""", unsafe_allow_html=True)
+
+    if triggers:
+        with st.expander(f"🔍 {len(triggers)} تأكيد داعم", expanded=False):
+            for t in triggers:
+                st.markdown(f"- {t['icon']} **{t['name']}** — وزن {t['weight']}")
+
+
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
@@ -2995,6 +3291,48 @@ if sadv and sadv != "None":
 
 
 # ============================================================
+# ENTRY CONFIRMATION — Original & Flip (Best Discovered Point)
+# ============================================================
+if sig in ("BUY", "SELL"):
+    st.markdown('<div class="section-title">🎯 Entry Confirmation '
+                '<span>تأكيد الدخول من أفضل نقطة مكتشفة</span></div>',
+                unsafe_allow_html=True)
+
+    ec1, ec2 = st.columns(2)
+
+    # الإشارة الأصلية
+    orig_conf = confirm_entry_signal(df, sig, cur_price, profile_for(sp_))
+    with ec1:
+        render_entry_confirmation(orig_conf, sig, sp_, "الإشارة الأصلية")
+
+    # إشارة الانعكاس
+    with ec2:
+        if flip_result and flip_result.get("flip_signal"):
+            flip_dir = flip_result["flip_signal"]
+            flip_conf_data = confirm_entry_signal(
+                df, flip_dir, cur_price, profile_for(sp_))
+            render_entry_confirmation(flip_conf_data, flip_dir, sp_,
+                                       "🔄 إشارة الانعكاس (Flip)")
+        else:
+            st.markdown("""<div class="tool-card" style="text-align:center;
+                            padding:30px 20px; min-height:180px;">
+                <div class="tool-name">🔄 إشارة الانعكاس</div>
+                <div class="tool-value" style="color:#6b7488;">—</div>
+                <div class="tool-desc">لا يوجد Flip حالياً · الإشارة الأصلية سارية</div>
+            </div>""", unsafe_allow_html=True)
+
+    # تحذير إذا الاثنين READY في نفس الوقت
+    if (orig_conf and orig_conf.get("status") == "READY" and
+        flip_result and flip_result.get("flip_signal")):
+        flip_dir = flip_result["flip_signal"]
+        flip_conf_data = confirm_entry_signal(df, flip_dir, cur_price,
+                                                profile_for(sp_))
+        if flip_conf_data and flip_conf_data.get("status") == "READY":
+            st.error("⚠️ **تحذير:** كلا الإشارتين مؤكدتين في نفس الوقت — "
+                     "انتظر وضوح الاتجاه قبل أي قرار.")
+
+
+# ============================================================
 # TRADE PLAN (Display only — no action)
 # ============================================================
 
@@ -3501,6 +3839,6 @@ with tab_bt:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    Analysis Only · Static SL · Flip Detection · Hyper-Tuned ML
+    Analysis Only · Static SL · Flip Detection · Entry Confirmation · Hyper-Tuned ML
 </div>
 """, unsafe_allow_html=True)
