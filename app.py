@@ -1,14 +1,26 @@
 # ============================================================
-# BLACK PYRAMID v2010.2 — MULTI-MODE FREQUENCY EDITION
+# BLACK PYRAMID v2010.3 — MULTI-MODE FREQUENCY EDITION
 # Institutional Analysis Terminal
 #
-# v2010.2 CHANGELOG:
-#  - 3 modes: strict / balanced / relaxed (change MODE constant)
-#  - Scaled gate thresholds per mode
-#  - Relaxed penalties, sessions, and blockers
-#  - Wider Pending tab (70-79%)
-#  - UI shows active mode
-#  - All 9 previous fixes preserved
+# v2010.3 CHANGELOG (bug fixes from v2010.2):
+#  - [CRITICAL] detect_regime: normalized ATR threshold (0.5),
+#    adaptive BB compression. Fixes FX being stuck in RANGE.
+#  - [CRITICAL] quick_backtest: fixed lookahead price leak
+#    (use close[i-1] not close[i]).
+#  - [CRITICAL] All Assets scan now applies full filters
+#    (skip_external_filters=False) — consistent with Single.
+#  - [CRITICAL] All Assets uses 6mo (was 3mo) → proper swings.
+#  - [HIGH] generate_signal: skip rebuild when features exist.
+#  - [HIGH] Sentiment applied AFTER signal stabilizes, cannot
+#    flip direction.
+#  - [HIGH] directional_score: BOS/MSS/etc use 5-bar window
+#    (matches entry_confirmation_score).
+#  - [HIGH] _weekly_bias_from_slice: SMA fallback works with
+#    shorter data (was ema200 → always NEUTRAL).
+#  - [MED] flip_confidence_pct: proper mapping (22→50, 100→95)
+#    instead of 50 + raw*0.5.
+#  - [MED] confirmation_gate: RANGE bonus 8→15, COMPRESSION 5→12.
+#  - All previous v2010.2 features preserved.
 # ============================================================
 
 import os
@@ -60,14 +72,9 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2010.2"
+APP_VERSION = "v2010.3"
 
-# ⭐ ========================================================
-# 🔥 TRADE FREQUENCY MODE — change this line only
-#    "strict"   → fewer, high-quality (80%)
-#    "balanced" → moderate, best default (75%)
-#    "relaxed"  → many, watch size (72%)
-# ⭐ ========================================================
+# ⭐ TRADE FREQUENCY MODE
 MODE = "balanced"
 
 _GATE_PRESETS = {
@@ -90,13 +97,12 @@ C_MIN               = _p["c"]
 MIN_SIGNAL_GAP      = _p["gap"]
 MIN_EMIT_CONFIDENCE = _p["gate"]
 
-# ⭐ Relaxed penalties
-PENALTY_MTF_AGAINST    = 8.0    # was 12
-PENALTY_RANGE_REGIME   = 6.0    # was 10
-PENALTY_WEAK_CANDLE    = 5.0    # was 8
-PENALTY_WEEKLY_AGAINST = 4.0    # was 6
-MAX_SOFT_PENALTY       = 8.0    # was 12
-SOFT_PENALTY_TOP_N     = 3      # was 4
+PENALTY_MTF_AGAINST    = 8.0
+PENALTY_RANGE_REGIME   = 6.0
+PENALTY_WEAK_CANDLE    = 5.0
+PENALTY_WEEKLY_AGAINST = 4.0
+MAX_SOFT_PENALTY       = 8.0
+SOFT_PENALTY_TOP_N     = 3
 
 MIN_RR_TP1 = 0.80
 MIN_RR_TP2 = 1.30
@@ -1224,14 +1230,34 @@ def get_gold_dxy_correlation():
     return float(a.iloc[:,0].rolling(30).corr(a.iloc[:,1]).iloc[-1])
 
 def detect_regime(df):
+    """
+    v2010.3 FIX: normalized threshold + adaptive BB compression.
+    Old code used ts = |ema20-ema50|/atr with threshold 1.0 which
+    was almost unreachable for FX (ATR too small relative to EMA gap
+    in price terms). Now we normalize by ATR with threshold 0.5 and
+    use adaptive BB compression based on rolling z-score.
+    """
     l = df.iloc[-1]
     atr = safe_float(l["atr"], np.nan)
-    if not np.isfinite(atr) or atr <= 0: return "UNKNOWN", 50.0
-    ts = abs(l["ema20"] - l["ema50"]) / atr
-    bw = (l["bb_upper"] - l["bb_lower"]) / max(l["close"], 1e-12)
-    if ts >= 1.0:
-        return ("TREND_BULLISH" if l["ema20"] > l["ema50"] else "TREND_BEARISH"), 75
-    if bw < 0.015: return "COMPRESSION", 65
+    price = safe_float(l["close"], np.nan)
+    if not np.isfinite(atr) or atr <= 0 or price <= 0:
+        return "UNKNOWN", 50.0
+    ema_spread = l["ema20"] - l["ema50"]
+    ts = abs(ema_spread) / atr
+    # Lower threshold from 1.0 → 0.5 to accept moderate trends
+    if ts >= 0.5:
+        return ("TREND_BULLISH" if ema_spread > 0 else "TREND_BEARISH"), 75
+    # Adaptive compression: rolling z-score of BB width
+    try:
+        bw_series = (df["bb_upper"] - df["bb_lower"]) / df["close"]
+        bw_mean = bw_series.rolling(100).mean().iloc[-1]
+        bw_std = bw_series.rolling(100).std().iloc[-1]
+        bw_now = bw_series.iloc[-1]
+        if (np.isfinite(bw_std) and bw_std > 0
+            and (bw_now - bw_mean) / bw_std < -0.7):
+            return "COMPRESSION", 65
+    except Exception:
+        pass
     return "RANGE", 55
 
 
@@ -1405,18 +1431,20 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
     s = structure_state(df)
     if s["bullish"]: sc["BUY"]["structure"] += 45; rs.append("هيكل صاعد")
     elif s["bearish"]: sc["SELL"]["structure"] += 45; rs.append("هيكل هابط")
-    if bool(l["bos_bullish"]): sc["BUY"]["structure"] += 35; rs.append("BOS صاعد")
-    if bool(l["bos_bearish"]): sc["SELL"]["structure"] += 35; rs.append("BOS هابط")
-    if bool(l["mss_bullish"]): sc["BUY"]["structure"] += 20; rs.append("MSS صاعد")
-    if bool(l["mss_bearish"]): sc["SELL"]["structure"] += 20; rs.append("MSS هابط")
-    if bool(l["liquidity_sweep_bullish"]): sc["BUY"]["structure"] += 25
-    if bool(l["liquidity_sweep_bearish"]): sc["SELL"]["structure"] += 25
-    if bool(l["order_block_bullish"]): sc["BUY"]["structure"] += 15
-    if bool(l["order_block_bearish"]): sc["SELL"]["structure"] += 15
-    if bool(l["fvg_bullish"]): sc["BUY"]["structure"] += 10
-    if bool(l["fvg_bearish"]): sc["SELL"]["structure"] += 10
-    if bool(l["in_discount"]): sc["BUY"]["structure"] += 10
-    if bool(l["in_premium"]): sc["SELL"]["structure"] += 10
+    # v2010.3 FIX: use 5-bar window (matches entry_confirmation_score)
+    recent = df.iloc[-5:]
+    if recent["bos_bullish"].any(): sc["BUY"]["structure"] += 35; rs.append("BOS صاعد")
+    if recent["bos_bearish"].any(): sc["SELL"]["structure"] += 35; rs.append("BOS هابط")
+    if recent["mss_bullish"].any(): sc["BUY"]["structure"] += 20; rs.append("MSS صاعد")
+    if recent["mss_bearish"].any(): sc["SELL"]["structure"] += 20; rs.append("MSS هابط")
+    if recent["liquidity_sweep_bullish"].any(): sc["BUY"]["structure"] += 25
+    if recent["liquidity_sweep_bearish"].any(): sc["SELL"]["structure"] += 25
+    if recent["order_block_bullish"].any(): sc["BUY"]["structure"] += 15
+    if recent["order_block_bearish"].any(): sc["SELL"]["structure"] += 15
+    if recent["fvg_bullish"].any(): sc["BUY"]["structure"] += 10
+    if recent["fvg_bearish"].any(): sc["SELL"]["structure"] += 10
+    if safe_bool(l.get("in_discount")): sc["BUY"]["structure"] += 10
+    if safe_bool(l.get("in_premium")): sc["SELL"]["structure"] += 10
     if l["ema20"] > l["ema50"] > l["ema200"]: sc["BUY"]["trend"] += 80
     elif l["ema20"] < l["ema50"] < l["ema200"]: sc["SELL"]["trend"] += 80
     else:
@@ -1513,8 +1541,9 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
     if (direction == "BUY" and regime == "TREND_BULLISH") or \
        (direction == "SELL" and regime == "TREND_BEARISH"):
         sc += 20; rs.append("Regime متوافق")
-    elif regime == "RANGE": sc += 8; rs.append("Range")
-    elif regime == "COMPRESSION": sc += 5; rs.append("Compression")
+    # v2010.3 FIX: RANGE 8→15, COMPRESSION 5→12 (was unfairly penalizing FX)
+    elif regime == "RANGE": sc += 15; rs.append("Range")
+    elif regime == "COMPRESSION": sc += 12; rs.append("Compression")
     else: bl.append("Regime غير متوافق")
     if (direction == "BUY" and mtf_bias == "BULLISH") or \
        (direction == "SELL" and mtf_bias == "BEARISH"):
@@ -1543,9 +1572,7 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
     if opp > own * 0.85: bl.append("تعارض قوي")
     else: sc += 5
     hard = any(x in bl for x in ("MTF ضد الاتجاه","Regime غير متوافق","Weekly ضد الاتجاه"))
-    # ⭐ Scaled threshold per mode
     th = max(55, MIN_EMIT_CONFIDENCE - 10)
-    # ⭐ Allow 3 blockers (was 2)
     ok = sc >= th and not hard and len(bl) <= 3
     return ok, clamp(sc, 0, 100), rs, bl
 
@@ -2064,14 +2091,14 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         triggers.append({"name": "EMA20 < EMA50", "score": 60, "icon": "📉"}); total_score += 12
 
     total_score = clamp(total_score, 0, 100)
-    if total_score < 22 or len(triggers) == 0:  # ⭐ was 25
+    if total_score < 22 or len(triggers) == 0:
         return {"flip_signal": None, "confidence": total_score,
                 "triggers": triggers, "status": "NO_FLIP",
                 "message": "لا يوجد انعكاس", "new_levels": None}
 
-    if total_score >= 65:  # ⭐ was 70
+    if total_score >= 65:
         status = "STRONG_FLIP"; msg = f"🚨 إشارة {flip_signal} مستقلة قوية"
-    elif total_score >= 42:  # ⭐ was 45
+    elif total_score >= 42:
         status = "POSSIBLE_FLIP"; msg = f"⚠️ إشارة {flip_signal} مستقلة محتملة"
     else:
         status = "WEAK_FLIP"; msg = f"💡 إشارة {flip_signal} مستقلة أولية"
@@ -2084,6 +2111,16 @@ def detect_signal_flip(df, current_price, original_signal, profile):
     return {"flip_signal": flip_signal, "confidence": total_score,
             "triggers": triggers, "status": status,
             "message": msg, "new_levels": new_levels}
+
+
+def flip_raw_to_pct(raw_score):
+    """
+    v2010.3 FIX: proper mapping. Old formula was 50 + raw*0.5
+    which compressed everything into 50-95 and made STRONG_FLIP
+    always appear as A+. New formula maps linearly from the
+    meaningful range [22, 100] → [50, 95].
+    """
+    return round(clamp(50 + (raw_score - 22) * 45 / 78, 50, 95), 1)
 
 
 # ============================================================
@@ -2187,7 +2224,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     else:
         checks.append({"name": "لا BOS حديث", "pass": False, "score": 0, "icon": "🔓"})
 
-    # Entry Zone (HTF context — fixed)
     zone_ok = False
     if direction == "BUY":
         if safe_bool(last.get("in_discount")): zone_ok = True
@@ -2204,7 +2240,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
     final_total = max(0, min(total, 100))
 
-    # ⭐ Scaled thresholds per mode
     enter_thr = int(MIN_EMIT_CONFIDENCE)
     retr_thr  = max(55, enter_thr - 15)
     close_thr = max(35, enter_thr - 35)
@@ -2224,7 +2259,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
 
 def compute_flip_grade(conf_pct, ec_score):
-    # ⭐ Scaled to mode
     if conf_pct >= A_PLUS_MIN and ec_score >= 80: return "A+"
     if conf_pct >= A_MIN and ec_score >= MIN_EMIT_CONFIDENCE: return "A"
     if conf_pct >= B_MIN and ec_score >= (MIN_EMIT_CONFIDENCE - 5): return "B"
@@ -2244,7 +2278,13 @@ def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
     profile = profile_for(pair_name); profile_key = get_asset_profile(pair_name)
-    df = build_features(df, profile)
+    # v2010.3 FIX: only build features if not already present
+    # (prevents double-build in backtest context)
+    _required = {"ema20","ema50","ema200","rsi","atr","swing_high",
+                 "bos_bullish","vwap","bb_upper"}
+    if not _required.issubset(df.columns):
+        df = build_features(df, profile)
+
     if precomputed is None:
         mtf, mtfc, mtfd = get_mtf_analysis(symbol, pair_name)
         wk, _ = weekly_bias(symbol, pair_name)
@@ -2260,17 +2300,13 @@ def generate_signal(df, current_price, pair_name, symbol,
         dxy = precomputed.get("dxy_bias","NEUTRAL"); gc = precomputed.get("gold_corr")
         ccs = precomputed.get("ccy_strength"); rd = precomputed.get("rate_diff", 0.0)
         rk = precomputed.get("risk"); bd = precomputed.get("bonds"); sent = precomputed.get("sentiment")
+
     sc = directional_score(df, pair_name, symbol, dxy_bias=dxy, gold_corr=gc,
                           ccy_strength=ccs, rate_diff=rd, risk=rk, bonds=bd)
     if sent is None: sent = estimate_retail_sentiment(df, profile)
-    cand_dir = "BUY" if sc["buy"] > sc["sell"] else "SELL"
-    sb, smsg = get_sentiment_bias_for_signal(sent, cand_dir)
-    if sb > 0:
-        if cand_dir == "BUY": sc["buy"] += sb
-        else: sc["sell"] += sb
-    elif sb < 0:
-        if cand_dir == "BUY": sc["buy"] += sb
-        else: sc["sell"] += sb
+
+    # v2010.3 FIX: apply MTF + weekly adjustments FIRST, then determine
+    # preliminary direction, THEN apply sentiment (which cannot flip it).
     buy, sell = sc["buy"], sc["sell"]
     if mtf == "BULLISH": buy += 8; sell -= 4
     elif mtf == "BEARISH": sell += 8; buy -= 4
@@ -2278,7 +2314,21 @@ def generate_signal(df, current_price, pair_name, symbol,
     elif wk == "BEARISH": sell += 5; buy -= 3
     buy, sell = clamp(buy, 0, 100), clamp(sell, 0, 100)
     gap = abs(buy - sell)
+    cand_dir = "BUY" if buy > sell else "SELL"
+    smsg = ""
+    if gap >= MIN_SIGNAL_GAP:
+        sb, smsg = get_sentiment_bias_for_signal(sent, cand_dir)
+        if sb != 0:
+            if cand_dir == "BUY":
+                buy = clamp(buy + sb, 0, 100)
+            else:
+                sell = clamp(sell + sb, 0, 100)
+            # Guard: sentiment cannot flip direction
+            if cand_dir == "BUY" and buy <= sell: buy = sell + 1.0
+            if cand_dir == "SELL" and sell <= buy: sell = buy + 1.0
+            gap = abs(buy - sell)
     signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
+
     l = df.iloc[-1]
     mc = False
     if safe_bool(l.get("mss_bullish")) and sell > buy: mc = True
@@ -2330,7 +2380,6 @@ def generate_signal(df, current_price, pair_name, symbol,
         lo_, lm = ltf_entry_trigger(symbol, cand, profile_key)
         flt["LTF Trigger"] = {"pass": lo_, "msg": lm}
         if not lo_: sp.append(("LTF", 6))
-        # ⭐ Relaxed session filter
         _strict_session = (profile_key == "crypto")
         so, sm, sl_ = session_filter(pair_name, strict=_strict_session)
         if not so and MODE != "strict":
@@ -2344,7 +2393,6 @@ def generate_signal(df, current_price, pair_name, symbol,
             else: sp.append(("Volatility", 6))
         ko, km = in_kill_zone(asset_type_from_name(pair_name))
         flt["Kill Zone"] = {"pass": ko, "msg": km}
-        # ⭐ KZ no longer penalizes in non-strict modes
         if not ko and MODE == "strict": sp.append(("KZ", 3))
         oo, om = ote_filter(df, cand)
         flt["OTE"] = {"pass": oo, "msg": om}
@@ -2374,7 +2422,6 @@ def generate_signal(df, current_price, pair_name, symbol,
         ec, mlprob, mlstat = ml_adjusted_confidence(rfm, signal, mlp)
         ec = clamp(ec, 0, 99)
 
-    # ⭐ Grade uses FINAL ec + mode-scaled cs
     cs_a_plus = _p["cs_a_plus"]
     cs_a = _p["cs_a"]
     cs_b = _p["cs_b"]
@@ -2408,7 +2455,7 @@ def generate_signal(df, current_price, pair_name, symbol,
         elif tg == "A":
             es, er = "EXECUTE", f"🚦 A (Conf {ec:.0f}% / Confirm {cs:.0f})"
         elif tg == "B":
-            es, er = "EXECUTE", f"🟢 B (Conf {ec:.0f}% / Confirm {cs:.0f})"   # ⭐ B EXECUTE in balanced/relaxed
+            es, er = "EXECUTE", f"🟢 B (Conf {ec:.0f}% / Confirm {cs:.0f})"
         else:
             es, er = "WAIT", "لا اجتياز"
     conf = ec
@@ -2450,12 +2497,22 @@ def _bias_from_slice(df_s, pair_name):
     except Exception: return "NEUTRAL", 50.0
 
 def _weekly_bias_from_slice(df_s, pair_name):
+    """
+    v2010.3 FIX: use SMA-based bias that works with fewer weekly bars.
+    Old code called _bias_from_slice which required ema200 → weekly
+    biases were always NEUTRAL for typical backtest ranges.
+    """
     if df_s is None or len(df_s) < 100: return "NEUTRAL"
     try:
         w = df_s.resample("1W").agg({"open":"first","high":"max","low":"min",
                                       "close":"last","volume":"sum"}).dropna()
-        if len(w) < 20: return "NEUTRAL"
-        b, _ = _bias_from_slice(w, pair_name); return b
+        if len(w) < 10: return "NEUTRAL"
+        sma = w["close"].rolling(min(20, len(w))).mean().iloc[-1]
+        last = w["close"].iloc[-1]
+        if not np.isfinite(sma): return "NEUTRAL"
+        if last > sma * 1.005: return "BULLISH"
+        if last < sma * 0.995: return "BEARISH"
+        return "NEUTRAL"
     except Exception: return "NEUTRAL"
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -2476,13 +2533,15 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
             rd, _ = get_interest_rate_differential(pair_name)
             rk = get_risk_sentiment(); bd = get_bond_yields()
         except Exception: ccs, rd, rk, bd = None, 0.0, None, None
-        df = build_features(dff, prof)
+        # v2010.3 FIX: keep df RAW (no pre-built features) → no lookahead
+        df = dff.copy()
         w = 0; l = 0; tr = 0.0; eq = 0.0; pk = 0.0; mdd = 0.0
         tlog = []; mlt = []
         si = 100; ei = len(df) - 20
         for i in range(si, ei):
             sl_df = df.iloc[:i].copy()
-            price = float(df["close"].iloc[i])
+            # v2010.3 FIX: use close[i-1] (last known close) → no lookahead
+            price = float(df["close"].iloc[i-1])
             mb, mcf = _bias_from_slice(sl_df, pair_name)
             wb = _weekly_bias_from_slice(sl_df, pair_name)
             pcd = {"mtf_bias": mb, "mtf_conf": mcf, "mtf_details": {},
@@ -2497,7 +2556,7 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
             if res["execution_status"] != "EXECUTE": continue
             slv = res["levels"]["stop_loss"]; t1 = res["levels"]["target1"]
             d = res["signal"]; rr1 = res["levels"]["risk_reward_1"]
-            fut = df.iloc[i+1:i+21]
+            fut = df.iloc[i:i+20]
             htp = hsl = False; out = "OPEN"
             for _, row in fut.iterrows():
                 if d == "BUY":
@@ -2547,9 +2606,11 @@ def get_all_signals_parallel():
     def one(pn, sym):
         try:
             p, _ = get_spot_price(sym)
-            d = get_historical_data(sym, "3mo", "4h")
+            # v2010.3 FIX: use 6mo (was 3mo) → better swing detection
+            d = get_historical_data(sym, "6mo", "4h")
             if p is None or d is None: return None
-            r = generate_signal(d, p, pn, sym, skip_external_filters=True)
+            # v2010.3 FIX: skip_external_filters=False → consistent with Single
+            r = generate_signal(d, p, pn, sym, skip_external_filters=False)
             lv = r["levels"] or {}
             sig_ = r["signal"]
 
@@ -2584,8 +2645,8 @@ def get_all_signals_parallel():
                         if fl["status"] == "STRONG_FLIP": flip_icon = "🚨"
                         elif fl["status"] == "POSSIBLE_FLIP": flip_icon = "⚠️"
                         else: flip_icon = "💡"
-                        flip_confidence_pct = round(clamp(
-                            50 + fl["confidence"] * 0.5, 50, 95), 1)
+                        # v2010.3 FIX: proper mapping
+                        flip_confidence_pct = flip_raw_to_pct(fl["confidence"])
                         nl = fl.get("new_levels")
                         if nl:
                             flip_sl = fmt_price(nl["stop_loss"], pn)
@@ -3054,7 +3115,6 @@ with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.caption(f"Version {APP_VERSION}")
     st.markdown("---")
-    # ⭐ Mode display
     mode_emoji = {"strict": "🔒", "balanced": "⚖️", "relaxed": "🚀"}.get(MODE, "⚖️")
     st.markdown(f"**{mode_emoji} Mode: `{MODE.upper()}`**")
     st.caption(f"🚦 Gate: ≥ {MIN_EMIT_CONFIDENCE:.0f}%")
@@ -3107,7 +3167,7 @@ with cc3:
     ana_all = st.button("🌐 تحليل الكل", width="stretch", key="btn_all")
 
 if ana_all:
-    with st.spinner("Scanning..."):
+    with st.spinner("Scanning... (full filters, ~30-60s first run)"):
         t0 = time.time()
         st.session_state.all_signals = get_all_signals_parallel()
         st.session_state.analysis_time = time.time() - t0
@@ -3151,7 +3211,6 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
 
     st.dataframe(df_show, hide_index=True, width="stretch", height=460)
 
-    # ⭐ Pending tab — wider range
     pending_low = 70 if MODE == "strict" else (68 if MODE == "balanced" else 65)
     if "🚦 أصلي" in df_full.columns and "الثقة" in df_full.columns:
         pending = df_full[
@@ -3212,8 +3271,8 @@ if sig in ("BUY","SELL"):
     try:
         flip_result = detect_signal_flip(df, cur_price, sig, profile_for(sp_))
         if flip_result and flip_result.get("flip_signal"):
-            flip_confidence_pct = round(clamp(
-                50 + flip_result["confidence"] * 0.5, 50, 95), 1)
+            # v2010.3 FIX: proper mapping via flip_raw_to_pct
+            flip_confidence_pct = flip_raw_to_pct(flip_result["confidence"])
             if flip_result.get("new_levels"):
                 flip_confirm = entry_confirmation_score(
                     df, flip_result["flip_signal"], flip_result["new_levels"], sp_)
