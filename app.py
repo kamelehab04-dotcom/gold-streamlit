@@ -26,7 +26,7 @@ try:
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import (train_test_split, GridSearchCV,
-                                          RandomizedSearchCV, StratifiedKFold)
+                                          RandomizedSearchCV, StratifiedKFold, TimeSeriesSplit)
     from sklearn.metrics import (accuracy_score, roc_auc_score, confusion_matrix,
                                   log_loss, f1_score, precision_score, recall_score)
     SKLEARN_AVAILABLE = True
@@ -52,7 +52,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2010.3"
+APP_VERSION = "v2010.5 FINAL HARDENED"
 
 MODE = "balanced"
 MAX_STRONG_TRADES = 4  # عدد الصفقات القوية المعروضة
@@ -410,11 +410,29 @@ def normalize_ohlcv(df, min_rows=50):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
+    """Fetch supported Yahoo intervals; aggregate 1h bars for 4h requests."""
     try:
-        return normalize_ohlcv(yf.download(sanitize_yf_symbol(symbol),
-            period=period, interval=interval, auto_adjust=False,
-            progress=False, threads=False))
-    except Exception: return None
+        yf_symbol = sanitize_yf_symbol(symbol)
+        if interval == "4h":
+            raw = yf.download(yf_symbol, period=period, interval="1h",
+                              auto_adjust=False, progress=False, threads=False)
+            df = normalize_ohlcv(raw, min_rows=2)
+            if df is None:
+                return None
+            # Resample in exchange/source timezone as provided by yfinance.
+            out = df.resample("4h", label="right", closed="right").agg({
+                "open": "first", "high": "max", "low": "min",
+                "close": "last", "volume": "sum"}).dropna(subset=["open", "high", "low", "close"])
+            # Exclude the newest potentially incomplete 4h bucket.
+            if len(out) > 1:
+                out = out.iloc[:-1]
+            return normalize_ohlcv(out, min_rows=50)
+        raw = yf.download(yf_symbol, period=period, interval=interval,
+                          auto_adjust=False, progress=False, threads=False)
+        return normalize_ohlcv(raw)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Yahoo fetch failed for %s/%s: %s", symbol, interval, exc)
+        return None
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_twelve_data(symbol, interval="4h", outputsize=500):
@@ -436,8 +454,12 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
         df = pd.DataFrame(data["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         df = df.set_index("datetime").sort_index()
-        return normalize_ohlcv(df)
-    except Exception: return None
+        # Short outputsize is used by the spot-price fallback; historical calls still
+        # require enough bars at their caller level.
+        return normalize_ohlcv(df, min_rows=2 if int(outputsize) < 50 else 50)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Twelve Data fetch failed for %s/%s: %s", symbol, interval, exc)
+        return None
 
 @st.cache_data(ttl=90, show_spinner=False)
 def get_historical_data(symbol, period="3mo", interval="4h"):
@@ -456,7 +478,8 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
 @st.cache_data(ttl=30, show_spinner=False)
 def get_spot_price(symbol):
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
-        for p, i in [("5d","1h"),("1mo","1d")]:
+        # Do not fall back to a daily close and label it as a live quote.
+        for p, i in [("5d", "1h")]:
             try:
                 df = normalize_ohlcv(yf.download(sanitize_yf_symbol(s), period=p,
                     interval=i, auto_adjust=False, progress=False, threads=False),
@@ -471,10 +494,8 @@ def get_spot_price(symbol):
             pc = float(df["close"].iloc[-2]); lt = float(df["close"].iloc[-1])
             return lt, ((lt - pc) / pc * 100) if pc else 0.0
     except Exception: pass
-    try:
-        df = get_historical_data(symbol, "3mo", "4h")
-        if df is not None and not df.empty: return float(df["close"].iloc[-1]), 0.0
-    except Exception: pass
+    # Fail closed: historical candles are not a live quote and must not be
+    # presented as the current execution price.
     return None, None
 
 
@@ -725,21 +746,27 @@ def extract_ml_features(result, direction):
 
 def tune_model(model_name, model, param_grid, X, y, mode="randomized",
                n_iter=20, cv_folds=5):
+    """Tune only with forward-chaining CV; never shuffle chronological samples."""
     try:
-        cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
-    except Exception: cv = cv_folds
-    try:
+        n_splits = min(int(cv_folds), max(2, len(X) // 10))
+        if len(X) < 12 or n_splits < 2:
+            return model, {}, 0.0
+        cv = TimeSeriesSplit(n_splits=n_splits)
         if mode == "grid":
             tuner = GridSearchCV(estimator=model, param_grid=param_grid, cv=cv,
-                scoring=TUNING_SCORING, n_jobs=TUNING_N_JOBS, verbose=0, refit=True)
+                scoring=TUNING_SCORING, n_jobs=TUNING_N_JOBS, verbose=0, refit=True,
+                error_score="raise")
         else:
             tuner = RandomizedSearchCV(estimator=model, param_distributions=param_grid,
                 n_iter=n_iter, cv=cv, scoring=TUNING_SCORING,
-                n_jobs=TUNING_N_JOBS, verbose=0, random_state=42, refit=True)
+                n_jobs=TUNING_N_JOBS, verbose=0, random_state=42, refit=True,
+                error_score="raise")
         tuner.fit(X, y)
         return tuner.best_estimator_, tuner.best_params_, float(tuner.best_score_)
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Model tuning failed for %s: %s", model_name, exc)
         return model, {}, 0.0
+
 
 def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
                    tuning_n_iter=20):
@@ -973,16 +1000,24 @@ def calc_session_vwap(df):
 
 
 def find_confirmed_swings(df, order=3):
-    out = df.copy(); w = 2*order+1
+    """Mark pivots at their actual bar; a pivot appears only after right bars exist."""
+    out = df.copy()
+    w = 2 * int(order) + 1
     if len(out) < w:
-        out["swing_high"] = False; out["swing_low"] = False; return out
-    rm = out["high"].rolling(w, min_periods=w).max()
-    rn = out["low"].rolling(w, min_periods=w).min()
-    im = (out["high"] >= rm - 1e-12) & rm.notna()
-    inn = (out["low"] <= rn + 1e-12) & rn.notna()
-    out["swing_high"] = im.shift(order).fillna(False).astype(bool)
-    out["swing_low"] = inn.shift(order).fillna(False).astype(bool)
+        out["swing_high"] = False
+        out["swing_low"] = False
+        return out
+    hi = pd.to_numeric(out["high"], errors="coerce")
+    lo = pd.to_numeric(out["low"], errors="coerce")
+    roll_hi = hi.rolling(w, center=True, min_periods=w).max()
+    roll_lo = lo.rolling(w, center=True, min_periods=w).min()
+    # Equal highs/lows can create duplicate pivots; accept the first exact extreme.
+    out["swing_high"] = (hi >= roll_hi - 1e-12) & roll_hi.notna()
+    out["swing_low"] = (lo <= roll_lo + 1e-12) & roll_lo.notna()
+    out["swing_high"] = out["swing_high"].fillna(False).astype(bool)
+    out["swing_low"] = out["swing_low"].fillna(False).astype(bool)
     return out
+
 
 def get_last_two_swings(df, kind="high"):
     c = "swing_high" if kind == "high" else "swing_low"
@@ -1296,10 +1331,14 @@ def session_filter(pair_name, strict=True):
     return True, "غير مشدّد", "OFF"
 
 def volatility_regime_filter(df):
-    a = df["atr"].dropna() if "atr" in df.columns else pd.Series()
-    if len(a) < 100: return True, "بيانات قليلة", "NORMAL"
-    ca = a.iloc[-1]; am = a.rolling(100).mean().iloc[-1]; ast = a.rolling(100).std().iloc[-1]
-    if not np.isfinite(ast) or ast == 0: return True, "ATR ثابت", "NORMAL"
+    a = df["atr"].dropna() if "atr" in df.columns else pd.Series(dtype=float)
+    if len(a) < 100:
+        return False, "بيانات ATR غير كافية — WAIT", "UNKNOWN"
+    ca = safe_float(a.iloc[-1], np.nan)
+    am = safe_float(a.rolling(100).mean().iloc[-1], np.nan)
+    ast = safe_float(a.rolling(100).std().iloc[-1], np.nan)
+    if not np.isfinite(ca) or ca <= 0 or not np.isfinite(am) or not np.isfinite(ast) or ast <= 0:
+        return False, "بيانات ATR غير صالحة — WAIT", "UNKNOWN"
     z = (ca - am) / ast
     if z < -1.0: return False, f"سوق ميت (Z={z:.1f})", "DEAD"
     if z > 2.5: return False, f"تقلب مفرط (Z={z:.1f})", "CHAOS"
@@ -1366,10 +1405,12 @@ def in_kill_zone(asset_type):
 
 def ote_filter(df, direction):
     sh = get_last_two_swings(df, "high"); sl = get_last_two_swings(df, "low")
-    if not sh or not sl: return True, "OTE غير متاح"
+    if not sh or not sl:
+        return False, "OTE غير متاح — WAIT"
     sh_v = sh[-1][1]; sl_v = sl[-1][1]
-    c = df["close"].iloc[-1]; leg = sh_v - sl_v
-    if leg <= 0: return True, "موجة غير صالحة"
+    c = safe_float(df["close"].iloc[-1], np.nan); leg = sh_v - sl_v
+    if not np.isfinite(c) or not np.isfinite(leg) or leg <= 0:
+        return False, "موجة غير صالحة — WAIT"
     if direction == "BUY":
         r = (sh_v - c) / leg
         if 0.55 <= r <= 0.85: return True, f"OTE صاعد {r*100:.0f}% ✅"
@@ -1786,23 +1827,20 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
 
     min_dist = SL_MIN_DIST_ATR * atr
     max_dist = SL_MAX_DIST_ATR * atr
+    # Buffer is added outside the selected level, so reserve room for it inside
+    # the maximum allowed final risk distance.
+    max_level_dist = max(0.0, max_dist - SL_BUFFER_ATR * atr)
     chosen_level = None; chosen_name = "ATR Fallback"
 
     for lvl, nm, src in candidates:
         dist = abs(current_price - lvl)
-        if min_dist <= dist <= max_dist:
+        if min_dist <= dist <= max_level_dist:
             chosen_level = lvl; chosen_name = nm; break
-    if chosen_level is None and candidates:
-        for lvl, nm, src in candidates:
-            dist = abs(current_price - lvl)
-            if dist >= min_dist:
-                chosen_level = lvl; chosen_name = nm; break
-        if chosen_level is None:
-            chosen_level = candidates[0][0]; chosen_name = candidates[0][1]
     if chosen_level is None:
-        if direction == "BUY": chosen_level = current_price - 1.0 * atr
-        else: chosen_level = current_price + 1.0 * atr
-        chosen_name = "ATR (No levels)"
+        # No structural level fits the allowed risk envelope: use a bounded ATR stop.
+        chosen_level = (current_price - max_level_dist if direction == "BUY"
+                        else current_price + max_level_dist)
+        chosen_name = "ATR Bounded Fallback"
 
     if direction == "BUY":
         sl = chosen_level - SL_BUFFER_ATR * atr
@@ -1810,8 +1848,10 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         sl = chosen_level + SL_BUFFER_ATR * atr
     if direction == "BUY":
         if (current_price - sl) < min_dist: sl = current_price - min_dist
+        if (current_price - sl) > max_dist: sl = current_price - max_dist
     else:
         if (sl - current_price) < min_dist: sl = current_price + min_dist
+        if (sl - current_price) > max_dist: sl = current_price + max_dist
 
     risk = abs(current_price - sl)
     if risk <= 0: return None
@@ -1903,17 +1943,43 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
 
 
 def validate_levels(signal, levels, profile):
-    if not levels: return False, "لا مستويات"
+    if not isinstance(levels, dict):
+        return False, "لا توجد مستويات صالحة"
+    required = ("entry", "stop_loss", "target1", "target2", "target3",
+                "risk_reward_1", "risk_reward_2", "risk_reward_3")
+    vals = {}
+    for key in required:
+        try:
+            vals[key] = float(levels[key])
+        except (KeyError, TypeError, ValueError):
+            return False, f"مستوى مفقود أو غير رقمي: {key}"
+        if not np.isfinite(vals[key]):
+            return False, f"مستوى غير صالح: {key}"
+    entry, sl = vals["entry"], vals["stop_loss"]
+    t1, t2, t3 = vals["target1"], vals["target2"], vals["target3"]
+    if min(entry, sl, t1, t2, t3) <= 0:
+        return False, "الأسعار يجب أن تكون موجبة"
     if signal == "BUY":
-        if not levels["stop_loss"] < levels["entry"] < levels["target1"]:
-            return False, "ترتيب BUY غير صالح"
+        if not sl < entry < t1 < t2 < t3:
+            return False, "ترتيب مستويات BUY غير صالح"
+    elif signal == "SELL":
+        if not t3 < t2 < t1 < entry < sl:
+            return False, "ترتيب مستويات SELL غير صالح"
     else:
-        if not levels["target1"] < levels["entry"] < levels["stop_loss"]:
-            return False, "ترتيب SELL غير صالح"
-    if levels["risk_reward_1"] < 0.70: return False, "TP1 RR منخفض"
-    if levels["risk_reward_2"] < 1.10: return False, "TP2 RR منخفض"
-    if levels["risk_reward_3"] < 1.60: return False, "TP3 RR منخفض"
+        return False, "اتجاه غير صالح"
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return False, "المخاطرة صفر أو غير صالحة"
+    for i, target in enumerate((t1, t2, t3), start=1):
+        actual_rr = abs(target - entry) / risk
+        stored_rr = vals[f"risk_reward_{i}"]
+        if abs(actual_rr - stored_rr) > max(0.05, actual_rr * 0.05):
+            return False, f"نسبة العائد/المخاطرة TP{i} غير متطابقة مع المستويات"
+    if vals["risk_reward_1"] < MIN_RR_TP1: return False, "TP1 RR منخفض"
+    if vals["risk_reward_2"] < MIN_RR_TP2: return False, "TP2 RR منخفض"
+    if vals["risk_reward_3"] < MIN_RR_TP3: return False, "TP3 RR منخفض"
     return True, ""
+
 
 
 # ============================================================
@@ -2159,7 +2225,18 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     else:
         checks.append({"name": "EMA20 غير متاح", "pass": False, "score": 0, "icon": "📍"})
 
-    h = datetime.now(timezone.utc).hour
+    # Use the timestamp of the analyzed candle, not wall-clock time; this also
+    # keeps historical backtests free of current-session leakage.
+    try:
+        candle_time = pd.Timestamp(df.index[-1])
+        if candle_time.tzinfo is None:
+            candle_time = candle_time.tz_localize("UTC")
+        else:
+            candle_time = candle_time.tz_convert("UTC")
+        h = int(candle_time.hour)
+    except Exception:
+        checks.append({"name": "وقت الشمعة غير متاح", "pass": False, "score": 0, "icon": "🕐"})
+        h = -1
     asset = asset_type_from_name(pair_name)
     active = (7 <= h <= 21) or asset == "crypto"
     if active:
@@ -2209,7 +2286,7 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     if zone_ok:
         checks.append({"name": "منطقة دخول ممتازة", "pass": True, "score": 10, "icon": "🎯"}); total += 10
     else:
-        checks.append({"name": "منطقة دخول متباعدة", "pass": True, "score": 3, "icon": "🎯"}); total += 3
+        checks.append({"name": "منطقة دخول متباعدة", "pass": False, "score": 0, "icon": "🎯"})
 
     final_total = max(0, min(total, 100))
 
@@ -2354,21 +2431,20 @@ def generate_signal(df, current_price, pair_name, symbol,
             sp.append(("LTF", 6))
         _strict_session = (profile_key == "crypto")
         so, sm, sl_ = session_filter(pair_name, strict=_strict_session)
-        if not so and MODE != "strict":
-            so = True; sm += " (relaxed)"
         flt["Session"] = {"pass": so, "msg": sm, "label": sl_}
-        if not so: sp.append(("Session", 5))
+        if not so:
+            ap = False; br_ = br_ or sm
         vo, vm, vl = volatility_regime_filter(df)
         flt["Volatility"] = {"pass": vo, "msg": vm, "label": vl}
         if not vo:
-            if vl == "CHAOS": ap = False; br_ = br_ or vm
-            else: sp.append(("Volatility", 6))
+            ap = False; br_ = br_ or vm
         ko, km = in_kill_zone(asset_type_from_name(pair_name))
         flt["Kill Zone"] = {"pass": ko, "msg": km}
         if not ko and MODE == "strict": sp.append(("KZ", 3))
         oo, om = ote_filter(df, cand)
         flt["OTE"] = {"pass": oo, "msg": om}
-        if not oo and MODE == "strict": sp.append(("OTE", 5))
+        if not oo:
+            ap = False; br_ = br_ or om
         do, dm = displacement_check(df, cand)
         flt["Displacement"] = {"pass": do, "msg": dm}
         if not do: sp.append(("Disp", 4))
@@ -2414,11 +2490,17 @@ def generate_signal(df, current_price, pair_name, symbol,
         entry_score = None
 
     if skip_external_filters:
+        # Historical mode may skip live-only external data, but it must still
+        # apply the same signal, confidence, confluence and entry-timing gates.
         if signal == "WAIT": es, er = "WAIT", "Signal WAIT"
-        elif not ap: es, er = "BLOCKED", f"Hard Gate: {br_}"
-        elif tg in ("A+","A","B"): es, er = "EXECUTE", f"{tg} PASS (backtest)"
-        elif tg == "C": es, er = "WATCH", "C مراقبة"
-        else: es, er = "WAIT", "لا اجتياز"
+        elif not rok: es, er = "BLOCKED", "Invalid trade levels"
+        elif ec < MIN_EMIT_CONFIDENCE: es, er = "WAIT", "Confidence below gate"
+        elif cs < MIN_EMIT_CONFIDENCE: es, er = "WAIT", "Confirmation below gate"
+        elif entry_score is None or entry_score < MIN_EMIT_CONFIDENCE:
+            es, er = "WAIT", "Entry timing unavailable/weak"
+        elif tg in ("A+", "A", "B"):
+            es, er = "EXECUTE", f"{tg} PASS (historical core gates)"
+        else: es, er = "WAIT", "Grade below execution gate"
     else:
         if signal == "WAIT":
             es, er = "WAIT", "Signal WAIT"
@@ -2498,94 +2580,131 @@ def _weekly_bias_from_slice(df_s, pair_name):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
+    """Conservative walk-forward simulation; uses only past bars for each signal."""
     try:
         dff = get_historical_data(symbol, "1y", "4h")
-        if dff is None or len(dff) < lookback + 50: return None
-        prof = profile_for(pair_name)
-        try:
-            dxy_df = get_historical_data("DX-Y.NYB", "1y", "4h")
-            dxy_b = _bias_from_slice(dxy_df, "DXY")[0] if dxy_df is not None else "NEUTRAL"
-        except Exception: dxy_b = "NEUTRAL"
-        try: gc = get_gold_dxy_correlation() if ("Gold" in pair_name or "XAU" in pair_name.upper()) else None
-        except Exception: gc = None
-        try:
-            ccs = get_currency_strength_matrix()
-            st.session_state["_ccy_strength_cache"] = ccs
-            rd, _ = get_interest_rate_differential(pair_name)
-            rk = get_risk_sentiment(); bd = get_bond_yields()
-        except Exception: ccs, rd, rk, bd = None, 0.0, None, None
-        df = dff.copy()
-        w = 0; l = 0; tr = 0.0; eq = 0.0; pk = 0.0; mdd = 0.0
-        tlog = []; mlt = []
-        si = 100; ei = len(df) - 20
-        next_available_i = si
-        for i in range(si, ei):
+        if dff is None or len(dff) < max(lookback + 50, 150):
+            return None
+        df = dff.copy().sort_index()
+        df = df[~df.index.duplicated(keep="last")]
+        w = l = 0
+        total_r = equity = peak = max_dd = 0.0
+        tlog, mlt, returns = [], [], []
+        start_i = 100
+        end_i = len(df) - 1
+        next_available_i = start_i
+        for i in range(start_i, end_i):
             if i < next_available_i:
                 continue
+            # Signal at the close of i-1; execution simulation begins on bar i.
             sl_df = df.iloc[:i].copy()
-            price = float(df["close"].iloc[i-1])
+            price = safe_float(sl_df["close"].iloc[-1], np.nan)
+            if not np.isfinite(price) or price <= 0:
+                continue
             mb, mcf = _bias_from_slice(sl_df, pair_name)
             wb = _weekly_bias_from_slice(sl_df, pair_name)
             pcd = {"mtf_bias": mb, "mtf_conf": mcf, "mtf_details": {},
-                   "weekly_bias": wb, "dxy_bias": dxy_b, "gold_corr": gc,
-                   "ccy_strength": ccs, "rate_diff": rd, "risk": rk,
-                   "bonds": bd, "sentiment": None}
+                   "weekly_bias": wb, "dxy_bias": "NEUTRAL", "gold_corr": None,
+                   "ccy_strength": {}, "rate_diff": 0.0, "risk": None,
+                   "bonds": None, "sentiment": None}
             try:
                 res = generate_signal(sl_df, price, pair_name, symbol,
                                       skip_external_filters=True, precomputed=pcd)
-            except Exception: continue
-            if res["signal"] == "WAIT" or res["levels"] is None: continue
-            if res["execution_status"] != "EXECUTE": continue
-            slv = res["levels"]["stop_loss"]; t1 = res["levels"]["target1"]
-            d = res["signal"]; rr1 = res["levels"]["risk_reward_1"]
-            fut = df.iloc[i:i+20]
-            htp = hsl = False; out = "OPEN"
-            exit_bar_index = None
-            for future_pos, (_, row) in enumerate(fut.iterrows(), start=i):
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Backtest signal failed %s bar %s: %s", symbol, i, exc)
+                continue
+            if res.get("signal") not in ("BUY", "SELL") or res.get("execution_status") != "EXECUTE":
+                continue
+            levels = res.get("levels")
+            valid, _ = validate_levels(res.get("signal"), levels, profile_for(pair_name))
+            if not valid:
+                continue
+            d = res["signal"]
+            entry = safe_float(levels.get("entry"), np.nan)
+            slv = safe_float(levels.get("stop_loss"), np.nan)
+            t1 = safe_float(levels.get("target1"), np.nan)
+            risk = abs(entry - slv)
+            if not all(np.isfinite(v) for v in (entry, slv, t1, risk)) or risk <= 0:
+                continue
+            fut = df.iloc[i:min(i + 20, len(df))]
+            if fut.empty:
+                break
+            outcome = "TIME_EXIT"
+            exit_price = safe_float(fut["close"].iloc[-1], entry)
+            exit_pos = i + len(fut) - 1
+            for future_pos, (_, bar) in enumerate(fut.iterrows(), start=i):
+                hi = safe_float(bar.get("high"), np.nan)
+                lo = safe_float(bar.get("low"), np.nan)
+                if not np.isfinite(hi) or not np.isfinite(lo):
+                    continue
+                # Conservative tie-break: if SL and TP are both touched, count SL first.
                 if d == "BUY":
-                    if row["low"] <= slv: hsl = True; out = "LOSS"; exit_bar_index = future_pos; break
-                    if row["high"] >= t1: htp = True; out = "WIN"; exit_bar_index = future_pos; break
+                    if lo <= slv:
+                        outcome, exit_price, exit_pos = "LOSS", slv, future_pos
+                        break
+                    if hi >= t1:
+                        outcome, exit_price, exit_pos = "WIN", t1, future_pos
+                        break
                 else:
-                    if row["high"] >= slv: hsl = True; out = "LOSS"; exit_bar_index = future_pos; break
-                    if row["low"] <= t1: htp = True; out = "WIN"; exit_bar_index = future_pos; break
-            if exit_bar_index is not None:
-                next_available_i = exit_bar_index + 1
-            if htp: w += 1; tr += rr1; eq += rr1
-            elif hsl: l += 1; tr -= 1.0; eq -= 1.0
-            else: continue
+                    if hi >= slv:
+                        outcome, exit_price, exit_pos = "LOSS", slv, future_pos
+                        break
+                    if lo <= t1:
+                        outcome, exit_price, exit_pos = "WIN", t1, future_pos
+                        break
+            if d == "BUY":
+                r_value = (exit_price - entry) / risk
+            else:
+                r_value = (entry - exit_price) / risk
+            # Model transaction costs conservatively where spread is unavailable.
+            r_value = float(r_value) - 0.02
+            if outcome == "WIN": w += 1
+            elif outcome == "LOSS": l += 1
+            else:
+                outcome = "TIME_EXIT_WIN" if r_value > 0 else "TIME_EXIT_LOSS" if r_value < 0 else "TIME_EXIT_FLAT"
+                if r_value > 0: w += 1
+                elif r_value < 0: l += 1
+            total_r += r_value
+            equity += r_value
+            peak = max(peak, equity)
+            max_dd = max(max_dd, peak - equity)
+            returns.append(r_value)
             try:
                 feat = extract_ml_features(res, d)
-                mlt.append({"features": feat, "label": 1 if htp else 0})
-            except Exception: pass
-            pk = max(pk, eq); mdd = max(mdd, pk - eq)
-            tlog.append({"bar_index": i, "direction": d, "outcome": out,
-                         "r": rr1 if htp else -1.0,
-                         "grade": res.get("trade_grade","?"),
-                         "confidence": res["confidence"]})
-        tot = w + l
+                mlt.append({"features": feat, "label": 1 if r_value > 0 else 0})
+            except Exception:
+                pass
+            tlog.append({"bar_index": i, "exit_bar_index": exit_pos,
+                         "direction": d, "outcome": outcome, "r": r_value,
+                         "grade": res.get("trade_grade", "?"),
+                         "confidence": res.get("confidence", 0)})
+            next_available_i = exit_pos + 1
+        tot = len(returns)
         if tot == 0:
-            return {"trades":0,"wins":0,"losses":0,"win_rate":0,"total_R":0,
-                    "expectancy":0,"profit_factor":0,"max_drawdown":0,"sharpe":0,
-                    "avg_r":0,"trades_log":[],"monte_carlo":None,"ml_trades":[]}
-        ar = tr/tot
-        wr_ = [t["r"] for t in tlog if t["outcome"] == "WIN"]
-        lr_ = [t["r"] for t in tlog if t["outcome"] == "LOSS"]
-        alr = wr_ + lr_
-        sh = 0.0
-        if len(alr) > 1:
-            rs = float(np.std(alr, ddof=1))
-            sh = (ar/rs*np.sqrt(len(alr))) if rs > 0 else 0.0
-        mcr = monte_carlo_simulation(alr, 1000) if run_mc and len(alr) >= 5 else None
-        return {"trades": tot, "wins": w, "losses": l,
-                "win_rate": w/tot*100, "total_R": tr, "expectancy": ar, "avg_r": ar,
-                "profit_factor": sum(wr_)/max(abs(sum(lr_)), 1e-9),
-                "max_drawdown": mdd, "sharpe": sh,
-                "trades_log": tlog[-50:], "monte_carlo": mcr, "ml_trades": mlt}
+            return {"trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
+                    "total_R": 0, "expectancy": 0, "profit_factor": 0,
+                    "max_drawdown": 0, "sharpe": 0, "avg_r": 0,
+                    "trades_log": [], "monte_carlo": None, "ml_trades": []}
+        wins_r = [x for x in returns if x > 0]
+        losses_r = [x for x in returns if x < 0]
+        expectancy = float(np.mean(returns))
+        std = float(np.std(returns, ddof=1)) if tot > 1 else 0.0
+        sharpe = (expectancy / std * math.sqrt(tot)) if std > 0 else 0.0
+        profit_factor = sum(wins_r) / max(abs(sum(losses_r)), 1e-9)
+        mc = monte_carlo_simulation(returns, 1000) if run_mc and tot >= 5 else None
+        return {"trades": tot, "wins": sum(1 for x in returns if x > 0),
+                "losses": sum(1 for x in returns if x < 0),
+                "win_rate": sum(1 for x in returns if x > 0) / tot * 100,
+                "total_R": total_r, "expectancy": expectancy, "avg_r": expectancy,
+                "profit_factor": profit_factor, "max_drawdown": max_dd,
+                "sharpe": sharpe, "trades_log": tlog[-50:],
+                "monte_carlo": mc, "ml_trades": mlt}
     except Exception as e:
+        logging.getLogger(__name__).exception("Backtest failed for %s", symbol)
         return {"error": str(e)}
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_all_signals_parallel():
     results = []
     def one(pn, sym):
@@ -2609,6 +2728,9 @@ def get_all_signals_parallel():
             orig_gate_ok = False; orig_gate = "—"
             if sig_ in ("BUY","SELL"):
                 orig_gate_ok, _ = passes_confidence_gate(r["confidence"], ec_score)
+                orig_gate_ok = bool(orig_gate_ok and r.get("execution_status") == "EXECUTE"
+                                    and r.get("entry_confirmation_score") is not None
+                                    and safe_float(r.get("entry_confirmation_score"), 0) >= MIN_EMIT_CONFIDENCE)
                 orig_gate = "✅" if orig_gate_ok else "❌"
 
             flip_sig = "—"; flip_conf_raw = 0; flip_status = "NONE"; flip_icon = ""
@@ -2677,7 +2799,9 @@ def get_all_signals_parallel():
                 "TP1": fmt_price(lv.get("target1"), pn),
                 "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0,
                 "_ec_score": ec_score, "_flip_ec_score": flip_ec_score}
-        except Exception: return None
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Signal scan failed for %s: %s", pn, exc)
+            return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(one, p, s): (p, i) for i, (p, s) in enumerate(PAIRS.items())}
         for f in concurrent.futures.as_completed(futs):
@@ -2701,61 +2825,74 @@ def get_all_signals_parallel():
 
 
 def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
-    """
-    يمسح كل الأزواج، يرجع أقوى (حتى 4) إشارات تمر البوابة مع كامل تفاصيلها.
-    """
+    """Return only freshly revalidated original signals. Flip candidates are display-only."""
     df = get_all_signals_parallel()
-    if df is None or df.empty:
-        return {"status": "NONE"}
-    mask = pd.Series([False] * len(df), index=df.index)
-    if "🚦 أصلي" in df.columns:
-        mask = mask | (df["🚦 أصلي"] == "✅")
-    if "🚦 Flip" in df.columns:
-        mask = mask | (df["🚦 Flip"] == "✅")
-    strong = df[mask].copy()
-    if strong.empty:
+    if df is None or df.empty or "الزوج" not in df.columns:
         return {"status": "NONE"}
 
-    def calc_score(row):
-        s_o = s_f = 0.0
-        if row.get("🚦 أصلي") == "✅":
-            s_o = row.get("_ec_score", 0) * 0.6 + row.get("الثقة", 0) * 0.4
-        if row.get("🚦 Flip") == "✅":
-            fc = row.get("Flip Conf%", 0)
-            fc = fc if isinstance(fc, (int, float)) else 0
-            s_f = row.get("_flip_ec_score", 0) * 0.6 + fc * 0.4
-        return max(s_o, s_f)
+    # Never promote Flip rows here: they require their own separately modelled
+    # direction/levels and previously could be rendered with the original trade.
+    candidates = df[(df.get("🚦 أصلي", "") == "✅") &
+                    (df.get("Execution", "") == "EXECUTE")].copy()
+    if candidates.empty:
+        return {"status": "NONE"}
 
-    strong["_final_score"] = strong.apply(calc_score, axis=1)
-    strong = strong.sort_values("_final_score", ascending=False).head(max_trades)
+    def rank(row):
+        ec = safe_float(row.get("_ec_score", 0), 0)
+        conf = safe_float(row.get("الثقة", 0), 0)
+        return 0.6 * ec + 0.4 * conf
+    candidates["_rank"] = candidates.apply(rank, axis=1)
+    candidates = candidates.sort_values("_rank", ascending=False)
 
     trades = []
-    for _, best in strong.iterrows():
-        pair = best["الزوج"]
+    for _, row in candidates.iterrows():
+        pair = str(row.get("الزوج", ""))
         sym = PAIRS.get(pair)
         if not sym:
             continue
-        price, _ = get_spot_price(sym)
+        price, _change = get_spot_price(sym)
         data = get_historical_data(sym, "3mo", "4h")
-        if price is None or data is None:
+        if price is None or data is None or len(data) < 100:
             continue
         try:
+            price = float(price)
+            if not np.isfinite(price) or price <= 0:
+                continue
             result = generate_signal(data, price, pair, sym, skip_external_filters=False)
-        except Exception:
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Final signal recheck failed for %s: %s", pair, exc)
             continue
-        ec = None
-        try:
-            if result["signal"] in ("BUY","SELL") and result["levels"]:
-                ec = entry_confirmation_score(
-                    result.get("df"), result["signal"], result["levels"], pair)
-        except Exception:
-            ec = None
-        trades.append({
-            "pair": pair, "price": price, "sym": sym,
-            "result": result, "row": best.to_dict(),
-            "ec": ec,
-            "score": float(best["_final_score"])})
-
+        # The latest decision is authoritative; a stale cached gate is never enough.
+        if result.get("signal") not in ("BUY", "SELL"):
+            continue
+        if result.get("execution_status") != "EXECUTE":
+            continue
+        levels = result.get("levels")
+        valid, _reason = validate_levels(result.get("signal"), levels, profile_for(pair))
+        if not valid or not levels:
+            continue
+        ec = result.get("entry_confirmation_score")
+        if ec is None or safe_float(ec, 0) < MIN_EMIT_CONFIDENCE:
+            continue
+        # Do not issue a stale entry after price moved materially away from calculated entry.
+        entry = safe_float(levels.get("entry"), np.nan)
+        atr = safe_float(result.get("df", pd.DataFrame()).get("atr", pd.Series(dtype=float)).iloc[-1]
+                         if result.get("df") is not None and len(result.get("df")) else np.nan, np.nan)
+        if not np.isfinite(entry) or not np.isfinite(atr) or atr <= 0:
+            continue
+        if abs(price - entry) > 0.25 * atr:
+            continue
+        # Ensure levels reflect the quote used for this final pass.
+        levels["entry"] = price
+        valid, _reason = validate_levels(result.get("signal"), levels, profile_for(pair))
+        if not valid:
+            continue
+        trades.append({"pair": pair, "price": price, "sym": sym,
+                       "result": result, "row": row.to_dict(),
+                       "ec": result.get("entry_confirmation_details"),
+                       "score": float(row["_rank"])})
+        if len(trades) >= max_trades:
+            break
     if not trades:
         return {"status": "NONE"}
     return {"status": "FOUND", "trades": trades, "count": len(trades)}
