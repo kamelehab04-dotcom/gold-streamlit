@@ -1,26 +1,6 @@
 # ============================================================
 # BLACK PYRAMID v2010.3 — MULTI-MODE FREQUENCY EDITION
 # Institutional Analysis Terminal
-#
-# v2010.3 CHANGELOG (bug fixes from v2010.2):
-#  - [CRITICAL] detect_regime: normalized ATR threshold (0.5),
-#    adaptive BB compression. Fixes FX being stuck in RANGE.
-#  - [CRITICAL] quick_backtest: fixed lookahead price leak
-#    (use close[i-1] not close[i]).
-#  - [CRITICAL] All Assets scan now applies full filters
-#    (skip_external_filters=False) — consistent with Single.
-#  - [CRITICAL] All Assets uses 6mo (was 3mo) → proper swings.
-#  - [HIGH] generate_signal: skip rebuild when features exist.
-#  - [HIGH] Sentiment applied AFTER signal stabilizes, cannot
-#    flip direction.
-#  - [HIGH] directional_score: BOS/MSS/etc use 5-bar window
-#    (matches entry_confirmation_score).
-#  - [HIGH] _weekly_bias_from_slice: SMA fallback works with
-#    shorter data (was ema200 → always NEUTRAL).
-#  - [MED] flip_confidence_pct: proper mapping (22→50, 100→95)
-#    instead of 50 + raw*0.5.
-#  - [MED] confirmation_gate: RANGE bonus 8→15, COMPRESSION 5→12.
-#  - All previous v2010.2 features preserved.
 # ============================================================
 
 import os
@@ -74,7 +54,6 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 APP_VERSION = "v2010.3"
 
-# ⭐ TRADE FREQUENCY MODE
 MODE = "balanced"
 
 _GATE_PRESETS = {
@@ -238,7 +217,9 @@ def init_state():
         "backtest_results": None, "strict_filters": False,
         "show_calendar_today": False, "show_session_info": False,
         "show_market_status": False, "trade_journal": [],
-        "ml_model": None, "_ccy_strength_cache": {}}
+        "ml_model": None, "_ccy_strength_cache": {},
+        "show_details": False,
+        "strong_trade_result": None}
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
 
@@ -1230,13 +1211,6 @@ def get_gold_dxy_correlation():
     return float(a.iloc[:,0].rolling(30).corr(a.iloc[:,1]).iloc[-1])
 
 def detect_regime(df):
-    """
-    v2010.3 FIX: normalized threshold + adaptive BB compression.
-    Old code used ts = |ema20-ema50|/atr with threshold 1.0 which
-    was almost unreachable for FX (ATR too small relative to EMA gap
-    in price terms). Now we normalize by ATR with threshold 0.5 and
-    use adaptive BB compression based on rolling z-score.
-    """
     l = df.iloc[-1]
     atr = safe_float(l["atr"], np.nan)
     price = safe_float(l["close"], np.nan)
@@ -1244,10 +1218,8 @@ def detect_regime(df):
         return "UNKNOWN", 50.0
     ema_spread = l["ema20"] - l["ema50"]
     ts = abs(ema_spread) / atr
-    # Lower threshold from 1.0 → 0.5 to accept moderate trends
     if ts >= 0.5:
         return ("TREND_BULLISH" if ema_spread > 0 else "TREND_BEARISH"), 75
-    # Adaptive compression: rolling z-score of BB width
     try:
         bw_series = (df["bb_upper"] - df["bb_lower"]) / df["close"]
         bw_mean = bw_series.rolling(100).mean().iloc[-1]
@@ -1431,7 +1403,6 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
     s = structure_state(df)
     if s["bullish"]: sc["BUY"]["structure"] += 45; rs.append("هيكل صاعد")
     elif s["bearish"]: sc["SELL"]["structure"] += 45; rs.append("هيكل هابط")
-    # v2010.3 FIX: use 5-bar window (matches entry_confirmation_score)
     recent = df.iloc[-5:]
     if recent["bos_bullish"].any(): sc["BUY"]["structure"] += 35; rs.append("BOS صاعد")
     if recent["bos_bearish"].any(): sc["SELL"]["structure"] += 35; rs.append("BOS هابط")
@@ -1541,7 +1512,6 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
     if (direction == "BUY" and regime == "TREND_BULLISH") or \
        (direction == "SELL" and regime == "TREND_BEARISH"):
         sc += 20; rs.append("Regime متوافق")
-    # v2010.3 FIX: RANGE 8→15, COMPRESSION 5→12 (was unfairly penalizing FX)
     elif regime == "RANGE": sc += 15; rs.append("Range")
     elif regime == "COMPRESSION": sc += 12; rs.append("Compression")
     else: bl.append("Regime غير متوافق")
@@ -1938,7 +1908,7 @@ def validate_levels(signal, levels, profile):
 
 
 # ============================================================
-# FLIP DETECTION (independent engine)
+# FLIP DETECTION
 # ============================================================
 
 def detect_reversal_candle(df):
@@ -2114,12 +2084,6 @@ def detect_signal_flip(df, current_price, original_signal, profile):
 
 
 def flip_raw_to_pct(raw_score):
-    """
-    v2010.3 FIX: proper mapping. Old formula was 50 + raw*0.5
-    which compressed everything into 50-95 and made STRONG_FLIP
-    always appear as A+. New formula maps linearly from the
-    meaningful range [22, 100] → [50, 95].
-    """
     return round(clamp(50 + (raw_score - 22) * 45 / 78, 50, 95), 1)
 
 
@@ -2278,8 +2242,6 @@ def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
     profile = profile_for(pair_name); profile_key = get_asset_profile(pair_name)
-    # v2010.3 FIX: only build features if not already present
-    # (prevents double-build in backtest context)
     _required = {"ema20","ema50","ema200","rsi","atr","swing_high",
                  "bos_bullish","vwap","bb_upper"}
     if not _required.issubset(df.columns):
@@ -2305,8 +2267,6 @@ def generate_signal(df, current_price, pair_name, symbol,
                           ccy_strength=ccs, rate_diff=rd, risk=rk, bonds=bd)
     if sent is None: sent = estimate_retail_sentiment(df, profile)
 
-    # v2010.3 FIX: apply MTF + weekly adjustments FIRST, then determine
-    # preliminary direction, THEN apply sentiment (which cannot flip it).
     buy, sell = sc["buy"], sc["sell"]
     if mtf == "BULLISH": buy += 8; sell -= 4
     elif mtf == "BEARISH": sell += 8; buy -= 4
@@ -2323,7 +2283,6 @@ def generate_signal(df, current_price, pair_name, symbol,
                 buy = clamp(buy + sb, 0, 100)
             else:
                 sell = clamp(sell + sb, 0, 100)
-            # Guard: sentiment cannot flip direction
             if cand_dir == "BUY" and buy <= sell: buy = sell + 1.0
             if cand_dir == "SELL" and sell <= buy: sell = buy + 1.0
             gap = abs(buy - sell)
@@ -2497,11 +2456,6 @@ def _bias_from_slice(df_s, pair_name):
     except Exception: return "NEUTRAL", 50.0
 
 def _weekly_bias_from_slice(df_s, pair_name):
-    """
-    v2010.3 FIX: use SMA-based bias that works with fewer weekly bars.
-    Old code called _bias_from_slice which required ema200 → weekly
-    biases were always NEUTRAL for typical backtest ranges.
-    """
     if df_s is None or len(df_s) < 100: return "NEUTRAL"
     try:
         w = df_s.resample("1W").agg({"open":"first","high":"max","low":"min",
@@ -2533,14 +2487,12 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
             rd, _ = get_interest_rate_differential(pair_name)
             rk = get_risk_sentiment(); bd = get_bond_yields()
         except Exception: ccs, rd, rk, bd = None, 0.0, None, None
-        # v2010.3 FIX: keep df RAW (no pre-built features) → no lookahead
         df = dff.copy()
         w = 0; l = 0; tr = 0.0; eq = 0.0; pk = 0.0; mdd = 0.0
         tlog = []; mlt = []
         si = 100; ei = len(df) - 20
         for i in range(si, ei):
             sl_df = df.iloc[:i].copy()
-            # v2010.3 FIX: use close[i-1] (last known close) → no lookahead
             price = float(df["close"].iloc[i-1])
             mb, mcf = _bias_from_slice(sl_df, pair_name)
             wb = _weekly_bias_from_slice(sl_df, pair_name)
@@ -2606,10 +2558,8 @@ def get_all_signals_parallel():
     def one(pn, sym):
         try:
             p, _ = get_spot_price(sym)
-            # v2010.3 FIX: use 6mo (was 3mo) → better swing detection
             d = get_historical_data(sym, "6mo", "4h")
             if p is None or d is None: return None
-            # v2010.3 FIX: skip_external_filters=False → consistent with Single
             r = generate_signal(d, p, pn, sym, skip_external_filters=False)
             lv = r["levels"] or {}
             sig_ = r["signal"]
@@ -2645,7 +2595,6 @@ def get_all_signals_parallel():
                         if fl["status"] == "STRONG_FLIP": flip_icon = "🚨"
                         elif fl["status"] == "POSSIBLE_FLIP": flip_icon = "⚠️"
                         else: flip_icon = "💡"
-                        # v2010.3 FIX: proper mapping
                         flip_confidence_pct = flip_raw_to_pct(fl["confidence"])
                         nl = fl.get("new_levels")
                         if nl:
@@ -2714,8 +2663,50 @@ def get_all_signals_parallel():
         sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
         return (-gate_score, -max_score, sp_)
     out["_sort"] = out.apply(sort_key, axis=1)
-    out = out.sort_values("_sort").drop(columns=["_sort", "_ec_score", "_flip_ec_score"])
+    out = out.sort_values("_sort").drop(columns=["_sort"])
     return out
+
+
+def find_strongest_trade():
+    """يمسح كل الأزواج، يرجع أقوى إشارة تمر البوابة مع كامل تفاصيلها."""
+    df = get_all_signals_parallel()
+    if df is None or df.empty:
+        return {"status": "NONE"}
+    mask = pd.Series([False] * len(df), index=df.index)
+    if "🚦 أصلي" in df.columns:
+        mask = mask | (df["🚦 أصلي"] == "✅")
+    if "🚦 Flip" in df.columns:
+        mask = mask | (df["🚦 Flip"] == "✅")
+    strong = df[mask].copy()
+    if strong.empty:
+        return {"status": "NONE"}
+
+    def calc_score(row):
+        s_o = s_f = 0.0
+        if row.get("🚦 أصلي") == "✅":
+            s_o = row.get("_ec_score", 0) * 0.6 + row.get("الثقة", 0) * 0.4
+        if row.get("🚦 Flip") == "✅":
+            fc = row.get("Flip Conf%", 0)
+            fc = fc if isinstance(fc, (int, float)) else 0
+            s_f = row.get("_flip_ec_score", 0) * 0.6 + fc * 0.4
+        return max(s_o, s_f)
+
+    strong["_final_score"] = strong.apply(calc_score, axis=1)
+    best = strong.sort_values("_final_score", ascending=False).iloc[0]
+    pair = best["الزوج"]
+    sym = PAIRS.get(pair)
+    if not sym:
+        return {"status": "NONE"}
+    price, _ = get_spot_price(sym)
+    data = get_historical_data(sym, "3mo", "4h")
+    if price is None or data is None:
+        return {"status": "NONE"}
+    try:
+        result = generate_signal(data, price, pair, sym, skip_external_filters=False)
+    except Exception:
+        return {"status": "NONE"}
+    return {"status": "FOUND", "row": best.to_dict(), "result": result,
+            "pair": pair, "price": price, "sym": sym}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3020,27 +3011,40 @@ with hl:
         </div>""", unsafe_allow_html=True)
 
 with hr:
-    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
-    b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
-    with b1:
+    st.markdown('<div style="height: 14px;"></div>', unsafe_allow_html=True)
+    br1 = st.columns(3)
+    with br1[0]:
         if st.button("📅 التقويم", width="stretch", key="btn_cal"):
             st.session_state.show_calendar_today = not st.session_state.show_calendar_today
             st.session_state.show_session_info = False
             st.session_state.show_market_status = False
-    with b2:
+    with br1[1]:
         if st.button("🕐 الجلسة", width="stretch", key="btn_sess"):
             st.session_state.show_session_info = not st.session_state.show_session_info
             st.session_state.show_calendar_today = False
             st.session_state.show_market_status = False
-    with b3:
+    with br1[2]:
         if st.button("📊 السوق", width="stretch", key="btn_mkt"):
             st.session_state.show_market_status = not st.session_state.show_market_status
             st.session_state.show_calendar_today = False
             st.session_state.show_session_info = False
-    with b4:
+
+    st.markdown('<div style="height: 6px;"></div>', unsafe_allow_html=True)
+    br2 = st.columns(3)
+    with br2[0]:
         if st.button("🔄 تحديث", width="stretch", key="btn_ref"):
             st.session_state.economic_events = get_fmp_economic_calendar()
             st.toast("✅ تم التحديث")
+    with br2[1]:
+        _lbl = "🙈 إخفاء التفاصيل" if st.session_state.show_details else "👁️ إظهار التفاصيل"
+        if st.button(_lbl, width="stretch", key="btn_toggle_details"):
+            st.session_state.show_details = not st.session_state.show_details
+            st.rerun()
+    with br2[2]:
+        if st.button("🎯 أعثر على صفقة قوية", width="stretch", key="btn_strong"):
+            with st.spinner("🔍 جاري البحث عن أقوى صفقة..."):
+                st.session_state.strong_trade_result = find_strongest_trade()
+            st.rerun()
 
 
 if st.session_state.show_calendar_today:
@@ -3109,6 +3113,65 @@ if st.session_state.show_market_status:
             st.markdown(f"""<div class="tool-card"><div class="tool-name">⚖️ الحالة</div>
                 <div class="tool-value">{mst['overall_icon']}</div>
                 <div class="tool-desc">{mst['overall']}</div></div>""", unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════
+# 🏆 STRONGEST TRADE DISPLAY
+# ═══════════════════════════════════════════════
+_str_res = st.session_state.get("strong_trade_result")
+if _str_res:
+    if _str_res.get("status") == "NONE":
+        st.warning("⏸️ **لا توجد صفقة قوية تمر البوابة الآن.**")
+        if st.button("🗑️ مسح", key="clr_best_none"):
+            st.session_state.strong_trade_result = None
+            st.rerun()
+    elif _str_res.get("status") == "FOUND":
+        _bp = _str_res["pair"]; _br = _str_res["result"]
+        _blv = _br["levels"]; _bsig = _br["signal"]
+        _bc = _br["confidence"]; _bprice = _str_res["price"]
+        _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
+        st.markdown(
+            f'<div class="section-title" style="color:#7cd4a0;">'
+            f'🏆 أقوى صفقة في السوق الآن — {_bp}</div>',
+            unsafe_allow_html=True)
+        _bs1, _bs2 = st.columns([1.5, 1.2])
+        with _bs1:
+            st.markdown(f"""
+            <div style="background:linear-gradient(145deg, #0a1a12, #0d1710);
+                        padding:28px 22px; border-radius:22px; text-align:center;
+                        border:2px solid {_bacc};
+                        box-shadow:0 0 35px {_bacc}66, 0 16px 40px rgba(0,0,0,0.7);">
+                <div style="color:#7cd4a0; font-size:0.9rem; font-weight:800;
+                            letter-spacing:2px;">🏆 BEST TRADE FOUND</div>
+                <div style="color:#e8edf5; font-size:1.35rem; font-weight:800;
+                            margin-top:8px;">{_bp}</div>
+                <div style="font-size:3.4rem; font-weight:900; color:{_bacc};
+                            letter-spacing:4px; margin:12px 0; line-height:1;">{_bsig}</div>
+                <div style="color:#c8d2e2; font-size:1.1rem;">
+                    Confidence: <b>{_bc:.1f}%</b></div>
+                <div style="color:{_bacc}; font-size:1.15rem; font-weight:800;
+                            margin-top:10px; letter-spacing:1.5px;">
+                    Grade: {_br['trade_grade']}</div>
+            </div>""", unsafe_allow_html=True)
+        with _bs2:
+            st.metric("💵 السعر", fmt_price(_bprice, _bp))
+            if _blv:
+                st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp))
+                st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp))
+                st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp))
+                st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp))
+        if _blv:
+            _bconf = entry_confirmation_score(_br.get("df"), _bsig, _blv, _bp)
+            if _bconf: render_entry_checks(_bconf, prefix="Best ")
+            render_trade_plan(_blv, _bp,
+                             title=f"🏆 Best Trade Plan — {_bsig}",
+                             accent="#7cd4a0")
+        _bcl1, _bcl2 = st.columns([3, 1])
+        with _bcl2:
+            if st.button("🗑️ مسح", key="clr_best", width="stretch"):
+                st.session_state.strong_trade_result = None
+                st.rerun()
+        st.markdown("---")
 
 
 with st.sidebar:
@@ -3209,7 +3272,8 @@ if st.session_state.all_signals is not None and not st.session_state.all_signals
             mask = mask | (df_show["🚦 Flip"] == "✅")
         df_show = df_show[mask]
 
-    st.dataframe(df_show, hide_index=True, width="stretch", height=460)
+    _disp_cols = [c for c in df_show.columns if not str(c).startswith("_")]
+    st.dataframe(df_show[_disp_cols], hide_index=True, width="stretch", height=460)
 
     pending_low = 70 if MODE == "strict" else (68 if MODE == "balanced" else 65)
     if "🚦 أصلي" in df_full.columns and "الثقة" in df_full.columns:
@@ -3271,7 +3335,6 @@ if sig in ("BUY","SELL"):
     try:
         flip_result = detect_signal_flip(df, cur_price, sig, profile_for(sp_))
         if flip_result and flip_result.get("flip_signal"):
-            # v2010.3 FIX: proper mapping via flip_raw_to_pct
             flip_confidence_pct = flip_raw_to_pct(flip_result["confidence"])
             if flip_result.get("new_levels"):
                 flip_confirm = entry_confirmation_score(
@@ -3398,7 +3461,7 @@ else:
 # ============================================
 # ORIGINAL
 # ============================================
-if sig in ("BUY","SELL") and lv and orig_confirm:
+if st.session_state.show_details and sig in ("BUY","SELL") and lv and orig_confirm:
     st.markdown('<div class="section-title">🅰️ الإشارة الأصلية — Entry Confirmation '
                 '<span>10 فحوصات مستقلة</span></div>',
                 unsafe_allow_html=True)
@@ -3423,7 +3486,7 @@ if sig in ("BUY","SELL") and lv and orig_confirm:
 # ============================================
 # FLIP
 # ============================================
-if has_flip:
+if st.session_state.show_details and has_flip:
     flip_sig_name = flip_result["flip_signal"]
     flip_levels = flip_result["new_levels"]
     flip_status = flip_result["status"]
@@ -3478,6 +3541,18 @@ sadv = result.get("soft_advisories", "None")
 if sadv and sadv != "None":
     if not ss_soft: st.info(f"💡 **Advisories:** {sadv}")
     else: st.warning(f"⚠️ **Strict ({result['soft_penalties']:.1f}):** {sadv}")
+
+
+if not st.session_state.show_details:
+    st.info("💡 **التفاصيل مخفية** — اضغط **👁️ إظهار التفاصيل** أعلاه "
+            "لعرض Entry Checks + Trade Plans + التبويبات التفصيلية.")
+    st.markdown(f"""
+    <div class="footer-style">
+        ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
+        {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Dual Signals · Analysis Only
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 
 
 # ============================================
