@@ -751,15 +751,17 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
     y = np.array([t["label"] for t in trades_data], dtype=int)
     if len(np.unique(y)) < 2: return {"error": "كل الصفقات من نفس الفئة"}
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-    scaler = StandardScaler(); X_scaled = scaler.fit_transform(X)
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y,
-            test_size=ML_TEST_SIZE, random_state=42, stratify=y)
-        X_train_raw, X_test_raw, _, _ = train_test_split(X, y,
-            test_size=ML_TEST_SIZE, random_state=42, stratify=y)
-    except Exception:
-        X_train = X_test = X_scaled; X_train_raw = X_test_raw = X
-        y_train = y_test = y
+    # Trades are time-ordered; random splitting leaks future market regimes into training.
+    split_at = int(len(X) * (1.0 - ML_TEST_SIZE))
+    if split_at < 2 or split_at >= len(X):
+        return {"error": "بيانات غير كافية لتقسيم زمني آمن"}
+    X_train_raw, X_test_raw = X[:split_at], X[split_at:]
+    y_train, y_test = y[:split_at], y[split_at:]
+    if len(np.unique(y_train)) < 2 or len(np.unique(y_test)) < 2:
+        return {"error": "الفئات غير كافية في التقسيم الزمني؛ اجمع نتائج صفقات أكثر"}
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train_raw)
+    X_test = scaler.transform(X_test_raw)
     res = {}; trep = {}
 
     try:
@@ -1242,7 +1244,8 @@ def detect_regime(df):
 def htf_zone_filter(symbol, direction, profile_key):
     try:
         d = get_historical_data(symbol, "1y", "1d")
-        if d is None or len(d) < 60: return True, "HTF غير متاح", "UNKNOWN"
+        # Fail closed: missing higher-timeframe data must never approve a trade.
+        if d is None or len(d) < 60: return False, "HTF data unavailable — WAIT", "UNKNOWN"
         x = build_features(d, ASSET_PROFILES[profile_key]); l = x.iloc[-1]
         ip = safe_bool(l.get("in_premium")); id_ = safe_bool(l.get("in_discount"))
         if direction == "BUY" and ip: return False, "BUY مرفوض: HTF Premium", "PREMIUM"
@@ -1250,15 +1253,16 @@ def htf_zone_filter(symbol, direction, profile_key):
         if direction == "BUY" and id_: return True, "BUY في Discount ✅", "DISCOUNT"
         if direction == "SELL" and ip: return True, "SELL في Premium ✅", "PREMIUM"
         return True, "HTF محايد", "MID"
-    except Exception: return True, "HTF فشل", "UNKNOWN"
+    except Exception: return False, "HTF calculation failed — WAIT", "UNKNOWN"
 
 @st.cache_data(ttl=180, show_spinner=False)
 def ltf_entry_trigger(symbol, direction, profile_key):
     try:
         d = get_historical_data(symbol, "3mo", "1h")
-        if d is None or len(d) < 60: return True, "LTF غير متاح"
+        # Fail closed: no lower-timeframe trigger means no confirmed entry.
+        if d is None or len(d) < 60: return False, "LTF data unavailable — WAIT"
         x = build_features(d, ASSET_PROFILES[profile_key])
-        if len(x) < 3: return True, "LTF قصير"
+        if len(x) < 3: return False, "Insufficient LTF candles — WAIT"
         l = x.iloc[-1]; p = x.iloc[-2]
         if direction == "BUY":
             if safe_bool(l.get("bos_bullish")): return True, "BOS صاعد ✅"
@@ -1271,7 +1275,7 @@ def ltf_entry_trigger(symbol, direction, profile_key):
             if (l["close"] < l["open"] and p["close"] > p["open"]
                 and safe_bool(l.get("fvg_bearish"))): return True, "Engulfing+FVG ✅"
         return False, "لا trigger"
-    except Exception: return True, "LTF فشل"
+    except Exception: return False, "LTF calculation failed — WAIT"
 
 def session_filter(pair_name, strict=True):
     h = datetime.now(timezone.utc).hour
@@ -2343,7 +2347,11 @@ def generate_signal(df, current_price, pair_name, symbol,
         if not ho: ap = False; br_ = hm
         lo_, lm = ltf_entry_trigger(symbol, cand, profile_key)
         flt["LTF Trigger"] = {"pass": lo_, "msg": lm}
-        if not lo_: sp.append(("LTF", 6))
+        if not lo_:
+            # A trigger is mandatory, not a soft penalty. Avoid counter-move entries.
+            ap = False
+            br_ = br_ or f"LTF trigger missing: {lm}"
+            sp.append(("LTF", 6))
         _strict_session = (profile_key == "crypto")
         so, sm, sl_ = session_filter(pair_name, strict=_strict_session)
         if not so and MODE != "strict":
@@ -2397,6 +2405,14 @@ def generate_signal(df, current_price, pair_name, symbol,
     elif ec >= C_MIN and cs >= cs_c: tg = "C"
     else: tg = "WAIT"
 
+    # Separate entry-timing check: directional confidence alone is not an entry.
+    try:
+        entry_check = entry_confirmation_score(df, cand, lv, pair_name) if lv and signal in ("BUY", "SELL") else None
+        entry_score = float(entry_check.get("score")) if entry_check and entry_check.get("score") is not None else None
+    except Exception:
+        entry_check = None
+        entry_score = None
+
     if skip_external_filters:
         if signal == "WAIT": es, er = "WAIT", "Signal WAIT"
         elif not ap: es, er = "BLOCKED", f"Hard Gate: {br_}"
@@ -2414,6 +2430,10 @@ def generate_signal(df, current_price, pair_name, symbol,
             es, er = "WAIT", f"🔒 الثقة {ec:.1f}% < {MIN_EMIT_CONFIDENCE:.0f}%"
         elif cs < MIN_EMIT_CONFIDENCE:
             es, er = "WAIT", f"🔒 التأكيد {cs:.1f}/100 < {MIN_EMIT_CONFIDENCE:.0f}"
+        elif entry_score is None:
+            es, er = "WAIT", "🔒 Entry confirmation unavailable — WAIT"
+        elif entry_score < MIN_EMIT_CONFIDENCE:
+            es, er = "WAIT", f"🔒 Entry timing {entry_score:.0f}/100 < {MIN_EMIT_CONFIDENCE:.0f}"
         elif tg == "A+":
             es, er = "EXECUTE", f"🚦 A+ (Conf {ec:.0f}% / Confirm {cs:.0f})"
         elif tg == "A":
@@ -2430,6 +2450,8 @@ def generate_signal(df, current_price, pair_name, symbol,
             "weekly_bias": wk, "levels": lv if rok else None, "df": df,
             "confirmation_ok": co, "confirmation_score": cs,
             "confirmation_reasons": cr, "confirmation_blockers": cbl,
+            "entry_confirmation_score": entry_score,
+            "entry_confirmation_details": entry_check,
             "execution_status": es, "execution_reason": er, "trade_grade": tg,
             "soft_penalties": pt, "soft_advisories": adv,
             "filter_results": flt, "all_filters_passed": ap,
@@ -2496,7 +2518,10 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
         w = 0; l = 0; tr = 0.0; eq = 0.0; pk = 0.0; mdd = 0.0
         tlog = []; mlt = []
         si = 100; ei = len(df) - 20
+        next_available_i = si
         for i in range(si, ei):
+            if i < next_available_i:
+                continue
             sl_df = df.iloc[:i].copy()
             price = float(df["close"].iloc[i-1])
             mb, mcf = _bias_from_slice(sl_df, pair_name)
@@ -2515,13 +2540,16 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
             d = res["signal"]; rr1 = res["levels"]["risk_reward_1"]
             fut = df.iloc[i:i+20]
             htp = hsl = False; out = "OPEN"
-            for _, row in fut.iterrows():
+            exit_bar_index = None
+            for future_pos, (_, row) in enumerate(fut.iterrows(), start=i):
                 if d == "BUY":
-                    if row["low"] <= slv: hsl = True; out = "LOSS"; break
-                    if row["high"] >= t1: htp = True; out = "WIN"; break
+                    if row["low"] <= slv: hsl = True; out = "LOSS"; exit_bar_index = future_pos; break
+                    if row["high"] >= t1: htp = True; out = "WIN"; exit_bar_index = future_pos; break
                 else:
-                    if row["high"] >= slv: hsl = True; out = "LOSS"; break
-                    if row["low"] <= t1: htp = True; out = "WIN"; break
+                    if row["high"] >= slv: hsl = True; out = "LOSS"; exit_bar_index = future_pos; break
+                    if row["low"] <= t1: htp = True; out = "WIN"; exit_bar_index = future_pos; break
+            if exit_bar_index is not None:
+                next_available_i = exit_bar_index + 1
             if htp: w += 1; tr += rr1; eq += rr1
             elif hsl: l += 1; tr -= 1.0; eq -= 1.0
             else: continue
