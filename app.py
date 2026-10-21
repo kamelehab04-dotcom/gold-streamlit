@@ -200,14 +200,22 @@ RISK_ON_CURRENCIES = {"AUD", "NZD", "CAD"}
 
 
 def get_secret(name, default=""):
+    """
+    Reads API key from session_state first (runtime override),
+    then st.secrets, then env vars.
+    Empty string in session_state means user explicitly disabled it.
+    """
+    try:
+        if name in st.session_state:
+            v = st.session_state[name]
+            if v is not None:
+                return str(v)
+    except Exception: pass
     try:
         v = st.secrets.get(name, None)
         if v is not None: return str(v)
     except Exception: pass
     return os.getenv(name, default)
-
-TWELVE_API_KEY = get_secret("TWELVE_API_KEY")
-FMP_API_KEY = get_secret("FMP_API_KEY")
 
 
 def init_state():
@@ -414,7 +422,8 @@ def get_yfinance(symbol, period="3mo", interval="4h"):
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_twelve_data(symbol, interval="4h", outputsize=500):
-    if not TWELVE_API_KEY: return None
+    api_key = get_secret("TWELVE_API_KEY")
+    if not api_key: return None
     mp = {"GC=F":"XAU/USD","SI=F":"XAG/USD","DX-Y.NYB":"DXY","EURUSD=X":"EUR/USD",
           "GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY","USDCHF=X":"USD/CHF",
           "AUDUSD=X":"AUD/USD","NZDUSD=X":"NZD/USD","USDCAD=X":"USD/CAD",
@@ -424,7 +433,7 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
     try:
         r = requests.get("https://api.twelvedata.com/time_series",
             params={"symbol": td, "interval": im.get(interval, interval),
-                    "outputsize": outputsize, "apikey": TWELVE_API_KEY,
+                    "outputsize": outputsize, "apikey": api_key,
                     "format":"JSON"}, timeout=10)
         data = r.json()
         if "values" not in data: return None
@@ -2711,12 +2720,13 @@ def find_strongest_trade():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_fmp_economic_calendar():
-    if not FMP_API_KEY: return []
+    api_key = get_secret("FMP_API_KEY")
+    if not api_key: return []
     try:
         r = requests.get("https://financialmodelingprep.com/api/v3/economic_calendar",
             params={"from": datetime.now().strftime("%Y-%m-%d"),
                     "to": (datetime.now()+timedelta(days=7)).strftime("%Y-%m-%d"),
-                    "apikey": FMP_API_KEY}, timeout=10)
+                    "apikey": api_key}, timeout=10)
         d = r.json()
         return d if isinstance(d, list) else []
     except Exception: return []
@@ -2914,10 +2924,6 @@ button[kind="header"]:hover { background: rgba(230,200,124,0.2) !important;
     font-size: 0.7rem; font-weight: 700;
     border: 1px solid rgba(230,200,124,0.6);
     margin-left: 6px; letter-spacing: 1.5px; text-transform: uppercase; }
-div[data-testid="stHorizontalBlock"] > div > div > div[data-testid="stButton"] { margin-top: 0 !important; }
-div[data-testid="stHorizontalBlock"] > div > div > div[data-testid="stButton"] > button {
-    padding: 0.55rem 0.8rem !important; font-size: 0.85rem !important;
-    white-space: nowrap !important; min-height: 42px !important; }
 .section-title { font-size: 1.4rem; font-weight: 700; color: #e6c87c;
     margin: 32px 0 18px 0; padding-bottom: 12px;
     border-bottom: 1px solid rgba(230,200,124,0.15); }
@@ -2941,27 +2947,6 @@ div.stButton > button { background: linear-gradient(145deg, #1a2130, #131821);
 div.stButton > button:hover { background: linear-gradient(145deg, #263049, #1a2233);
     border-color: rgba(230,200,124,0.55); color: #fff;
     transform: translateY(-1px); box-shadow: 0 10px 24px rgba(0,0,0,0.6); }
-div[data-testid="stSelectbox"] > label { color: #e6c87c !important;
-    font-weight: 600 !important; font-size: 0.9rem !important;
-    letter-spacing: 0.5px; margin-bottom: 6px !important; }
-div[data-testid="stSelectbox"] > div > div {
-    background: linear-gradient(145deg, #10141c, #0d1017) !important;
-    border: 1px solid rgba(230,200,124,0.25) !important;
-    border-radius: 12px !important; min-height: 46px !important; }
-div[data-baseweb="select"] > div { background: transparent !important; }
-div[data-baseweb="select"] input { color: #e8edf5 !important; }
-button[data-baseweb="tab"] { background: transparent; color: #8892a5;
-    border-radius: 12px 12px 0 0; font-weight: 500; padding: 12px 20px; }
-button[data-baseweb="tab"][aria-selected="true"] { color: #e6c87c !important;
-    background: rgba(230,200,124,0.05); border-bottom: 2px solid #e6c87c; }
-div[data-testid="stDataFrame"] { background: #0d1017; border-radius: 16px;
-    border: 1px solid rgba(255,255,255,0.05); }
-div[data-testid="stDataFrame"] th { background: #10141c !important;
-    color: #e6c87c !important; font-weight: 600 !important;
-    text-transform: uppercase; font-size: 0.75rem !important;
-    letter-spacing: 0.5px; }
-div[data-testid="stDataFrame"] td { background: #0d1017 !important;
-    color: #ced6e6 !important; }
 div[data-testid="stMetric"] { background: linear-gradient(145deg, #10141c, #0d1017);
     padding: 16px 18px; border-radius: 16px;
     border: 1px solid rgba(255,255,255,0.05); }
@@ -2970,6 +2955,17 @@ div[data-testid="stMetric"] label { color: #7d879c !important;
     letter-spacing: 1px; font-weight: 600; }
 div[data-testid="stMetric"] .stMetricValue { color: #e8edf5 !important;
     font-weight: 700 !important; }
+div[data-testid="stTextInput"] > label { color: #e6c87c !important;
+    font-weight: 600 !important; font-size: 0.85rem !important;
+    letter-spacing: 0.5px; }
+div[data-testid="stTextInput"] > div > div > input {
+    background: linear-gradient(145deg, #10141c, #0d1017) !important;
+    border: 1px solid rgba(230,200,124,0.25) !important;
+    border-radius: 12px !important; color: #e8edf5 !important;
+    padding: 10px 14px !important; }
+div[data-testid="stTextInput"] > div > div > input:focus {
+    border-color: rgba(230,200,124,0.55) !important;
+    box-shadow: 0 0 0 2px rgba(230,200,124,0.15) !important; }
 hr { border: none; height: 1px;
     background: linear-gradient(90deg, transparent, rgba(230,200,124,0.15), transparent);
     margin: 30px 0; }
@@ -2982,6 +2978,9 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 """, unsafe_allow_html=True)
 
 
+# ═══════════════════════════════════════════════
+# HERO
+# ═══════════════════════════════════════════════
 _logo = load_logo_b64()
 hl, hr = st.columns([1.15, 1.6])
 with hl:
@@ -3011,129 +3010,88 @@ with hl:
         </div>""", unsafe_allow_html=True)
 
 with hr:
-    st.markdown('<div style="height: 14px;"></div>', unsafe_allow_html=True)
-    br1 = st.columns(3)
-    with br1[0]:
-        if st.button("📅 التقويم", width="stretch", key="btn_cal"):
-            st.session_state.show_calendar_today = not st.session_state.show_calendar_today
-            st.session_state.show_session_info = False
-            st.session_state.show_market_status = False
-    with br1[1]:
-        if st.button("🕐 الجلسة", width="stretch", key="btn_sess"):
-            st.session_state.show_session_info = not st.session_state.show_session_info
-            st.session_state.show_calendar_today = False
-            st.session_state.show_market_status = False
-    with br1[2]:
-        if st.button("📊 السوق", width="stretch", key="btn_mkt"):
-            st.session_state.show_market_status = not st.session_state.show_market_status
-            st.session_state.show_calendar_today = False
-            st.session_state.show_session_info = False
-
-    st.markdown('<div style="height: 6px;"></div>', unsafe_allow_html=True)
-    br2 = st.columns(3)
-    with br2[0]:
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    br = st.columns([1, 1])
+    with br[0]:
         if st.button("🔄 تحديث", width="stretch", key="btn_ref"):
             st.session_state.economic_events = get_fmp_economic_calendar()
+            st.cache_data.clear()
             st.toast("✅ تم التحديث")
-    with br2[1]:
-        _lbl = "🙈 إخفاء التفاصيل" if st.session_state.show_details else "👁️ إظهار التفاصيل"
-        if st.button(_lbl, width="stretch", key="btn_toggle_details"):
-            st.session_state.show_details = not st.session_state.show_details
-            st.rerun()
-    with br2[2]:
+    with br[1]:
         if st.button("🎯 أعثر على صفقة قوية", width="stretch", key="btn_strong"):
             with st.spinner("🔍 جاري البحث عن أقوى صفقة..."):
                 st.session_state.strong_trade_result = find_strongest_trade()
             st.rerun()
 
 
-if st.session_state.show_calendar_today:
-    st.markdown("### 📅 أحداث اليوم")
-    if not st.session_state.economic_events:
-        st.info("اضغط '🔄 تحديث'.")
-    else:
-        tt = get_todays_events(st.session_state.economic_events, st.session_state.selected_pair)
-        if not tt: st.success("✅ لا أحداث عالية.")
-        else:
-            cc = st.columns(3)
-            for i, ev in enumerate(tt[:9]):
-                imp = ev["impact"]
-                if imp in ("high","3","high impact"): ic_ = "🔴"; cl = "#f57a7a"
-                elif imp in ("medium","2"): ic_ = "🟡"; cl = "#f5c87a"
-                else: ic_ = "🟢"; cl = "#7cd4a0"
-                with cc[i % 3]:
-                    st.markdown(f"""<div class="tool-card" style="margin-bottom:12px;">
-                        <div class="tool-name">{ic_} {ev['time']} · {ev['country']}</div>
-                        <div class="tool-value" style="font-size:0.95rem; color:{cl};">
-                            {ev['event'][:50]}</div>
-                        <div class="tool-desc">التأثير: <b>{ev['impact'].upper()}</b></div>
-                    </div>""", unsafe_allow_html=True)
+# ═══════════════════════════════════════════════
+# API KEYS SECTION
+# ═══════════════════════════════════════════════
+st.markdown('<div class="section-title">🔑 مفاتيح المصادر <span>API Keys · Data Sources</span></div>',
+            unsafe_allow_html=True)
+st.caption("أدخل مفاتيح API لجلب البيانات من مصادر إضافية. "
+           "يتم الحفظ في الجلسة الحالية فقط (Session).")
 
-if st.session_state.show_session_info:
-    st.markdown("### 🕐 الجلسة الحالية")
-    si = get_current_session_info()
-    sc1, sc2, sc3 = st.columns(3)
-    with sc1:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">🌍 الجلسة</div>
-            <div class="tool-value">{si['icon']} {si['session']}</div>
-            <div class="tool-desc">{si['desc']}</div></div>""", unsafe_allow_html=True)
-    with sc2:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">⏰ التوقيت</div>
-            <div class="tool-value">{si['time_utc']}</div>
-            <div class="tool-desc">UTC</div></div>""", unsafe_allow_html=True)
-    with sc3:
-        kic = "✅" if "داخل" in si["kill_zone"] else "⚪"
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">🎯 Kill Zone</div>
-            <div class="tool-value">{kic}</div>
-            <div class="tool-desc">{si['kill_zone']}</div></div>""", unsafe_allow_html=True)
+# Initialize widget state from env/secrets on first load
+if "_td_api_input" not in st.session_state:
+    st.session_state._td_api_input = get_secret("TWELVE_API_KEY", "")
+if "_fmp_api_input" not in st.session_state:
+    st.session_state._fmp_api_input = get_secret("FMP_API_KEY", "")
 
-if st.session_state.show_market_status:
-    st.markdown("### 📊 وضع السوق")
-    _ms = PAIRS.get(st.session_state.selected_pair, "GC=F")
-    mst = get_market_status_info(_ms, st.session_state.selected_pair)
-    if mst is None: st.warning("تعذر التحميل.")
-    else:
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        with mc1:
-            st.markdown(f"""<div class="tool-card"><div class="tool-name">📈 الاتجاه</div>
-                <div class="tool-value">{mst['trend_icon']}</div>
-                <div class="tool-desc">{mst['trend_align']}</div></div>""", unsafe_allow_html=True)
-        with mc2:
-            st.markdown(f"""<div class="tool-card"><div class="tool-name">🌊 التقلب</div>
-                <div class="tool-value">{mst['vol_icon']} {mst['vol_state']}</div>
-                <div class="tool-desc">ATR ratio: <b>{mst['atr_ratio']:.2f}×</b></div></div>""",
-                unsafe_allow_html=True)
-        with mc3:
-            rgi = trend_icon(mst["regime"])
-            st.markdown(f"""<div class="tool-card"><div class="tool-name">🎯 النظام</div>
-                <div class="tool-value">{rgi} {mst['regime']}</div>
-                <div class="tool-desc">الهيكل: <b>{mst['structure']}</b></div></div>""",
-                unsafe_allow_html=True)
-        with mc4:
-            st.markdown(f"""<div class="tool-card"><div class="tool-name">⚖️ الحالة</div>
-                <div class="tool-value">{mst['overall_icon']}</div>
-                <div class="tool-desc">{mst['overall']}</div></div>""", unsafe_allow_html=True)
+kc1, kc2 = st.columns(2)
+with kc1:
+    td_val = st.text_input(
+        "TwelveData API Key",
+        type="password",
+        key="_td_api_input",
+        placeholder="مفتاح TwelveData للأسعار",
+        help="بديل مجاني: yfinance (مدمج). TwelveData يعطي دقة أعلى للفوركس.")
+    _td_status = "✅ نشط" if td_val else "⚪ غير مفعّل (يستخدم yfinance)"
+    st.caption(f"الحالة: {_td_status}")
+
+with kc2:
+    fmp_val = st.text_input(
+        "FMP API Key",
+        type="password",
+        key="_fmp_api_input",
+        placeholder="مفتاح Financial Modeling Prep للتقويم",
+        help="مطلوب فقط لجلب التقويم الاقتصادي.")
+    _fmp_status = "✅ نشط" if fmp_val else "⚪ غير مفعّل"
+    st.caption(f"الحالة: {_fmp_status}")
+
+# Sync to session_state and clear cache if changed
+_changed = False
+if td_val != st.session_state.get("TWELVE_API_KEY", ""):
+    st.session_state.TWELVE_API_KEY = td_val
+    _changed = True
+if fmp_val != st.session_state.get("FMP_API_KEY", ""):
+    st.session_state.FMP_API_KEY = fmp_val
+    _changed = True
+if _changed:
+    st.cache_data.clear()
 
 
 # ═══════════════════════════════════════════════
-# 🏆 STRONGEST TRADE DISPLAY
+# STRONGEST TRADE DISPLAY (Simplified)
 # ═══════════════════════════════════════════════
 _str_res = st.session_state.get("strong_trade_result")
 if _str_res:
     if _str_res.get("status") == "NONE":
-        st.warning("⏸️ **لا توجد صفقة قوية تمر البوابة الآن.**")
-        if st.button("🗑️ مسح", key="clr_best_none"):
-            st.session_state.strong_trade_result = None
-            st.rerun()
+        st.markdown('<div class="section-title">🏆 أقوى صفقة</div>',
+                    unsafe_allow_html=True)
+        st.warning("⏸️ **لا توجد صفقة قوية تمر البوابة الآن.** "
+                   f"(تحتاج ≥ {MIN_EMIT_CONFIDENCE:.0f}% ثقة + تأكيد)")
     elif _str_res.get("status") == "FOUND":
         _bp = _str_res["pair"]; _br = _str_res["result"]
         _blv = _br["levels"]; _bsig = _br["signal"]
         _bc = _br["confidence"]; _bprice = _str_res["price"]
         _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
+
         st.markdown(
             f'<div class="section-title" style="color:#7cd4a0;">'
             f'🏆 أقوى صفقة في السوق الآن — {_bp}</div>',
             unsafe_allow_html=True)
+
         _bs1, _bs2 = st.columns([1.5, 1.2])
         with _bs1:
             st.markdown(f"""
@@ -3156,757 +3114,29 @@ if _str_res:
         with _bs2:
             st.metric("💵 السعر", fmt_price(_bprice, _bp))
             if _blv:
-                st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp))
-                st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp))
-                st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp))
-                st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp))
-        if _blv:
-            _bconf = entry_confirmation_score(_br.get("df"), _bsig, _blv, _bp)
-            if _bconf: render_entry_checks(_bconf, prefix="Best ")
-            render_trade_plan(_blv, _bp,
-                             title=f"🏆 Best Trade Plan — {_bsig}",
-                             accent="#7cd4a0")
-        _bcl1, _bcl2 = st.columns([3, 1])
-        with _bcl2:
-            if st.button("🗑️ مسح", key="clr_best", width="stretch"):
-                st.session_state.strong_trade_result = None
-                st.rerun()
-        st.markdown("---")
-
-
-with st.sidebar:
-    st.markdown("### ⚙️ Settings")
-    st.caption(f"Version {APP_VERSION}")
-    st.markdown("---")
-    mode_emoji = {"strict": "🔒", "balanced": "⚖️", "relaxed": "🚀"}.get(MODE, "⚖️")
-    st.markdown(f"**{mode_emoji} Mode: `{MODE.upper()}`**")
-    st.caption(f"🚦 Gate: ≥ {MIN_EMIT_CONFIDENCE:.0f}%")
-    st.caption(f"📊 A_MIN: {A_MIN:.0f}")
-    if MODE == "strict":
-        st.caption("🔒 صفقات قليلة · دقة عالية")
-    elif MODE == "balanced":
-        st.caption("⚖️ توازن مثالي")
-    else:
-        st.caption("🚀 صفقات كثيرة · دقة متوسطة")
-    st.markdown("---")
-    st.markdown("**🎯 Dual Signals**")
-    st.caption("• Original: independent")
-    st.caption("• Flip: independent")
-    st.markdown("---")
-    st.markdown("**🧠 ML Model**")
-    if not SKLEARN_AVAILABLE: st.caption("⚠️ sklearn غير مثبت")
-    elif st.session_state.get("ml_model"):
-        mp = st.session_state.ml_model
-        st.success(f"✅ {mp.get('model_name','?')}")
-        st.caption(f"AUC: {mp.get('auc',0):.3f}")
-        if st.button("🗑️ Clear ML", width="stretch", key="clr_ml"):
-            st.session_state.ml_model = None; st.rerun()
-    else:
-        xb = "✅" if XGBOOST_AVAILABLE else "⚠️"
-        st.caption(f"⚪ Not trained · XGB {xb}")
-    st.markdown("---")
-    sm = st.checkbox("🔒 Strict Filters",
-        value=st.session_state.get("strict_filters", False))
-    st.session_state.strict_filters = sm
-    st.markdown("---")
-    if st.button("🔄 Refresh Cache", width="stretch"):
-        st.cache_data.clear(); st.rerun()
-
-
-st.markdown('<div class="section-title">🎯 Analysis Control <span>اختر الأصل</span></div>',
-            unsafe_allow_html=True)
-cc1, cc2, cc3 = st.columns([2.2, 1, 1])
-with cc1:
-    sp_ = st.selectbox("🎯 اختر الأصل للتحليل", list(PAIRS.keys()),
-        index=list(PAIRS.keys()).index(st.session_state.selected_pair)
-        if st.session_state.selected_pair in PAIRS else 0, key="pair_sel")
-    st.session_state.selected_pair = sp_
-    sym = PAIRS[sp_]
-with cc2:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    ana1 = st.button("🎯 تحليل الأصل", width="stretch", key="btn_one")
-with cc3:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    ana_all = st.button("🌐 تحليل الكل", width="stretch", key="btn_all")
-
-if ana_all:
-    with st.spinner("Scanning... (full filters, ~30-60s first run)"):
-        t0 = time.time()
-        st.session_state.all_signals = get_all_signals_parallel()
-        st.session_state.analysis_time = time.time() - t0
-if ana1:
-    st.cache_data.clear(); st.rerun()
-
-
-# ============================================
-# ALL ASSETS
-# ============================================
-if st.session_state.all_signals is not None and not st.session_state.all_signals.empty:
-    st.markdown(
-        f'<div class="section-title">🌐 All Assets '
-        f'<span>{MODE.upper()} · بوابة {MIN_EMIT_CONFIDENCE:.0f}%</span></div>',
-        unsafe_allow_html=True)
-
-    df_full = st.session_state.all_signals.copy()
-    n_orig_pass = int((df_full["🚦 أصلي"] == "✅").sum()) if "🚦 أصلي" in df_full.columns else 0
-    n_flip_pass = int((df_full["🚦 Flip"] == "✅").sum()) if "🚦 Flip" in df_full.columns else 0
-
-    r1, r2, r3 = st.columns([3, 1.2, 1])
-    with r1:
-        if n_orig_pass + n_flip_pass > 0:
-            st.success(f"✅ **{n_orig_pass}** إشارة أصلية مؤهلة · "
-                       f"**{n_flip_pass}** إشارة Flip مؤهلة")
-        else:
-            st.warning(f"⏸️ لا إشارات مؤهلة حالياً (تحتاج ≥ {MIN_EMIT_CONFIDENCE:.0f}%)")
-    with r2:
-        only_gate = st.checkbox(f"🚦 {MIN_EMIT_CONFIDENCE:.0f}%+ فقط",
-                                value=True, key="only_gate_filter")
-    with r3:
-        if st.button("🗑️ مسح", width="stretch", key="clr_all"):
-            st.session_state.all_signals = None; st.rerun()
-
-    df_show = df_full
-    if only_gate and "🚦 أصلي" in df_show.columns:
-        mask = (df_show["🚦 أصلي"] == "✅")
-        if "🚦 Flip" in df_show.columns:
-            mask = mask | (df_show["🚦 Flip"] == "✅")
-        df_show = df_show[mask]
-
-    _disp_cols = [c for c in df_show.columns if not str(c).startswith("_")]
-    st.dataframe(df_show[_disp_cols], hide_index=True, width="stretch", height=460)
-
-    pending_low = 70 if MODE == "strict" else (68 if MODE == "balanced" else 65)
-    if "🚦 أصلي" in df_full.columns and "الثقة" in df_full.columns:
-        pending = df_full[
-            (df_full["🚦 أصلي"] == "❌") &
-            (df_full["الثقة"] >= pending_low) &
-            (df_full["الثقة"] < MIN_EMIT_CONFIDENCE)
-        ]
-        if not pending.empty:
-            with st.expander(f"⏸️ إشارات قريبة من البوابة ({len(pending)}) — "
-                             f"{pending_low}-{MIN_EMIT_CONFIDENCE-1:.0f}%"):
-                st.caption("متابعة فقط — لا تُتداول حتى تعبر البوابة")
-                cols_ok = [c for c in ["الزوج","الإشارة","الثقة","🎯 تأكيد","Grade"]
-                           if c in pending.columns]
-                st.dataframe(pending[cols_ok].reset_index(drop=True),
-                             hide_index=True, width="stretch")
-
-    st.markdown("---")
-
-
-# ============================================
-# MAIN ANALYSIS
-# ============================================
-cur_price, chg = get_spot_price(sym)
-if cur_price is None: st.error(f"تعذر السعر لـ {sp_}."); st.stop()
-df_raw = get_historical_data(sym, "3mo", "4h")
-if df_raw is None: st.error(f"تعذر البيانات لـ {sp_}."); st.stop()
-
-ntb, _ = news_time_block(st.session_state.economic_events or [], sp_)
-ss_soft = st.session_state.get("strict_filters", False)
-_ccs = get_currency_strength_matrix()
-st.session_state["_ccy_strength_cache"] = _ccs
-_rd, _rm = get_interest_rate_differential(sp_)
-_rsk = get_risk_sentiment()
-
-result = generate_signal(df_raw, cur_price, sp_, sym,
-                        news_block=ntb, strict_soft=ss_soft)
-df = result["df"]; lv = result["levels"]; sig = result["signal"]; conf = result["confidence"]
-
-orig_confirm = None
-if sig in ("BUY","SELL") and lv:
-    try:
-        orig_confirm = entry_confirmation_score(df, sig, lv, sp_)
-    except Exception:
-        orig_confirm = None
-
-orig_ec_score = orig_confirm["score"] if orig_confirm else 0
-orig_ec_text = orig_confirm["verdict_text"] if orig_confirm else "—"
-orig_ec_color = orig_confirm["verdict_color"] if orig_confirm else "#6b7488"
-
-orig_gate_ok, orig_gate_msg = passes_confidence_gate(conf, orig_ec_score)
-
-flip_result = None; flip_confirm = None; flip_grade = None
-flip_confidence_pct = 0
-flip_gate_ok = False; flip_gate_msg = ""
-flip_ec_score = 0; flip_ec_text = "—"; flip_ec_color = "#6b7488"
-
-if sig in ("BUY","SELL"):
-    try:
-        flip_result = detect_signal_flip(df, cur_price, sig, profile_for(sp_))
-        if flip_result and flip_result.get("flip_signal"):
-            flip_confidence_pct = flip_raw_to_pct(flip_result["confidence"])
-            if flip_result.get("new_levels"):
-                flip_confirm = entry_confirmation_score(
-                    df, flip_result["flip_signal"], flip_result["new_levels"], sp_)
-                if flip_confirm:
-                    flip_ec_score = flip_confirm["score"]
-                    flip_ec_text = flip_confirm["verdict_text"]
-                    flip_ec_color = flip_confirm["verdict_color"]
-                    flip_grade = compute_flip_grade(
-                        flip_confidence_pct, flip_ec_score)
-                flip_gate_ok, flip_gate_msg = passes_confidence_gate(
-                    flip_confidence_pct, flip_ec_score)
-    except Exception:
-        flip_result = None
-        flip_confirm = None
-
-mo_, mm_ = is_market_open(sp_)
-if not mo_: st.error(f"🚫 **{mm_}**")
-
-has_flip = bool(flip_result and flip_result.get("flip_signal")
-                and flip_result.get("new_levels") and sig in ("BUY","SELL"))
-
-
-# ============================================
-# DUAL / SINGLE SIGNAL DISPLAY
-# ============================================
-if has_flip:
-    st.markdown('<div class="section-title">⚡ الإشارتان المستقلتان '
-                f'<span>{MODE.upper()} · بوابة {MIN_EMIT_CONFIDENCE:.0f}%</span></div>',
-                unsafe_allow_html=True)
-
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        if not orig_gate_ok:
-            _vt = f"🔒 {orig_gate_msg}"; _vc = "#f57a7a"
-        else:
-            _vt = orig_ec_text; _vc = orig_ec_color
-        render_signal_card(
-            title=f"الإشارة الأصلية · Gate {'✅' if orig_gate_ok else '❌'}",
-            direction=sig, confidence=conf,
-            grade=result['trade_grade'],
-            verdict_text=_vt, verdict_color=_vc,
-            subtitle=f"Execution: {result['execution_status']} · Confirm: {orig_ec_score}/100")
-    with sc2:
-        if not flip_gate_ok:
-            _vt = f"🔒 {flip_gate_msg}"; _vc = "#f57a7a"
-        else:
-            _vt = flip_ec_text; _vc = flip_ec_color
-        render_signal_card(
-            title=f"إشارة Flip · Gate {'✅' if flip_gate_ok else '❌'}",
-            direction=flip_result["flip_signal"],
-            confidence=flip_confidence_pct,
-            grade=flip_grade or "WAIT",
-            verdict_text=_vt, verdict_color=_vc,
-            subtitle=(f"Raw: {flip_result['confidence']:.0f}/100 · "
-                      f"{len(flip_result['triggers'])} triggers"))
-
-    combined_orig = orig_ec_score * 0.6 + conf * 0.4
-    combined_flip = flip_ec_score * 0.6 + flip_confidence_pct * 0.4
-    diff = abs(combined_orig - combined_flip)
-    if not orig_gate_ok and not flip_gate_ok:
-        rec_text = "⏸️ لا إشارة عبرت البوابة — انتظر"; rec_color = "#f5c87a"; rec_icon = "⏸️"
-    elif orig_gate_ok and not flip_gate_ok:
-        rec_text = f"✅ الإشارة الأصلية ({sig}) الوحيدة المؤهلة"; rec_color = "#7cd4a0"; rec_icon = "✅"
-    elif flip_gate_ok and not orig_gate_ok:
-        rec_text = f"✅ إشارة Flip ({flip_result['flip_signal']}) الوحيدة المؤهلة"; rec_color = "#7cd4a0"; rec_icon = "✅"
-    elif diff < 8:
-        rec_text = "⚖️ الإشارتان مؤهلتان — متقاربتان"; rec_color = "#f5c87a"; rec_icon = "⚖️"
-    elif combined_orig > combined_flip:
-        rec_text = f"✅ الإشارة الأصلية ({sig}) أقوى"; rec_color = "#7cd4a0"; rec_icon = "✅"
-    else:
-        rec_text = f"✅ إشارة Flip ({flip_result['flip_signal']}) أقوى"; rec_color = "#7cd4a0"; rec_icon = "✅"
-
-    st.markdown(f"""
-    <div style="background:{rec_color}22; padding:14px 20px;
-                border-radius:12px; margin-top:14px;
-                border:2px solid {rec_color}66;">
-        <span style="color:{rec_color}; font-weight:800; font-size:1.05rem;">
-            {rec_icon} التوصية:
-        </span>
-        <span style="color:#e8edf5; font-size:1rem; margin-left:8px;">{rec_text}</span>
-    </div>
-    """, unsafe_allow_html=True)
-
+                st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
+                          help=_blv.get("sources", {}).get("sl", ""))
+                st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp),
+                          help=_blv.get("sources", {}).get("tp1", ""))
+                st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp),
+                          help=_blv.get("sources", {}).get("tp2", ""))
+                st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp),
+                          help=_blv.get("sources", {}).get("tp3", ""))
 else:
-    st.markdown('<div class="section-title">🎯 Signal '
-                f'<span>{MODE.upper()} · بوابة {MIN_EMIT_CONFIDENCE:.0f}%</span></div>',
+    st.markdown('<div class="section-title">🏆 أقوى صفقة</div>',
                 unsafe_allow_html=True)
-    _vt = (f"🔒 {orig_gate_msg}" if not orig_gate_ok else orig_ec_text)
-    _vc = ("#f57a7a" if not orig_gate_ok else orig_ec_color)
-
-    c_sig, c_stat = st.columns([1.6, 1])
-    with c_sig:
-        render_signal_card(
-            title=f"BLACK PYRAMID · {sp_} · {MODE.upper()}",
-            direction=sig, confidence=conf,
-            grade=result['trade_grade'],
-            verdict_text=_vt, verdict_color=_vc,
-            subtitle=f"Execution: {result['execution_status']} · {result['execution_reason']}")
-    with c_stat:
-        st.markdown(f"""
-        <div class="metric-card" style="margin-bottom:14px;">
-            <div class="metric-label">Current Price</div>
-            <div class="metric-value">{fmt_price(cur_price, sp_)}</div>
-            <div class="metric-sub">Change: {chg:+.2f}%</div>
-        </div>""", unsafe_allow_html=True)
-        s1, s2 = st.columns(2)
-        with s1:
-            st.markdown(f"""<div class="metric-card"><div class="metric-label">BUY</div>
-                <div class="metric-value" style="color:#7cd4a0;">{result['buy_score']:.0f}</div></div>""",
-                unsafe_allow_html=True)
-        with s2:
-            st.markdown(f"""<div class="metric-card"><div class="metric-label">SELL</div>
-                <div class="metric-value" style="color:#f57a7a;">{result['sell_score']:.0f}</div></div>""",
-                unsafe_allow_html=True)
-        st.markdown(f"""<div class="metric-card" style="margin-top:14px;">
-            <div class="metric-label">Confluence</div>
-            <div class="metric-value">{result['weighted_confluence']:.0f}
-            <span style="font-size:1rem; color:#6b7488;">/ 100</span></div>
-            <div class="metric-sub">Confirmation: {result['confirmation_score']:.1f}</div>
-        </div>""", unsafe_allow_html=True)
+    st.info("🎯 اضغط **'أعثر على صفقة قوية'** أعلاه لبدء البحث في جميع الأزواج "
+            f"({len(PAIRS)} زوج). سيتم عرض أفضل إشارة تمر البوابة ≥ {MIN_EMIT_CONFIDENCE:.0f}%.")
 
 
-# ============================================
-# ORIGINAL
-# ============================================
-if st.session_state.show_details and sig in ("BUY","SELL") and lv and orig_confirm:
-    st.markdown('<div class="section-title">🅰️ الإشارة الأصلية — Entry Confirmation '
-                '<span>10 فحوصات مستقلة</span></div>',
-                unsafe_allow_html=True)
-    render_entry_checks(orig_confirm, prefix="Original ")
-
-    if orig_confirm["verdict"] == "ENTER_NOW":
-        st.success(f"✅ تأكيد الدخول مكتمل — {orig_confirm['score']}/100")
-    elif orig_confirm["verdict"] == "WAIT_RETRACE":
-        st.warning(f"⚠️ انتظر ارتداد — {orig_confirm['score']}/100")
-    elif orig_confirm["verdict"] == "WAIT_CLOSE":
-        st.info(f"⏳ انتظر إغلاق الشمعة — {orig_confirm['score']}/100")
-    else:
-        st.error(f"🚫 لا تدخل الآن — {orig_confirm['score']}/100")
-
-    render_trade_plan(lv, sp_,
-                     title=f"🅰️ Trade Plan — Original {sig}",
-                     accent="#e6c87c", dimmed=(not orig_gate_ok))
-
-    st.markdown("---")
-
-
-# ============================================
-# FLIP
-# ============================================
-if st.session_state.show_details and has_flip:
-    flip_sig_name = flip_result["flip_signal"]
-    flip_levels = flip_result["new_levels"]
-    flip_status = flip_result["status"]
-    flip_conf_raw = flip_result["confidence"]
-
-    flip_color_banner = ("#f57a7a" if flip_status == "STRONG_FLIP"
-                        else "#f5c87a" if flip_status == "POSSIBLE_FLIP"
-                        else "#7cd4a0")
-
-    st.markdown(f'<div class="section-title">🅱️ إشارة Flip المستقلة — {flip_sig_name} '
-                f'<span>10 فحوصات + SL/TP مستقل</span></div>',
-                unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div style="background:{flip_color_banner}18; padding:14px 20px;
-                border-radius:12px; margin-bottom:14px;
-                border-left:4px solid {flip_color_banner};">
-        <div style="color:{flip_color_banner}; font-weight:700; font-size:1rem;">
-            {flip_result['message']}
-        </div>
-        <div style="color:#a0aab8; font-size:0.85rem; margin-top:6px;">
-            {len(flip_result['triggers'])} مؤشر داعم · Flip raw: <b>{flip_conf_raw:.0f}/100</b>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    with st.expander(f"🔍 مؤشرات الانعكاس ({len(flip_result['triggers'])})",
-                     expanded=False):
-        for tr in flip_result["triggers"]:
-            st.markdown(f"- {tr['icon']} **{tr['name']}** — قوة {tr['score']}")
-
-    if flip_confirm:
-        render_entry_checks(flip_confirm, prefix="Flip ")
-        if flip_confirm["verdict"] == "ENTER_NOW":
-            st.success(f"✅ تأكيد Flip مكتمل — {flip_confirm['score']}/100")
-        elif flip_confirm["verdict"] == "WAIT_RETRACE":
-            st.warning(f"⚠️ انتظر ارتداد للـ Flip — {flip_confirm['score']}/100")
-        elif flip_confirm["verdict"] == "WAIT_CLOSE":
-            st.info(f"⏳ انتظر إغلاق الشمعة — {flip_confirm['score']}/100")
-        else:
-            st.error(f"🚫 Flip غير مؤكد — {flip_confirm['score']}/100")
-
-    if flip_levels:
-        render_trade_plan(flip_levels, sp_,
-                         title=f"🅱️ Trade Plan — Flip {flip_sig_name}",
-                         accent=flip_color_banner, dimmed=(not flip_gate_ok))
-
-    st.markdown("---")
-
-
-sadv = result.get("soft_advisories", "None")
-if sadv and sadv != "None":
-    if not ss_soft: st.info(f"💡 **Advisories:** {sadv}")
-    else: st.warning(f"⚠️ **Strict ({result['soft_penalties']:.1f}):** {sadv}")
-
-
-if not st.session_state.show_details:
-    st.info("💡 **التفاصيل مخفية** — اضغط **👁️ إظهار التفاصيل** أعلاه "
-            "لعرض Entry Checks + Trade Plans + التبويبات التفصيلية.")
-    st.markdown(f"""
-    <div class="footer-style">
-        ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-        {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Dual Signals · Analysis Only
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-
-# ============================================
-# TABS
-# ============================================
-tab_ov, tab_tl, tab_smc, tab_mtf, tab_fnd, tab_ml, tab_flt, tab_cht, tab_cal, tab_jrn, tab_bt = st.tabs([
-    "📊 Overview","🧰 Tools","🏛️ SMC","⏱️ MTF",
-    "💰 Fundamentals","🎓 ML Model","🎛️ Filters",
-    "📈 Chart","📅 Calendar","📔 Journal","🔬 Backtest"])
-
-
-with tab_ov:
-    st.markdown('<div class="section-title">🧠 Five Pillars</div>', unsafe_allow_html=True)
-    pn = {"structure": "Structure", "trend": "Trend", "momentum": "Momentum",
-          "volume": "Volume & Flow", "context": "Context"}
-    c = st.columns(5)
-    for i, p in enumerate(PILLAR_WEIGHTS):
-        b = result["pillars"]["BUY"][p]; s = result["pillars"]["SELL"][p]
-        c[i].metric(pn[p], f"B {b:.0f}", delta=f"S {s:.0f}", delta_color="inverse")
-    st.markdown('<div class="section-title">📝 Reasons</div>', unsafe_allow_html=True)
-    if result["reasons"]:
-        for r in result["reasons"][:10]: st.markdown(f"- {r}")
-    else: st.caption("—")
-    st.markdown('<div class="section-title">🛡️ Confirmation Gate</div>', unsafe_allow_html=True)
-    gc1, gc2, gc3 = st.columns(3)
-    gc1.metric("Score", f"{result['confirmation_score']:.1f}/100")
-    gc2.metric("Gate", "✅ PASS" if result["confirmation_ok"] else "⚠️ SOFT")
-    gc3.metric("Raw/Eff", f"{result['raw_confidence']:.1f} / {result['confidence']:.1f}")
-
-
-with tab_tl:
-    l = df.iloc[-1]
-    st.markdown('<div class="section-title">📈 Trend</div>', unsafe_allow_html=True)
-    e20 = safe_float(l.get("ema20")); e50 = safe_float(l.get("ema50")); e200 = safe_float(l.get("ema200"))
-    if e20 > e50 > e200: es = "Fully Bullish"; ei = "🟢"
-    elif e20 < e50 < e200: es = "Fully Bearish"; ei = "🔴"
-    elif e20 > e50: es = "Short-term Bullish"; ei = "🟡"
-    else: es = "Short-term Bearish"; ei = "🟡"
-    vw = safe_float(l.get("vwap")); vt = l.get("vwap_type", "session")
-    vs_ = "Above VWAP" if cur_price > vw else "Below VWAP"
-    vi = "🟢" if cur_price > vw else "🔴"
-    vl = "Rolling(20)" if vt == "rolling" else "Session"
-    t1, t2 = st.columns(2)
-    with t1:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📊 EMA</div>
-            <div class="tool-value">{ei} {es}</div>
-            <div class="tool-desc">EMA20: <b>{e20:.5f}</b><br>EMA50: <b>{e50:.5f}</b><br>
-            EMA200: <b>{e200:.5f}</b></div></div>""", unsafe_allow_html=True)
-    with t2:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📉 VWAP·{vl}</div>
-            <div class="tool-value">{vi} {vs_}</div>
-            <div class="tool-desc">VWAP: <b>{vw:.5f}</b><br>
-            Distance: <b>{((cur_price-vw)/vw*100):+.2f}%</b></div></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">⚡ Momentum</div>', unsafe_allow_html=True)
-    r_ = safe_float(l.get("rsi"), 50); mh = safe_float(l.get("macd_histogram"))
-    if r_ >= 70: rs_ = "Overbought"; ri = "🔴"
-    elif r_ <= 30: rs_ = "Oversold"; ri = "🟢"
-    elif r_ >= 55: rs_ = "Bullish"; ri = "🟢"
-    elif r_ <= 45: rs_ = "Bearish"; ri = "🔴"
-    else: rs_ = "Neutral"; ri = "🟡"
-    ms_ = "Bullish" if mh > 0 else "Bearish"; mi = "🟢" if mh > 0 else "🔴"
-    m1, m2 = st.columns(2)
-    with m1:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">🎯 RSI</div>
-            <div class="tool-value">{ri} {r_:.1f}</div>
-            <div class="tool-desc">{rs_}</div></div>""", unsafe_allow_html=True)
-    with m2:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📈 MACD</div>
-            <div class="tool-value">{mi} {ms_}</div>
-            <div class="tool-desc">Hist: <b>{mh:.5f}</b></div></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">🌊 Volatility</div>', unsafe_allow_html=True)
-    atr_ = safe_float(l.get("atr")); ap_ = (atr_/cur_price*100) if cur_price else 0
-    bu = safe_float(l.get("bb_upper")); bl = safe_float(l.get("bb_lower"))
-    bw = ((bu-bl)/cur_price*100) if cur_price else 0
-    if bw < 1.5: bs_ = "Compression"
-    elif bw > 5.0: bs_ = "Expansion"
-    else: bs_ = "Normal"
-    v1, v2 = st.columns(2)
-    with v1:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📊 ATR</div>
-            <div class="tool-value">{atr_:.5f}</div>
-            <div class="tool-desc">ATR %: <b>{ap_:.3f}%</b></div></div>""", unsafe_allow_html=True)
-    with v2:
-        st.markdown(f"""<div class="tool-card"><div class="tool-name">📉 BB</div>
-            <div class="tool-value">{bs_}</div>
-            <div class="tool-desc">Width: <b>{bw:.2f}%</b></div></div>""", unsafe_allow_html=True)
-
-
-with tab_smc:
-    l = df.iloc[-1]
-    st.markdown('<div class="section-title">🏛️ SMC</div>', unsafe_allow_html=True)
-    s_ = structure_state(df); si_ = trend_icon(s_["state"])
-    st.markdown(f"""<div class="tool-card" style="margin-bottom:20px;">
-        <div class="tool-name">🏗️ Structure</div>
-        <div class="tool-value">{si_} {s_['state']}</div></div>""", unsafe_allow_html=True)
-    cols = st.columns(4)
-    for i, (bk, sk, nm) in enumerate([
-        ("bos_bullish","bos_bearish","BOS"), ("mss_bullish","mss_bearish","MSS"),
-        ("liquidity_sweep_bullish","liquidity_sweep_bearish","Liquidity"),
-        ("fvg_bullish","fvg_bearish","FVG")]):
-        bb = safe_bool(l.get(bk)); be = safe_bool(l.get(sk))
-        ic_ = "🟢" if bb else "🔴" if be else "⚪"
-        stt = "Bullish" if bb else "Bearish" if be else "None"
-        with cols[i]:
-            st.markdown(f"""<div class="tool-card"><div class="tool-name">{nm}</div>
-                <div class="tool-value">{ic_}</div>
-                <div class="tool-desc">{stt}</div></div>""", unsafe_allow_html=True)
-
-
-with tab_mtf:
-    st.markdown('<div class="section-title">⏱️ MTF</div>', unsafe_allow_html=True)
-    mc = st.columns(4)
-    for i, (tf, info) in enumerate(result["mtf_details"].items()):
-        bias = info["bias"]
-        ic_ = "🟢" if bias == "BULLISH" else "🔴" if bias == "BEARISH" else "🟡"
-        cl = "#7cd4a0" if bias == "BULLISH" else "#f57a7a" if bias == "BEARISH" else "#f5c87a"
-        with mc[i]:
-            st.markdown(f"""<div class="tool-card"><div class="tool-name">{tf}</div>
-                <div class="tool-value" style="color:{cl};">{ic_} {bias}</div>
-                <div class="tool-desc">Strength: <b>{info['strength']}/10</b></div></div>""",
-                unsafe_allow_html=True)
-
-
-with tab_fnd:
-    st.markdown('<div class="section-title">💪 Currency Strength</div>', unsafe_allow_html=True)
-    if _ccs:
-        sc_ = sorted(_ccs.items(), key=lambda x: x[1], reverse=True)
-        cc_ = st.columns(len(sc_))
-        for i, (cy, scr) in enumerate(sc_):
-            if scr > 20: cl = "#7cd4a0"; stn = "STRONG"
-            elif scr > 5: cl = "#a0d4b0"; stn = "Mild Bull"
-            elif scr < -20: cl = "#f57a7a"; stn = "WEAK"
-            elif scr < -5: cl = "#d4a0a0"; stn = "Mild Bear"
-            else: cl = "#f5c87a"; stn = "Neutral"
-            with cc_[i]:
-                st.markdown(f"""<div class="tool-card"><div class="tool-name">{cy}</div>
-                    <div class="tool-value" style="color:{cl}; font-size:1.1rem;">{scr:+.0f}</div>
-                    <div class="tool-desc">{stn}</div></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📊 Bond Yields</div>', unsafe_allow_html=True)
-    _bd = get_bond_yields()
-    if _bd["us10y"] is not None:
-        b1, b2, b3, b4 = st.columns(4)
-        b1.metric("US10Y", f"{_bd['us10y']:.2f}%", delta=f"{_bd['us10y_change']:+.2f}")
-        b2.metric("US5Y", f"{_bd['us5y']:.2f}%" if _bd['us5y'] else "N/A")
-        b3.metric("US30Y", f"{_bd['us30y']:.2f}%" if _bd['us30y'] else "N/A")
-        b4.metric("Curve", f"{_bd['curve_10y_5y']:+.2f}%" if _bd['curve_10y_5y'] else "N/A")
-    st.markdown('<div class="section-title">🌊 Risk (VIX)</div>', unsafe_allow_html=True)
-    if _rsk and _rsk.get("vix") is not None:
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("VIX", f"{_rsk['vix']:.2f}")
-        r2.metric("20-avg", f"{_rsk.get('vix_avg', 0):.2f}")
-        r3.metric("Change", f"{_rsk.get('vix_change', 0):+.2f}%")
-        r4.metric("State", _rsk["vix_state"])
-    st.markdown('<div class="section-title">👥 Sentiment</div>', unsafe_allow_html=True)
-    _st = estimate_retail_sentiment(df, profile_for(sp_))
-    if _st:
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Long %", f"{_st['long_pct']:.0f}%")
-        s2.metric("Short %", f"{_st['short_pct']:.0f}%")
-        s3.metric("Bias", _st["bias"])
-        s4.metric("Contrarian", _st["contrarian"])
-
-
-with tab_ml:
-    st.markdown('<div class="section-title">🎓 ML Calibration</div>', unsafe_allow_html=True)
-    if not SKLEARN_AVAILABLE:
-        st.error("⚠️ scikit-learn غير مثبت. pip install scikit-learn")
-    else:
-        l1, l2 = st.columns(2)
-        l1.success("✅ scikit-learn")
-        if XGBOOST_AVAILABLE: l2.success("✅ xgboost")
-        else: l2.warning("⚠️ xgboost غير مثبت")
-        bt = st.session_state.get("backtest_results")
-        if bt and bt.get("ml_trades"):
-            nt = len(bt["ml_trades"])
-            st.success(f"✅ {nt} صفقة · {len(ML_FEATURE_NAMES)} feature")
-        else:
-            nt = 0
-            st.warning("⚠️ اذهب إلى Backtest tab أولاً.")
-        tc1, tc2, tc3 = st.columns(3)
-        with tc1: ut = st.checkbox("🎯 Tuning", value=False, key="ut")
-        with tc2: tm = st.selectbox("طريقة", ["randomized","grid"], index=0, key="tm", disabled=not ut)
-        with tc3: ti = st.number_input("محاولات", 5, 100, 20, 5, key="ti", disabled=not ut or tm == "grid")
-        tr1, tr2 = st.columns(2)
-        with tr1:
-            if st.button("🎓 Train All", width="stretch", disabled=(nt < ML_MIN_TRADES), key="train_ml"):
-                with st.spinner("Training..."):
-                    mp = train_ml_model(bt["ml_trades"], use_tuning=ut,
-                                         tuning_mode=tm, tuning_n_iter=int(ti))
-                    if "error" in mp: st.error(f"فشل: {mp['error']}")
-                    else:
-                        st.session_state.ml_model = mp
-                        st.success(f"✅ {mp['model_name']} (AUC={mp['auc']:.3f})"); st.rerun()
-        with tr2:
-            if st.session_state.get("ml_model"):
-                if st.button("🔄 Retrain", width="stretch", key="retr"):
-                    with st.spinner("Retraining..."):
-                        mp = train_ml_model(bt["ml_trades"], use_tuning=ut,
-                                             tuning_mode=tm, tuning_n_iter=int(ti))
-                        if "error" not in mp:
-                            st.session_state.ml_model = mp; st.rerun()
-        mp = st.session_state.get("ml_model")
-        if mp:
-            rows = []
-            for name, d in mp.get("all_models", {}).items():
-                if d.get("error"): rows.append({"Model": name, "AUC": "❌", "Acc": "-"})
-                else:
-                    bg = "🏆" if name == mp["model_name"] else ""
-                    rows.append({"Model": f"{name} {bg}", "AUC": f"{d['auc']:.3f}",
-                                 "Acc": f"{d['accuracy']*100:.1f}%"})
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            pm1, pm2, pm3, pm4, pm5 = st.columns(5)
-            pm1.metric("Model", mp["model_name"])
-            pm2.metric("AUC", f"{mp['auc']:.3f}")
-            pm3.metric("Accuracy", f"{mp['accuracy']*100:.1f}%")
-            pm4.metric("F1", f"{mp['f1']:.3f}")
-            pm5.metric("Samples", f"{mp['n_total']}")
-
-
-with tab_flt:
-    st.markdown('<div class="section-title">🎛️ Filters</div>', unsafe_allow_html=True)
-    items = list(result["filter_results"].items())
-    for r in range(0, len(items), 4):
-        row = items[r:r+4]; cc = st.columns(4)
-        for i, (n, info) in enumerate(row):
-            p_ = info.get("pass", True); ic_ = "✅" if p_ else "❌"
-            with cc[i]:
-                st.markdown(f"""<div class="tool-card"><div class="tool-name">{n}</div>
-                    <div class="tool-value">{ic_}</div>
-                    <div class="tool-desc">{info.get('msg','')[:60]}</div></div>""",
-                    unsafe_allow_html=True)
-    if not result["all_filters_passed"]:
-        st.error(f"🚫 **Block:** {result['filter_block_reason']}")
-
-
-with tab_cht:
-    st.markdown('<div class="section-title">📈 Chart '
-                '<span>Original (صلب) + Flip (متقطع)</span></div>',
-                unsafe_allow_html=True)
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.04, row_heights=[0.60,0.20,0.20])
-    fig.add_trace(go.Candlestick(x=df.index, open=df["open"], high=df["high"],
-                                  low=df["low"], close=df["close"], name="Price"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema20"], name="EMA20",
-                             line=dict(color="#7cd4a0", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], name="EMA50",
-                             line=dict(color="#f5c87a", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema200"], name="EMA200",
-                             line=dict(color="#e6c87c", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["vwap"], name="VWAP",
-                             line=dict(color="#a0aab8", dash="dot")), row=1, col=1)
-
-    if lv:
-        for k, cl, lb in [("stop_loss","#f57a7a","SL"),
-                          ("target1","#7cd4a0","TP1"),
-                          ("target2","#7cd4a0","TP2"),
-                          ("target3","#7cd4a0","TP3")]:
-            fig.add_hline(y=lv[k], row=1, col=1, line_dash="solid",
-                          line_color=cl, opacity=0.65,
-                          annotation_text=f"{lb} (Orig)",
-                          annotation_position="right")
-
-    if has_flip and flip_result.get("new_levels"):
-        fnl = flip_result["new_levels"]
-        for k, cl, lb in [("stop_loss","#f57a7a","F-SL"),
-                          ("target1","#7cd4a0","F-TP1"),
-                          ("target2","#7cd4a0","F-TP2"),
-                          ("target3","#7cd4a0","F-TP3")]:
-            fig.add_hline(y=fnl[k], row=1, col=1, line_dash="dash",
-                          line_color=cl, opacity=0.45,
-                          annotation_text=f"{lb}",
-                          annotation_position="left")
-
-    fig.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI",
-                             line=dict(color="#7cd4a0")), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD",
-                             line=dict(color="#7cd4a0")), row=3, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Sig",
-                             line=dict(color="#f5c87a")), row=3, col=1)
-    fig.update_layout(height=850, template="plotly_dark",
-        xaxis_rangeslider_visible=False,
-        paper_bgcolor="#0a0d13", plot_bgcolor="#0a0d13",
-        font=dict(family="Inter", color="#c8d2e2"),
-        legend=dict(bgcolor="rgba(0,0,0,0)", borderwidth=0),
-        margin=dict(l=20, r=20, t=20, b=20))
-    st.plotly_chart(fig, width="stretch")
-
-
-with tab_cal:
-    st.markdown('<div class="section-title">📅 Calendar</div>', unsafe_allow_html=True)
-    if st.button("🔄 Update Calendar", width="stretch"):
-        st.session_state.economic_events = get_fmp_economic_calendar()
-    if st.session_state.economic_events:
-        st.caption(event_risk_message(st.session_state.economic_events, sp_))
-        rows = [{"Country": e.get("country",""), "Event": e.get("event",""),
-                 "Impact": e.get("impact",""), "Date": e.get("date","")}
-                for e in st.session_state.economic_events[:20]]
-        if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-
-
-with tab_jrn:
-    st.markdown('<div class="section-title">📔 Journal</div>', unsafe_allow_html=True)
-    if not st.session_state.trade_journal:
-        st.info("لا صفقات مسجلة.")
-    else:
-        jdf = pd.DataFrame(st.session_state.trade_journal)
-        st.dataframe(jdf, hide_index=True, width="stretch")
-        tt = len(jdf); ww = (jdf["outcome"] == "WIN").sum()
-        ll = (jdf["outcome"] == "LOSS").sum()
-        wr = (ww/tt*100) if tt > 0 else 0
-        j1, j2, j3 = st.columns(3)
-        j1.metric("Total", tt); j2.metric("WR", f"{wr:.1f}%")
-        j3.metric("W/L", f"{ww}/{ll}")
-    st.markdown("---")
-    rc1, rc2, rc3 = st.columns(3)
-    with rc1:
-        if st.button("✅ WIN", width="stretch", key="lgw"):
-            log_trade_result(result, "WIN"); st.rerun()
-    with rc2:
-        if st.button("❌ LOSS", width="stretch", key="lgl"):
-            log_trade_result(result, "LOSS"); st.rerun()
-    with rc3:
-        if st.button("🗑️ Clear", width="stretch", key="clj"):
-            st.session_state.trade_journal = []; st.rerun()
-
-
-with tab_bt:
-    st.markdown('<div class="section-title">🔬 Backtest + Monte Carlo '
-                '<span>Backtest يتجاوز البوابة للحفاظ على العيّنة</span></div>',
-                unsafe_allow_html=True)
-    if st.button("▶️ Run Backtest", width="stretch"):
-        with st.spinner("Running..."):
-            st.session_state.backtest_results = quick_backtest(sym, sp_)
-        st.rerun()
-    if st.session_state.backtest_results:
-        bt = st.session_state.backtest_results
-        if bt.get("error"): st.error(f"فشل: {bt['error']}")
-        else:
-            b1, b2, b3, b4, b5 = st.columns(5)
-            b1.metric("Trades", bt["trades"]); b2.metric("WR", f"{bt['win_rate']:.1f}%")
-            b3.metric("Total R", f"{bt['total_R']:.2f}")
-            b4.metric("Expectancy", f"{bt['expectancy']:.3f}R")
-            b5.metric("PF", f"{bt['profit_factor']:.2f}")
-            mc = bt.get("monte_carlo")
-            if mc:
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Mean", f"{mc['mean_final']:.2f}R")
-                m2.metric("Median", f"{mc['median_final']:.2f}R")
-                m3.metric("Prob Profit", f"{mc['prob_profit']:.1f}%")
-
-
+# ═══════════════════════════════════════════════
+# FOOTER + STOP
+# ═══════════════════════════════════════════════
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Dual Signals · Pending Watch · Analysis Only
+    {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Strong Trade Finder · Analysis Only
 </div>
 """, unsafe_allow_html=True)
+
+st.stop()
