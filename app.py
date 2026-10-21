@@ -55,6 +55,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 APP_VERSION = "v2010.3"
 
 MODE = "balanced"
+MAX_STRONG_TRADES = 4  # عدد الصفقات القوية المعروضة
 
 _GATE_PRESETS = {
     "strict":   {"gate": 80.0, "a_plus": 85.0, "a": 80.0, "b": 72.0,
@@ -200,11 +201,6 @@ RISK_ON_CURRENCIES = {"AUD", "NZD", "CAD"}
 
 
 def get_secret(name, default=""):
-    """
-    Reads API key from session_state first (runtime override),
-    then st.secrets, then env vars.
-    Empty string in session_state means user explicitly disabled it.
-    """
     try:
         if name in st.session_state:
             v = st.session_state[name]
@@ -2676,8 +2672,10 @@ def get_all_signals_parallel():
     return out
 
 
-def find_strongest_trade():
-    """يمسح كل الأزواج، يرجع أقوى إشارة تمر البوابة مع كامل تفاصيلها."""
+def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
+    """
+    يمسح كل الأزواج، يرجع أقوى (حتى 4) إشارات تمر البوابة مع كامل تفاصيلها.
+    """
     df = get_all_signals_parallel()
     if df is None or df.empty:
         return {"status": "NONE"}
@@ -2701,21 +2699,38 @@ def find_strongest_trade():
         return max(s_o, s_f)
 
     strong["_final_score"] = strong.apply(calc_score, axis=1)
-    best = strong.sort_values("_final_score", ascending=False).iloc[0]
-    pair = best["الزوج"]
-    sym = PAIRS.get(pair)
-    if not sym:
+    strong = strong.sort_values("_final_score", ascending=False).head(max_trades)
+
+    trades = []
+    for _, best in strong.iterrows():
+        pair = best["الزوج"]
+        sym = PAIRS.get(pair)
+        if not sym:
+            continue
+        price, _ = get_spot_price(sym)
+        data = get_historical_data(sym, "3mo", "4h")
+        if price is None or data is None:
+            continue
+        try:
+            result = generate_signal(data, price, pair, sym, skip_external_filters=False)
+        except Exception:
+            continue
+        ec = None
+        try:
+            if result["signal"] in ("BUY","SELL") and result["levels"]:
+                ec = entry_confirmation_score(
+                    result.get("df"), result["signal"], result["levels"], pair)
+        except Exception:
+            ec = None
+        trades.append({
+            "pair": pair, "price": price, "sym": sym,
+            "result": result, "row": best.to_dict(),
+            "ec": ec,
+            "score": float(best["_final_score"])})
+
+    if not trades:
         return {"status": "NONE"}
-    price, _ = get_spot_price(sym)
-    data = get_historical_data(sym, "3mo", "4h")
-    if price is None or data is None:
-        return {"status": "NONE"}
-    try:
-        result = generate_signal(data, price, pair, sym, skip_external_filters=False)
-    except Exception:
-        return {"status": "NONE"}
-    return {"status": "FOUND", "row": best.to_dict(), "result": result,
-            "pair": pair, "price": price, "sym": sym}
+    return {"status": "FOUND", "trades": trades, "count": len(trades)}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -2844,24 +2859,6 @@ def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c",
     rr1.metric("RR·TP1", f"1:{levels['risk_reward_1']:.2f}")
     rr2.metric("RR·TP2", f"1:{levels['risk_reward_2']:.2f}")
     rr3.metric("RR·TP3", f"1:{levels['risk_reward_3']:.2f}")
-    st.markdown(f"""<div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-        <span style="background:rgba(245,122,122,0.15); padding:5px 12px;
-                     border-radius:18px; color:#f57a7a; font-size:0.8rem;
-                     border:1px solid rgba(245,122,122,0.35); font-weight:600;">
-            🛑 SL: {src.get('sl','—')}</span>
-        <span style="background:rgba(230,200,124,0.15); padding:5px 12px;
-                     border-radius:18px; color:#e6c87c; font-size:0.8rem;
-                     border:1px solid rgba(230,200,124,0.35);">
-            🎯 TP1: {src.get('tp1','—')}</span>
-        <span style="background:rgba(124,212,160,0.12); padding:5px 12px;
-                     border-radius:18px; color:#7cd4a0; font-size:0.8rem;
-                     border:1px solid rgba(124,212,160,0.35);">
-            🎯 TP2: {src.get('tp2','—')}</span>
-        <span style="background:rgba(124,212,160,0.12); padding:5px 12px;
-                     border-radius:18px; color:#7cd4a0; font-size:0.8rem;
-                     border:1px solid rgba(124,212,160,0.35);">
-            🎯 TP3: {src.get('tp3','—')}</span>
-    </div>""", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2877,7 +2874,6 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'Inter','Segoe UI',Tahoma,sans-serif; }
 body { background: #0a0d13; color: #e8edf5; }
 .main-header, .main-title, .main-subtitle,
-.signal-card, .signal-meta, .signal-conf, .signal-grade,
 .metric-card, .metric-label, .metric-value, .metric-sub,
 .tool-card, .tool-name, .tool-value, .tool-desc,
 .section-title, .footer-style,
@@ -3018,9 +3014,10 @@ with hr:
             st.cache_data.clear()
             st.toast("✅ تم التحديث")
     with br[1]:
-        if st.button("🎯 أعثر على صفقة قوية", width="stretch", key="btn_strong"):
-            with st.spinner("🔍 جاري البحث عن أقوى صفقة..."):
-                st.session_state.strong_trade_result = find_strongest_trade()
+        if st.button(f"🎯 أعثر على {MAX_STRONG_TRADES} صفقات قوية", width="stretch", key="btn_strong"):
+            with st.spinner(f"🔍 جاري البحث عن أفضل {MAX_STRONG_TRADES} صفقات..."):
+                st.session_state.strong_trade_result = find_strongest_trades(
+                    max_trades=MAX_STRONG_TRADES)
             st.rerun()
 
 
@@ -3032,7 +3029,6 @@ st.markdown('<div class="section-title">🔑 مفاتيح المصادر <span>A
 st.caption("أدخل مفاتيح API لجلب البيانات من مصادر إضافية. "
            "يتم الحفظ في الجلسة الحالية فقط (Session).")
 
-# Initialize widget state from env/secrets on first load
 if "_td_api_input" not in st.session_state:
     st.session_state._td_api_input = get_secret("TWELVE_API_KEY", "")
 if "_fmp_api_input" not in st.session_state:
@@ -3059,7 +3055,6 @@ with kc2:
     _fmp_status = "✅ نشط" if fmp_val else "⚪ غير مفعّل"
     st.caption(f"الحالة: {_fmp_status}")
 
-# Sync to session_state and clear cache if changed
 _changed = False
 if td_val != st.session_state.get("TWELVE_API_KEY", ""):
     st.session_state.TWELVE_API_KEY = td_val
@@ -3072,61 +3067,113 @@ if _changed:
 
 
 # ═══════════════════════════════════════════════
-# STRONGEST TRADE DISPLAY (Simplified)
+# STRONGEST TRADES DISPLAY (up to 4)
 # ═══════════════════════════════════════════════
 _str_res = st.session_state.get("strong_trade_result")
+
 if _str_res:
     if _str_res.get("status") == "NONE":
-        st.markdown('<div class="section-title">🏆 أقوى صفقة</div>',
+        st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
                     unsafe_allow_html=True)
-        st.warning("⏸️ **لا توجد صفقة قوية تمر البوابة الآن.** "
+        st.warning("⏸️ **لا توجد صفقات قوية تمر البوابة الآن.** "
                    f"(تحتاج ≥ {MIN_EMIT_CONFIDENCE:.0f}% ثقة + تأكيد)")
+
     elif _str_res.get("status") == "FOUND":
-        _bp = _str_res["pair"]; _br = _str_res["result"]
-        _blv = _br["levels"]; _bsig = _br["signal"]
-        _bc = _br["confidence"]; _bprice = _str_res["price"]
-        _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
+        _trades = _str_res.get("trades", [])
+        _n = len(_trades)
 
         st.markdown(
             f'<div class="section-title" style="color:#7cd4a0;">'
-            f'🏆 أقوى صفقة في السوق الآن — {_bp}</div>',
+            f'🏆 أقوى {_n} {"صفقة" if _n == 1 else "صفقات"} في السوق الآن '
+            f'<span>مرتبة حسب القوة · بوابة {MIN_EMIT_CONFIDENCE:.0f}%</span></div>',
             unsafe_allow_html=True)
 
-        _bs1, _bs2 = st.columns([1.5, 1.2])
-        with _bs1:
-            st.markdown(f"""
-            <div style="background:linear-gradient(145deg, #0a1a12, #0d1710);
-                        padding:28px 22px; border-radius:22px; text-align:center;
-                        border:2px solid {_bacc};
-                        box-shadow:0 0 35px {_bacc}66, 0 16px 40px rgba(0,0,0,0.7);">
-                <div style="color:#7cd4a0; font-size:0.9rem; font-weight:800;
-                            letter-spacing:2px;">🏆 BEST TRADE FOUND</div>
-                <div style="color:#e8edf5; font-size:1.35rem; font-weight:800;
-                            margin-top:8px;">{_bp}</div>
-                <div style="font-size:3.4rem; font-weight:900; color:{_bacc};
-                            letter-spacing:4px; margin:12px 0; line-height:1;">{_bsig}</div>
-                <div style="color:#c8d2e2; font-size:1.1rem;">
-                    Confidence: <b>{_bc:.1f}%</b></div>
-                <div style="color:{_bacc}; font-size:1.15rem; font-weight:800;
-                            margin-top:10px; letter-spacing:1.5px;">
-                    Grade: {_br['trade_grade']}</div>
-            </div>""", unsafe_allow_html=True)
-        with _bs2:
-            st.metric("💵 السعر", fmt_price(_bprice, _bp))
-            if _blv:
-                st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
-                          help=_blv.get("sources", {}).get("sl", ""))
-                st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp),
-                          help=_blv.get("sources", {}).get("tp1", ""))
-                st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp),
-                          help=_blv.get("sources", {}).get("tp2", ""))
-                st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp),
-                          help=_blv.get("sources", {}).get("tp3", ""))
-else:
-    st.markdown('<div class="section-title">🏆 أقوى صفقة</div>',
+        for idx, t in enumerate(_trades, 1):
+            _bp = t["pair"]; _br = t["result"]; _blv = _br["levels"]
+            _bsig = _br["signal"]; _bc = _br["confidence"]
+            _bprice = t["price"]; _ec = t.get("ec")
+            _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
+            _rank_icon = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"#{idx}")
+
+            st.markdown(
+                f'<div style="margin:24px 0 14px 0; padding:12px 18px; '
+                f'background:linear-gradient(90deg, {_bacc}22, transparent); '
+                f'border-left:4px solid {_bacc}; border-radius:10px;">'
+                f'<span style="color:{_bacc}; font-size:1.15rem; font-weight:800;">'
+                f'{_rank_icon} صفقة #{idx}</span>'
+                f'<span style="color:#e8edf5; font-size:1.15rem; font-weight:700; '
+                f'margin:0 10px;">— {_bp}</span>'
+                f'<span style="color:{_bacc}; font-size:1.1rem; font-weight:800;">'
+                f'· {_bsig} · {_bc:.1f}% · {_br["trade_grade"]}</span>'
+                f'</div>',
                 unsafe_allow_html=True)
-    st.info("🎯 اضغط **'أعثر على صفقة قوية'** أعلاه لبدء البحث في جميع الأزواج "
-            f"({len(PAIRS)} زوج). سيتم عرض أفضل إشارة تمر البوابة ≥ {MIN_EMIT_CONFIDENCE:.0f}%.")
+
+            _bs1, _bs2 = st.columns([1.4, 1.2])
+            with _bs1:
+                st.markdown(f"""
+                <div style="background:linear-gradient(145deg, #0a1a12, #0d1710);
+                            padding:22px 18px; border-radius:20px; text-align:center;
+                            border:2px solid {_bacc};
+                            box-shadow:0 0 25px {_bacc}44, 0 12px 30px rgba(0,0,0,0.6);">
+                    <div style="color:#7cd4a0; font-size:0.75rem; font-weight:800;
+                                letter-spacing:2px;">{_rank_icon} RANK #{idx}</div>
+                    <div style="color:#e8edf5; font-size:1.15rem; font-weight:800;
+                                margin-top:6px;">{_bp}</div>
+                    <div style="font-size:2.8rem; font-weight:900; color:{_bacc};
+                                letter-spacing:3px; margin:8px 0; line-height:1;">
+                        {_bsig}</div>
+                    <div style="color:#c8d2e2; font-size:1rem;">
+                        Confidence: <b>{_bc:.1f}%</b></div>
+                    <div style="color:{_bacc}; font-size:1rem; font-weight:800;
+                                margin-top:6px; letter-spacing:1.5px;">
+                        Grade: {_br['trade_grade']}</div>
+                </div>""", unsafe_allow_html=True)
+
+            with _bs2:
+                st.metric("💵 السعر", fmt_price(_bprice, _bp))
+                if _blv:
+                    st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
+                              help=_blv.get("sources", {}).get("sl", ""))
+                    st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp),
+                              help=_blv.get("sources", {}).get("tp1", ""))
+                    st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp),
+                              help=_blv.get("sources", {}).get("tp2", ""))
+                    st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp),
+                              help=_blv.get("sources", {}).get("tp3", ""))
+
+            if _blv:
+                _rr1 = _blv["risk_reward_1"]; _rr2 = _blv["risk_reward_2"]
+                _rr3 = _blv["risk_reward_3"]
+                _src = _blv.get("sources", {})
+                st.markdown(
+                    f'<div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">'
+                    f'<span style="background:rgba(245,122,122,0.15); padding:5px 12px; '
+                    f'border-radius:16px; color:#f57a7a; font-size:0.78rem; '
+                    f'border:1px solid rgba(245,122,122,0.35); font-weight:600;">'
+                    f'🛑 SL: {_src.get("sl","—")}</span>'
+                    f'<span style="background:rgba(230,200,124,0.15); padding:5px 12px; '
+                    f'border-radius:16px; color:#e6c87c; font-size:0.78rem; '
+                    f'border:1px solid rgba(230,200,124,0.35);">'
+                    f'RR1 1:{_rr1:.2f}</span>'
+                    f'<span style="background:rgba(124,212,160,0.12); padding:5px 12px; '
+                    f'border-radius:16px; color:#7cd4a0; font-size:0.78rem; '
+                    f'border:1px solid rgba(124,212,160,0.35);">'
+                    f'RR2 1:{_rr2:.2f}</span>'
+                    f'<span style="background:rgba(124,212,160,0.12); padding:5px 12px; '
+                    f'border-radius:16px; color:#7cd4a0; font-size:0.78rem; '
+                    f'border:1px solid rgba(124,212,160,0.35);">'
+                    f'RR3 1:{_rr3:.2f}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+
+            st.markdown("---")
+
+else:
+    st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
+                unsafe_allow_html=True)
+    st.info(f"🎯 اضغط **'أعثر على {MAX_STRONG_TRADES} صفقات قوية'** أعلاه لبدء البحث "
+            f"في جميع الأزواج ({len(PAIRS)} زوج). سيتم عرض أفضل {MAX_STRONG_TRADES} "
+            f"إشارات تمر البوابة ≥ {MIN_EMIT_CONFIDENCE:.0f}%.")
 
 
 # ═══════════════════════════════════════════════
@@ -3135,7 +3182,7 @@ else:
 st.markdown(f"""
 <div class="footer-style">
     ▲ BLACK PYRAMID {APP_VERSION} ▲<br>
-    {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Strong Trade Finder · Analysis Only
+    {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Top {MAX_STRONG_TRADES} Trades · Analysis Only
 </div>
 """, unsafe_allow_html=True)
 
