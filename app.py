@@ -52,7 +52,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # APP CONFIG
 # ============================================================
 
-APP_VERSION = "v2010.5 FINAL HARDENED"
+APP_VERSION = "v2010.6 FINAL API-CONNECTED"
 
 MODE = "balanced"
 MAX_STRONG_TRADES = 4  # عدد الصفقات القوية المعروضة
@@ -200,18 +200,32 @@ RISK_OFF_CURRENCIES = {"USD", "JPY", "CHF"}
 RISK_ON_CURRENCIES = {"AUD", "NZD", "CAD"}
 
 
+# API credentials supplied for this local build. These are fallbacks only:
+# Streamlit Secrets / environment variables take precedence. Rotate these keys
+# before deployment because credentials pasted into a chat should be considered exposed.
+_EMBEDDED_API_KEYS = {
+    "FMP_API_KEY": "wavsYe6yHShMmau0mzefor2aaP2r1SeC",
+    "TWELVE_API_KEY": "aeb08b1667274914bfa707940d1be324",
+    # Accept the common alternate spelling too.
+    "TWELVE_DATA_API_KEY": "aeb08b1667274914bfa707940d1be324",
+}
+
 def get_secret(name, default=""):
     try:
         if name in st.session_state:
             v = st.session_state[name]
-            if v is not None:
-                return str(v)
+            if v is not None and str(v).strip():
+                return str(v).strip()
     except Exception: pass
     try:
         v = st.secrets.get(name, None)
-        if v is not None: return str(v)
+        if v is not None and str(v).strip():
+            return str(v).strip()
     except Exception: pass
-    return os.getenv(name, default)
+    v = os.getenv(name, "")
+    if str(v).strip():
+        return str(v).strip()
+    return _EMBEDDED_API_KEYS.get(name, default)
 
 
 def init_state():
@@ -3191,8 +3205,7 @@ with hr:
 # ═══════════════════════════════════════════════
 st.markdown('<div class="section-title">🔑 مفاتيح المصادر <span>API Keys · Data Sources</span></div>',
             unsafe_allow_html=True)
-st.caption("أدخل مفاتيح API لجلب البيانات من مصادر إضافية. "
-           "يتم الحفظ في الجلسة الحالية فقط (Session).")
+st.caption("مفاتيح FMP وTwelve Data مضمنة كإعداد افتراضي لهذه النسخة؛ يمكنك استبدالها هنا للجلسة الحالية أو ضبط Streamlit Secrets للنشر الآمن.")
 
 if "_td_api_input" not in st.session_state:
     st.session_state._td_api_input = get_secret("TWELVE_API_KEY", "")
