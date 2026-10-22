@@ -971,14 +971,10 @@ def calc_session_vwap(df):
 
 
 # ═══════════════════════════════════════════════════════════
-# SWING DETECTION (FIXED — real swing prices stored)
+# SWING DETECTION (real swing prices)
 # ═══════════════════════════════════════════════════════════
 
 def find_confirmed_swings(df, order=3):
-    """
-    يكتشف القمم/القيعان المؤكدة ويخزن السعر الفعلي للشمعة الأصلية
-    في عمود swing_high_price / swing_low_price (وليس سعر شمعة التأكيد).
-    """
     out = df.copy(); w = 2*order+1
     if len(out) < w:
         out["swing_high"] = False; out["swing_low"] = False
@@ -990,14 +986,12 @@ def find_confirmed_swings(df, order=3):
     inn = (out["low"] <= rn + 1e-12) & rn.notna()
     out["swing_high"] = im.shift(order).fillna(False).astype(bool)
     out["swing_low"] = inn.shift(order).fillna(False).astype(bool)
-    # ⭐ تخزين سعر الشمعة الفعلية (بعد shift للخلف)
     out["swing_high_price"] = out["high"].shift(order).where(out["swing_high"], np.nan)
     out["swing_low_price"] = out["low"].shift(order).where(out["swing_low"], np.nan)
     return out
 
 
 def get_last_two_swings(df, kind="high"):
-    """يرجع آخر قمتين/قاعين مؤكدين بالأسعار الحقيقية."""
     c = "swing_high" if kind == "high" else "swing_low"
     pc = "swing_high_price" if kind == "high" else "swing_low_price"
     if c not in df.columns: return None
@@ -1023,7 +1017,6 @@ def structure_state(df):
 
 
 def detect_bos_mss(df):
-    """كسر الهيكل — يستخدم أسعار الـ swings الحقيقية (وليس شمعة التأكيد)."""
     out = df.copy(); n = len(out)
     bbu = np.zeros(n, dtype=bool); bbe = np.zeros(n, dtype=bool)
     mbu = np.zeros(n, dtype=bool); mbe = np.zeros(n, dtype=bool)
@@ -1101,7 +1094,6 @@ def add_premium_discount(df, lb=50):
     return out
 
 def analyze_smc(df, profile):
-    """تحليل SMC كامل — يستخدم أسعار swings الحقيقية لـ BSL/SSL."""
     out = df.copy()
     out = find_confirmed_swings(out, profile["swing_order"])
     out = detect_bos_mss(out)
@@ -1132,7 +1124,6 @@ def candle_confirmation(df, direction):
 
 
 def detect_divergence(df):
-    """Divergence — يستخدم أسعار الـ swings الحقيقية."""
     if len(df) < 30: return None
     w = find_confirmed_swings(df, 3)
     lo = w.index[w["swing_low"]].tolist(); hi = w.index[w["swing_high"]].tolist()
@@ -1606,7 +1597,6 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
 
 
 def latest_structure_levels(df):
-    """آخر قاع/قمة هيكلية — يستخدم أسعار الـ swings الحقيقية."""
     lo = df.index[df["swing_low"]].tolist()
     hi = df.index[df["swing_high"]].tolist()
     sl = np.nan; sh = np.nan
@@ -1670,7 +1660,6 @@ def fib_levels_from_impulse(impulse):
 
 
 def collect_sr_levels(df, lookback=200):
-    """مستويات الدعم/المقاومة — يستخدم أسعار الـ swings الحقيقية."""
     lv = []
     w = df.iloc[-lookback:] if len(df) > lookback else df
     if "swing_high" in w.columns:
@@ -1690,7 +1679,6 @@ def collect_sr_levels(df, lookback=200):
 
 
 def detect_inducement(df, direction, lookback=50):
-    """IDM — يستخدم أسعار الـ swings الحقيقية."""
     if len(df) < 20: return None
     work = df.iloc[-lookback:]
     if direction == "BUY":
@@ -1716,7 +1704,6 @@ def detect_inducement(df, direction, lookback=50):
 
 
 def find_nearest_liquidity(df, current_price, direction, lookback=100):
-    """السيولة القريبة — يستخدم أسعار الـ swings الحقيقية."""
     if len(df) < 10: return []
     work = df.iloc[-lookback:] if len(df) > lookback else df
     levels = []
@@ -2754,34 +2741,43 @@ def get_all_signals_parallel():
 
 
 def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
-    """يمسح كل الأزواج، يرجع أقوى (حتى 4) إشارات تمر البوابة."""
+    """
+    يعيد أفضل N إشارات (BUY/SELL مع مستويات SL/TP) مرتبة حسب القوة.
+    لا يشترط اجتياز البوابة — بل يعرض حالة البوابة لكل صفقة بوضوح.
+    """
     df = get_all_signals_parallel()
     if df is None or df.empty:
-        return {"status": "NONE"}
-    mask = pd.Series([False] * len(df), index=df.index)
-    if "🚦 أصلي" in df.columns:
-        mask = mask | (df["🚦 أصلي"] == "✅")
-    if "🚦 Flip" in df.columns:
-        mask = mask | (df["🚦 Flip"] == "✅")
-    strong = df[mask].copy()
-    if strong.empty:
-        return {"status": "NONE"}
+        return {"status": "NONE",
+                "message": "تعذر جلب البيانات — جرب 🔄 تحديث"}
+
+    valid = df[df["الإشارة"].isin(["BUY", "SELL"])].copy()
+    if valid.empty:
+        return {"status": "NONE",
+                "message": "كل الأزواج في حالة WAIT الآن — لا يوجد اتجاه واضح. "
+                           "هذا طبيعي في أوقات التذبذب أو إغلاق السوق."}
 
     def calc_score(row):
-        s_o = s_f = 0.0
-        if row.get("🚦 أصلي") == "✅":
-            s_o = row.get("_ec_score", 0) * 0.6 + row.get("الثقة", 0) * 0.4
-        if row.get("🚦 Flip") == "✅":
-            fc = row.get("Flip Conf%", 0)
-            fc = fc if isinstance(fc, (int, float)) else 0
-            s_f = row.get("_flip_ec_score", 0) * 0.6 + fc * 0.4
+        ec_o = row.get("_ec_score", 0) or 0
+        conf_o = row.get("الثقة", 0) or 0
+        s_o = ec_o * 0.6 + conf_o * 0.4
+
+        fc = row.get("Flip Conf%", 0)
+        fc = fc if isinstance(fc, (int, float)) else 0
+        ec_f = row.get("_flip_ec_score", 0) or 0
+        s_f = ec_f * 0.6 + fc * 0.4
         return max(s_o, s_f)
 
-    strong["_final_score"] = strong.apply(calc_score, axis=1)
-    strong = strong.sort_values("_final_score", ascending=False).head(max_trades)
+    valid["_final_score"] = valid.apply(calc_score, axis=1)
+
+    def sort_priority(row):
+        passing = (row.get("🚦 أصلي") == "✅") or (row.get("🚦 Flip") == "✅")
+        return (1000.0 if passing else 0.0) + float(row.get("_final_score", 0))
+
+    valid["_sort"] = valid.apply(sort_priority, axis=1)
+    valid = valid.sort_values("_sort", ascending=False).head(max_trades)
 
     trades = []
-    for _, best in strong.iterrows():
+    for _, best in valid.iterrows():
         pair = best["الزوج"]
         sym = PAIRS.get(pair)
         if not sym:
@@ -2791,25 +2787,40 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
         if price is None or data is None:
             continue
         try:
-            result = generate_signal(data, price, pair, sym, skip_external_filters=False)
+            result = generate_signal(data, price, pair, sym,
+                                     skip_external_filters=False)
         except Exception:
             continue
+        if result["signal"] == "WAIT" or result["levels"] is None:
+            continue
+
         ec = None
         try:
-            if result["signal"] in ("BUY","SELL") and result["levels"]:
-                ec = entry_confirmation_score(
-                    result.get("df"), result["signal"], result["levels"], pair)
+            ec = entry_confirmation_score(
+                result.get("df"), result["signal"], result["levels"], pair)
         except Exception:
             ec = None
+
+        ec_s = ec["score"] if ec else 0
+        gate_ok, gate_msg = passes_confidence_gate(
+            result["confidence"], ec_s)
+
         trades.append({
             "pair": pair, "price": price, "sym": sym,
             "result": result, "row": best.to_dict(),
             "ec": ec,
-            "score": float(best["_final_score"])})
+            "gate_ok": gate_ok, "gate_msg": gate_msg,
+            "score": float(best.get("_final_score", 0))})
 
     if not trades:
-        return {"status": "NONE"}
-    return {"status": "FOUND", "trades": trades, "count": len(trades)}
+        return {"status": "NONE",
+                "message": "الإشارات المكتشفة لم تنجح إعادة التحليل — جرب 🔄 تحديث"}
+
+    trades.sort(key=lambda t: (not t["gate_ok"], -t["score"]))
+    n_pass = sum(1 for t in trades if t["gate_ok"])
+
+    return {"status": "FOUND", "trades": trades,
+            "count": len(trades), "n_pass": n_pass}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3146,7 +3157,7 @@ if _changed:
 
 
 # ═══════════════════════════════════════════════
-# STRONGEST TRADES DISPLAY (up to 4)
+# STRONGEST TRADES DISPLAY
 # ═══════════════════════════════════════════════
 _str_res = st.session_state.get("strong_trade_result")
 
@@ -3154,36 +3165,82 @@ if _str_res:
     if _str_res.get("status") == "NONE":
         st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
                     unsafe_allow_html=True)
-        st.warning("⏸️ **لا توجد صفقات قوية تمر البوابة الآن.** "
-                   f"(تحتاج ≥ {MIN_EMIT_CONFIDENCE:.0f}% ثقة + تأكيد)")
+        _msg = _str_res.get("message", "لا توجد إشارات صالحة الآن.")
+        st.warning(f"⏸️ **{_msg}**")
+        st.caption(f"البوابة تتطلب: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% **و** "
+                   f"تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100")
 
     elif _str_res.get("status") == "FOUND":
         _trades = _str_res.get("trades", [])
         _n = len(_trades)
+        _n_pass = _str_res.get("n_pass", 0)
+        _n_watch = _n - _n_pass
 
-        st.markdown(
-            f'<div class="section-title" style="color:#7cd4a0;">'
-            f'🏆 أقوى {_n} {"صفقة" if _n == 1 else "صفقات"} في السوق الآن '
-            f'<span>مرتبة حسب القوة · بوابة {MIN_EMIT_CONFIDENCE:.0f}%</span></div>',
-            unsafe_allow_html=True)
+        if _n_pass > 0 and _n_watch > 0:
+            _summ_color = "#7cd4a0"
+            _summ_icon = "🎯"
+            _summ_text = (f"**{_n_pass}** عابرة البوابة ✅ · "
+                          f"**{_n_watch}** قوية لكن تحت البوابة ⚠️")
+        elif _n_pass > 0:
+            _summ_color = "#7cd4a0"
+            _summ_icon = "🎯"
+            _summ_text = f"كل الصفقات ({_n_pass}) عابرة البوابة ✅"
+        else:
+            _summ_color = "#f5c87a"
+            _summ_icon = "⚠️"
+            _summ_text = (f"لا صفقات عابرة البوابة الآن — "
+                          f"أقوى {_n} إشارات للمراقبة فقط ⚠️")
+
+        st.markdown(f"""
+        <div style="background:{_summ_color}22; padding:14px 20px;
+                    border-radius:12px; margin:20px 0;
+                    border:2px solid {_summ_color}66;">
+            <span style="color:{_summ_color}; font-weight:800; font-size:1.05rem;">
+                {_summ_icon} {_summ_text}
+            </span>
+            <div style="color:#8b95a8; font-size:0.82rem; margin-top:6px;">
+                بوابة الجودة: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% و تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         for idx, t in enumerate(_trades, 1):
             _bp = t["pair"]; _br = t["result"]; _blv = _br["levels"]
             _bsig = _br["signal"]; _bc = _br["confidence"]
             _bprice = t["price"]; _ec = t.get("ec")
+            _gate_ok = t.get("gate_ok", False)
+            _gate_msg = t.get("gate_msg", "")
             _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
             _rank_icon = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"#{idx}")
+
+            if _gate_ok:
+                _badge = (
+                    f'<span style="background:#7cd4a022; color:#7cd4a0; '
+                    f'padding:4px 12px; border-radius:16px; font-size:0.8rem; '
+                    f'font-weight:800; border:1px solid #7cd4a066; margin-left:8px;">'
+                    f'✅ عابرة البوابة</span>')
+                _border = "#7cd4a0"
+                _opacity = "1.0"
+            else:
+                _badge = (
+                    f'<span style="background:#f5c87a22; color:#f5c87a; '
+                    f'padding:4px 12px; border-radius:16px; font-size:0.8rem; '
+                    f'font-weight:800; border:1px solid #f5c87a66; margin-left:8px;">'
+                    f'⚠️ تحت البوابة — مراقبة فقط</span>')
+                _border = "#f5c87a"
+                _opacity = "0.92"
 
             st.markdown(
                 f'<div style="margin:24px 0 14px 0; padding:12px 18px; '
                 f'background:linear-gradient(90deg, {_bacc}22, transparent); '
-                f'border-left:4px solid {_bacc}; border-radius:10px;">'
+                f'border-left:4px solid {_bacc}; border-radius:10px; opacity:{_opacity};">'
                 f'<span style="color:{_bacc}; font-size:1.15rem; font-weight:800;">'
                 f'{_rank_icon} صفقة #{idx}</span>'
                 f'<span style="color:#e8edf5; font-size:1.15rem; font-weight:700; '
                 f'margin:0 10px;">— {_bp}</span>'
                 f'<span style="color:{_bacc}; font-size:1.1rem; font-weight:800;">'
                 f'· {_bsig} · {_bc:.1f}% · {_br["trade_grade"]}</span>'
+                f'{_badge}'
                 f'</div>',
                 unsafe_allow_html=True)
 
@@ -3192,8 +3249,8 @@ if _str_res:
                 st.markdown(f"""
                 <div style="background:linear-gradient(145deg, #0a1a12, #0d1710);
                             padding:22px 18px; border-radius:20px; text-align:center;
-                            border:2px solid {_bacc};
-                            box-shadow:0 0 25px {_bacc}44, 0 12px 30px rgba(0,0,0,0.6);">
+                            border:2px solid {_border};
+                            box-shadow:0 0 25px {_border}44, 0 12px 30px rgba(0,0,0,0.6);">
                     <div style="color:#7cd4a0; font-size:0.75rem; font-weight:800;
                                 letter-spacing:2px;">{_rank_icon} RANK #{idx}</div>
                     <div style="color:#e8edf5; font-size:1.15rem; font-weight:800;
@@ -3245,6 +3302,15 @@ if _str_res:
                     f'</div>',
                     unsafe_allow_html=True)
 
+                if not _gate_ok and _gate_msg:
+                    st.markdown(
+                        f'<div style="margin-top:10px; padding:8px 14px; '
+                        f'background:#f5c87a18; border-left:3px solid #f5c87a; '
+                        f'border-radius:8px; color:#f5c87a; font-size:0.82rem;">'
+                        f'🔒 <b>سبب عدم الاجتياز:</b> {_gate_msg} — '
+                        f'انتظر تحسّن الشروط قبل الدخول</div>',
+                        unsafe_allow_html=True)
+
             st.markdown("---")
 
 else:
@@ -3252,7 +3318,7 @@ else:
                 unsafe_allow_html=True)
     st.info(f"🎯 اضغط **'أعثر على {MAX_STRONG_TRADES} صفقات قوية'** أعلاه لبدء البحث "
             f"في جميع الأزواج ({len(PAIRS)} زوج). سيتم عرض أفضل {MAX_STRONG_TRADES} "
-            f"إشارات تمر البوابة ≥ {MIN_EMIT_CONFIDENCE:.0f}%.")
+            f"إشارات (العابرة للبوابة أولاً ثم الأقوى).")
 
 
 # ═══════════════════════════════════════════════
