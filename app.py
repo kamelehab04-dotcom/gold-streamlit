@@ -55,7 +55,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 APP_VERSION = "v2010.3"
 
 MODE = "balanced"
-MAX_STRONG_TRADES = 4  # عدد الصفقات القوية المعروضة
+MAX_STRONG_TRADES = 4
 
 _GATE_PRESETS = {
     "strict":   {"gate": 80.0, "a_plus": 85.0, "a": 80.0, "b": 72.0,
@@ -970,25 +970,46 @@ def calc_session_vwap(df):
     return vw.fillna(fb)
 
 
+# ═══════════════════════════════════════════════════════════
+# SWING DETECTION (FIXED — real swing prices stored)
+# ═══════════════════════════════════════════════════════════
+
 def find_confirmed_swings(df, order=3):
+    """
+    يكتشف القمم/القيعان المؤكدة ويخزن السعر الفعلي للشمعة الأصلية
+    في عمود swing_high_price / swing_low_price (وليس سعر شمعة التأكيد).
+    """
     out = df.copy(); w = 2*order+1
     if len(out) < w:
-        out["swing_high"] = False; out["swing_low"] = False; return out
+        out["swing_high"] = False; out["swing_low"] = False
+        out["swing_high_price"] = np.nan; out["swing_low_price"] = np.nan
+        return out
     rm = out["high"].rolling(w, min_periods=w).max()
     rn = out["low"].rolling(w, min_periods=w).min()
     im = (out["high"] >= rm - 1e-12) & rm.notna()
     inn = (out["low"] <= rn + 1e-12) & rn.notna()
     out["swing_high"] = im.shift(order).fillna(False).astype(bool)
     out["swing_low"] = inn.shift(order).fillna(False).astype(bool)
+    # ⭐ تخزين سعر الشمعة الفعلية (بعد shift للخلف)
+    out["swing_high_price"] = out["high"].shift(order).where(out["swing_high"], np.nan)
+    out["swing_low_price"] = out["low"].shift(order).where(out["swing_low"], np.nan)
     return out
 
+
 def get_last_two_swings(df, kind="high"):
+    """يرجع آخر قمتين/قاعين مؤكدين بالأسعار الحقيقية."""
     c = "swing_high" if kind == "high" else "swing_low"
+    pc = "swing_high_price" if kind == "high" else "swing_low_price"
     if c not in df.columns: return None
     p = df.index[df[c]].tolist()
-    v = df.loc[p, "high" if kind == "high" else "low"].tolist()
     if len(p) < 2: return None
+    if pc in df.columns:
+        v = df.loc[p, pc].fillna(
+            df.loc[p, "high" if kind == "high" else "low"]).tolist()
+    else:
+        v = df.loc[p, "high" if kind == "high" else "low"].tolist()
     return [(p[-2], float(v[-2])), (p[-1], float(v[-1]))]
+
 
 def structure_state(df):
     h = get_last_two_swings(df, "high"); l = get_last_two_swings(df, "low")
@@ -1000,7 +1021,9 @@ def structure_state(df):
         elif lh and ll: be = True; s = "BEARISH"
     return {"state": s, "bullish": bu, "bearish": be, "highs": h, "lows": l}
 
+
 def detect_bos_mss(df):
+    """كسر الهيكل — يستخدم أسعار الـ swings الحقيقية (وليس شمعة التأكيد)."""
     out = df.copy(); n = len(out)
     bbu = np.zeros(n, dtype=bool); bbe = np.zeros(n, dtype=bool)
     mbu = np.zeros(n, dtype=bool); mbe = np.zeros(n, dtype=bool)
@@ -1008,12 +1031,18 @@ def detect_bos_mss(df):
         out["bos_bullish"] = bbu; out["bos_bearish"] = bbe
         out["mss_bullish"] = mbu; out["mss_bearish"] = mbe; return out
     sh = out["swing_high"].values; sl = out["swing_low"].values
-    ha = out["high"].values; la = out["low"].values; ca = out["close"].values
+    if "swing_high_price" in out.columns:
+        shp = out["swing_high_price"].values
+        slp = out["swing_low_price"].values
+    else:
+        shp = out["high"].values
+        slp = out["low"].values
+    ca = out["close"].values
     st = "RANGE"; lh = np.nan; ll = np.nan
     for i in range(n):
         if i > 0:
-            if sh[i-1]: lh = ha[i-1]
-            if sl[i-1]: ll = la[i-1]
+            if sh[i-1] and np.isfinite(shp[i-1]): lh = shp[i-1]
+            if sl[i-1] and np.isfinite(slp[i-1]): ll = slp[i-1]
         if i < 10: continue
         c = ca[i]
         if np.isfinite(lh) and c > lh:
@@ -1027,6 +1056,7 @@ def detect_bos_mss(df):
     out["bos_bullish"] = bbu; out["bos_bearish"] = bbe
     out["mss_bullish"] = mbu; out["mss_bearish"] = mbe
     return out
+
 
 def detect_liquidity_sweeps(df, tol_atr=0.10):
     out = df.copy(); t = out["atr"] * tol_atr
@@ -1071,6 +1101,7 @@ def add_premium_discount(df, lb=50):
     return out
 
 def analyze_smc(df, profile):
+    """تحليل SMC كامل — يستخدم أسعار swings الحقيقية لـ BSL/SSL."""
     out = df.copy()
     out = find_confirmed_swings(out, profile["swing_order"])
     out = detect_bos_mss(out)
@@ -1080,9 +1111,16 @@ def analyze_smc(df, profile):
     out = add_premium_discount(out, min(profile["structure_lookback"], 100))
     hi = out.index[out["swing_high"]]; lo = out.index[out["swing_low"]]
     out["bsl"] = np.nan; out["ssl"] = np.nan
-    if len(hi): out["bsl"] = float(out.loc[hi[-1], "high"])
-    if len(lo): out["ssl"] = float(out.loc[lo[-1], "low"])
+    if len(hi):
+        v = safe_float(out.loc[hi[-1], "swing_high_price"],
+                        safe_float(out.loc[hi[-1], "high"]))
+        if np.isfinite(v): out["bsl"] = v
+    if len(lo):
+        v = safe_float(out.loc[lo[-1], "swing_low_price"],
+                        safe_float(out.loc[lo[-1], "low"]))
+        if np.isfinite(v): out["ssl"] = v
     return out
+
 
 def candle_confirmation(df, direction):
     if len(df) < 3: return False
@@ -1092,17 +1130,32 @@ def candle_confirmation(df, direction):
         return bool(l["close"] > l["open"] and (l["close"]-l["low"])/rng >= 0.60 and b/rng >= 0.35)
     return bool(l["close"] < l["open"] and (l["high"]-l["close"])/rng >= 0.60 and b/rng >= 0.35)
 
+
 def detect_divergence(df):
+    """Divergence — يستخدم أسعار الـ swings الحقيقية."""
     if len(df) < 30: return None
     w = find_confirmed_swings(df, 3)
     lo = w.index[w["swing_low"]].tolist(); hi = w.index[w["swing_high"]].tolist()
     if len(lo) >= 2:
         p1, p2 = lo[-2], lo[-1]
-        if w.loc[p2,"low"] < w.loc[p1,"low"] and w.loc[p2,"rsi"] > w.loc[p1,"rsi"]: return "BULLISH"
+        lp1 = safe_float(w.loc[p1, "swing_low_price"],
+                          safe_float(w.loc[p1, "low"]))
+        lp2 = safe_float(w.loc[p2, "swing_low_price"],
+                          safe_float(w.loc[p2, "low"]))
+        if (np.isfinite(lp1) and np.isfinite(lp2)
+            and lp2 < lp1 and w.loc[p2,"rsi"] > w.loc[p1,"rsi"]):
+            return "BULLISH"
     if len(hi) >= 2:
         p1, p2 = hi[-2], hi[-1]
-        if w.loc[p2,"high"] > w.loc[p1,"high"] and w.loc[p2,"rsi"] < w.loc[p1,"rsi"]: return "BEARISH"
+        hp1 = safe_float(w.loc[p1, "swing_high_price"],
+                          safe_float(w.loc[p1, "high"]))
+        hp2 = safe_float(w.loc[p2, "swing_high_price"],
+                          safe_float(w.loc[p2, "high"]))
+        if (np.isfinite(hp1) and np.isfinite(hp2)
+            and hp2 > hp1 and w.loc[p2,"rsi"] < w.loc[p1,"rsi"]):
+            return "BEARISH"
     return None
+
 
 def smc_quality(df):
     if df is None or len(df) < 5: return 0.0, []
@@ -1553,10 +1606,18 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
 
 
 def latest_structure_levels(df):
-    lo = df.index[df["swing_low"]].tolist(); hi = df.index[df["swing_high"]].tolist()
-    sl = float(df.loc[lo[-1], "low"]) if lo else np.nan
-    sh = float(df.loc[hi[-1], "high"]) if hi else np.nan
+    """آخر قاع/قمة هيكلية — يستخدم أسعار الـ swings الحقيقية."""
+    lo = df.index[df["swing_low"]].tolist()
+    hi = df.index[df["swing_high"]].tolist()
+    sl = np.nan; sh = np.nan
+    if lo:
+        pc = "swing_low_price" if "swing_low_price" in df.columns else "low"
+        sl = safe_float(df.loc[lo[-1], pc], safe_float(df.loc[lo[-1], "low"]))
+    if hi:
+        pc = "swing_high_price" if "swing_high_price" in df.columns else "high"
+        sh = safe_float(df.loc[hi[-1], pc], safe_float(df.loc[hi[-1], "high"]))
     return sl, sh
+
 
 def calc_pivot_points(df):
     if len(df) < 2: return None
@@ -1607,13 +1668,21 @@ def fib_levels_from_impulse(impulse):
             "extension": {"1.000": e, "1.272": x(1.272), "1.618": x(1.618),
                           "2.000": x(2.000), "2.618": x(2.618)}}
 
+
 def collect_sr_levels(df, lookback=200):
+    """مستويات الدعم/المقاومة — يستخدم أسعار الـ swings الحقيقية."""
     lv = []
     w = df.iloc[-lookback:] if len(df) > lookback else df
     if "swing_high" in w.columns:
-        for i in w.index[w["swing_high"]][-5:]: lv.append(float(w.loc[i, "high"]))
+        pc = "swing_high_price" if "swing_high_price" in w.columns else "high"
+        for i in w.index[w["swing_high"]][-5:]:
+            v = safe_float(w.loc[i, pc], safe_float(w.loc[i, "high"]))
+            if np.isfinite(v): lv.append(v)
     if "swing_low" in w.columns:
-        for i in w.index[w["swing_low"]][-5:]: lv.append(float(w.loc[i, "low"]))
+        pc = "swing_low_price" if "swing_low_price" in w.columns else "low"
+        for i in w.index[w["swing_low"]][-5:]:
+            v = safe_float(w.loc[i, pc], safe_float(w.loc[i, "low"]))
+            if np.isfinite(v): lv.append(v)
     if len(w) >= 20:
         lv.append(float(w["high"].iloc[-20:].max()))
         lv.append(float(w["low"].iloc[-20:].min()))
@@ -1621,6 +1690,7 @@ def collect_sr_levels(df, lookback=200):
 
 
 def detect_inducement(df, direction, lookback=50):
+    """IDM — يستخدم أسعار الـ swings الحقيقية."""
     if len(df) < 20: return None
     work = df.iloc[-lookback:]
     if direction == "BUY":
@@ -1630,7 +1700,9 @@ def detect_inducement(df, direction, lookback=50):
         last_high = swings_h[-1]
         prior = [s for s in swings_l if s < last_high]
         if not prior: return None
-        return float(work.loc[prior[-1], "low"])
+        pc = "swing_low_price" if "swing_low_price" in work.columns else "low"
+        return safe_float(work.loc[prior[-1], pc],
+                          safe_float(work.loc[prior[-1], "low"]))
     else:
         swings_l = work.index[work["swing_low"]].tolist()
         swings_h = work.index[work["swing_high"]].tolist()
@@ -1638,17 +1710,23 @@ def detect_inducement(df, direction, lookback=50):
         last_low = swings_l[-1]
         prior = [s for s in swings_h if s < last_low]
         if not prior: return None
-        return float(work.loc[prior[-1], "high"])
+        pc = "swing_high_price" if "swing_high_price" in work.columns else "high"
+        return safe_float(work.loc[prior[-1], pc],
+                          safe_float(work.loc[prior[-1], "high"]))
 
 
 def find_nearest_liquidity(df, current_price, direction, lookback=100):
+    """السيولة القريبة — يستخدم أسعار الـ swings الحقيقية."""
     if len(df) < 10: return []
     work = df.iloc[-lookback:] if len(df) > lookback else df
     levels = []
     if direction == "BUY":
+        pc = "swing_high_price" if "swing_high_price" in work.columns else "high"
         for idx in work.index[work["swing_high"]][-5:]:
-            lvl = float(work.loc[idx, "high"])
-            if lvl > current_price: levels.append({"name": "BSL", "level": lvl})
+            lvl = safe_float(work.loc[idx, pc],
+                              safe_float(work.loc[idx, "high"]))
+            if np.isfinite(lvl) and lvl > current_price:
+                levels.append({"name": "BSL", "level": lvl})
         if len(work) >= 20:
             rh = work["high"].iloc[-20:].values
             for i in range(len(rh) - 1):
@@ -1659,9 +1737,12 @@ def find_nearest_liquidity(df, current_price, direction, lookback=100):
                             levels.append({"name": "Equal Highs", "level": lvl})
                         break
     else:
+        pc = "swing_low_price" if "swing_low_price" in work.columns else "low"
         for idx in work.index[work["swing_low"]][-5:]:
-            lvl = float(work.loc[idx, "low"])
-            if lvl < current_price: levels.append({"name": "SSL", "level": lvl})
+            lvl = safe_float(work.loc[idx, pc],
+                              safe_float(work.loc[idx, "low"]))
+            if np.isfinite(lvl) and lvl < current_price:
+                levels.append({"name": "SSL", "level": lvl})
         if len(work) >= 20:
             rl = work["low"].iloc[-20:].values
             for i in range(len(rl) - 1):
@@ -2673,9 +2754,7 @@ def get_all_signals_parallel():
 
 
 def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
-    """
-    يمسح كل الأزواج، يرجع أقوى (حتى 4) إشارات تمر البوابة مع كامل تفاصيلها.
-    """
+    """يمسح كل الأزواج، يرجع أقوى (حتى 4) إشارات تمر البوابة."""
     df = get_all_signals_parallel()
     if df is None or df.empty:
         return {"status": "NONE"}
@@ -2708,7 +2787,7 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
         if not sym:
             continue
         price, _ = get_spot_price(sym)
-        data = get_historical_data(sym, "3mo", "4h")
+        data = get_historical_data(sym, "6mo", "4h")
         if price is None or data is None:
             continue
         try:
