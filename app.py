@@ -3651,25 +3651,55 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
         sym = PAIRS.get(pair)
         if not sym:
             continue
+        # Re-analysis is useful for fresh levels, but must never erase a valid
+        # candidate already found by the parallel market scan.
         price, _ = get_spot_price(sym)
         data = get_historical_data(sym, "6mo", "4h")
-        if price is None or data is None:
-            continue
-        try:
-            result = generate_signal(data, price, pair, sym,
-                                     skip_external_filters=False)
-        except Exception:
-            continue
-        if result["signal"] == "WAIT" or result["levels"] is None:
-            continue
+        result = None
+        recheck_note = ""
+        if price is not None and data is not None and not data.empty:
+            try:
+                candidate_result = generate_signal(
+                    data, price, pair, sym, skip_external_filters=False)
+                if candidate_result.get("signal") in ("BUY", "SELL") and candidate_result.get("levels"):
+                    result = candidate_result
+                else:
+                    recheck_note = "إعادة الفحص لم تؤكد الإشارة؛ نعرض نتيجة المسح الأولي للمراجعة"
+            except Exception as exc:
+                recheck_note = f"تعذرت إعادة الفحص: {type(exc).__name__}"
+        else:
+            recheck_note = "تعذر تحديث السعر/البيانات؛ نعرض نتيجة المسح الأولي"
+
+        # Fallback uses only values returned by the initial scan. It does not
+        # invent SL/TP values or mark the candidate executable.
+        if result is None:
+            price = price if price is not None else None
+            result = {
+                "signal": str(best.get("الإشارة", "WAIT")),
+                "confidence": safe_float(best.get("الثقة", 0), 0),
+                "levels": None,
+                "execution_status": "MONITOR",
+                "execution_reason": recheck_note or "بانتظار تأكيد إعادة التحليل",
+                "all_filters_passed": False,
+                "buy_score": safe_float(best.get("BUY", 0), 0),
+                "sell_score": safe_float(best.get("SELL", 0), 0),
+                "trade_grade": best.get("Grade", "WAIT"),
+                "mtf_bias": best.get("MTF", "—"),
+                "weekly_bias": best.get("Weekly", "—"),
+                "regime": best.get("Regime", "—"),
+                "weighted_confluence": safe_float(best.get("Conf", 0), 0),
+                "confirmation_score": safe_float(best.get("Confirm", 0), 0),
+                "reasons": [recheck_note] if recheck_note else [],
+            }
 
 
 
 
         ec = None
         try:
-            ec = entry_confirmation_score(
-                result.get("df"), result["signal"], result["levels"], pair)
+            if result.get("levels") and result.get("df") is not None:
+                ec = entry_confirmation_score(
+                    result.get("df"), result["signal"], result["levels"], pair)
         except Exception:
             ec = None
 
@@ -3709,7 +3739,8 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
         confirmation_for_gate = ec_s
         confidence_ok, gate_msg = passes_confidence_gate(
             confidence_for_gate, confirmation_for_gate)
-        gate_ok = (not selected_by_flip and confidence_ok and
+        has_fresh_levels = bool(result.get("levels"))
+        gate_ok = (has_fresh_levels and not selected_by_flip and confidence_ok and
                    result.get("execution_status") == "EXECUTE" and
                    result.get("all_filters_passed", False))
         if selected_by_flip:
@@ -4237,6 +4268,32 @@ if _changed:
 # SELECTED PAIR TERMINAL — SINGLE PAIR VIEW
 # ═══════════════════════════════════════════════
 _str_res = st.session_state.get("strong_trade_result") or {}
+
+# Always render the Top-4 scan result independently of the selected-pair panel.
+st.markdown('<div class="section-title">🏆 أفضل 4 فرص <span>TOP 4 MARKET SCAN</span></div>',
+            unsafe_allow_html=True)
+if _str_res.get("status") == "FOUND" and _str_res.get("trades"):
+    _top4_rows = []
+    for _t in _str_res.get("trades", [])[:MAX_STRONG_TRADES]:
+        _row = _t.get("row", {}) or {}
+        _res = _t.get("result", {}) or {}
+        _lv = _res.get("levels") or {}
+        _top4_rows.append({
+            "الزوج": _t.get("pair", "—"),
+            "الإشارة": _res.get("signal", _row.get("الإشارة", "—")),
+            "الثقة": f"{safe_float(_res.get('confidence', _row.get('الثقة', 0)), 0):.1f}%",
+            "السعر": fmt_price(_t.get("price"), _t.get("pair")) if _t.get("price") is not None else _row.get("السعر", "—"),
+            "وقف الخسارة": fmt_price(_lv.get("stop_loss"), _t.get("pair")) if _lv.get("stop_loss") is not None else _row.get("SL", "—"),
+            "الهدف الأول": fmt_price(_lv.get("target1"), _t.get("pair")) if _lv.get("target1") is not None else _row.get("TP1", "—"),
+            "حالة التنفيذ": "اجتازت الفلاتر" if _t.get("gate_ok") else "مراقبة فقط",
+            "ملاحظة": _t.get("gate_msg", ""),
+        })
+    st.dataframe(pd.DataFrame(_top4_rows), use_container_width=True, hide_index=True)
+elif _str_res.get("status") == "NONE":
+    st.info(_str_res.get("message", "لا توجد فرص مطابقة حالياً."))
+else:
+    st.caption("اضغط «أعثر على 4 صفقات قوية» أو «تحديث» لبدء مسح جميع الأزواج وعرض أفضل أربع فرص.")
+
 _all_pairs = list(PAIRS.keys())
 if st.session_state.get("selected_pair") not in PAIRS:
     st.session_state.selected_pair = _all_pairs[0]
@@ -4281,7 +4338,7 @@ if _detail is None and _str_res.get("status") == "FOUND":
             break
 
 if _detail:
-    _r = _detail.get("result", {})
+    _r = _detail.get("result", {}) or {}
     _lv = _r.get("levels") or {}
     _sig = _r.get("signal", "WAIT")
     _conf = float(_r.get("confidence", 0) or 0)
