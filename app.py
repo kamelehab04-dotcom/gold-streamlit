@@ -81,7 +81,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2010.3"
+APP_VERSION = "v2010.5 UI"
 
 
 
@@ -3647,6 +3647,39 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
 
 
 
+def analyze_selected_pair_detail(pair_name):
+    """تحليل الزوج المختار بنفس محرك الإشارات والبوابة الحالية دون تغيير الاستراتيجية."""
+    sym = PAIRS.get(pair_name)
+    if not sym:
+        return None, "الزوج غير موجود في قائمة الأدوات"
+    price, price_change = get_spot_price(sym)
+    data = get_historical_data(sym, "6mo", "4h")
+    price_source = " + ".join(sorted(DATA_SOURCES_USED)) or "مصدر احتياطي"
+    if price is None or data is None or data.empty:
+        return None, "تعذر جلب بيانات كافية لهذا الزوج من مصادر الأسعار"
+    try:
+        result = generate_signal(data, price, pair_name, sym, skip_external_filters=False)
+        signal = result.get("signal", "WAIT")
+        levels = result.get("levels")
+        confirmation = None
+        if signal in ("BUY", "SELL") and levels:
+            confirmation = entry_confirmation_score(result.get("df"), signal, levels, pair_name)
+        confirmation_score = confirmation.get("score", 0) if confirmation else result.get("confirmation_score", 0)
+        conf_ok, gate_msg = passes_confidence_gate(result.get("confidence", 0), confirmation_score)
+        gate_ok = (signal in ("BUY", "SELL") and conf_ok and
+                   result.get("execution_status") == "EXECUTE" and
+                   result.get("all_filters_passed", False))
+        if not gate_msg and not gate_ok:
+            gate_msg = result.get("execution_reason", "لم تجتز بوابة التنفيذ")
+        return {"pair": pair_name, "price": price, "sym": sym,
+                "price_source": price_source, "price_change": price_change, "result": result,
+                "ec": confirmation, "gate_ok": gate_ok,
+                "gate_msg": gate_msg, "score": result.get("weighted_confluence", 0)}, None
+    except Exception as exc:
+        return None, f"تعذر تحليل الزوج: {exc}"
+
+
+
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -4099,214 +4132,115 @@ if _changed:
 
 
 # ═══════════════════════════════════════════════
-# STRONGEST TRADES DISPLAY
+# SELECTED PAIR TERMINAL — SINGLE PAIR VIEW
 # ═══════════════════════════════════════════════
-_str_res = st.session_state.get("strong_trade_result")
+_str_res = st.session_state.get("strong_trade_result") or {}
+_all_pairs = list(PAIRS.keys())
+if st.session_state.get("selected_pair") not in PAIRS:
+    st.session_state.selected_pair = _all_pairs[0]
 
+st.markdown('<div class="section-title">📊 شاشة الزوج المختار <span>SELECTED MARKET · LIVE SCENARIO</span></div>',
+            unsafe_allow_html=True)
+st.caption("اختر زوجًا من الشريط؛ ستتغير تفاصيل الصفقة ومؤشرات القوة والإحصائيات لتخص هذا الزوج فقط.")
 
+# Horizontal, scroll-friendly instrument selector
+st.markdown("""<style>
+div[data-testid="stRadio"] > div[role="radiogroup"]{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:7px;padding:8px 2px 13px;scrollbar-width:thin}
+div[data-testid="stRadio"] label{white-space:nowrap;min-width:max-content;background:rgba(230,200,124,.07);border:1px solid rgba(230,200,124,.22);border-radius:10px;padding:7px 12px;margin:0}
+div[data-testid="stRadio"] label:has(input:checked){background:rgba(230,200,124,.18);border-color:#e6c87c}
+.bp-panel{background:linear-gradient(145deg,#0b1420,#111d2b);border:1px solid rgba(230,200,124,.28);border-radius:18px;padding:18px;margin:12px 0}
+.bp-level{background:#101c29;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:12px;text-align:center}
+.bp-k{color:#9aa9bb;font-size:.78rem}.bp-v{color:#f2f5fa;font-size:1.05rem;font-weight:800;margin-top:5px}
+</style>""", unsafe_allow_html=True)
+_selected_pair = st.radio("الأزواج والأسواق", options=_all_pairs,
+    index=_all_pairs.index(st.session_state.selected_pair), horizontal=True,
+    key="bp_pair_selector", label_visibility="collapsed")
+st.session_state.selected_pair = _selected_pair
 
+if st.button("🔎 تحليل الزوج المحدد", key="bp_analyze_selected", type="primary", width="stretch"):
+    with st.spinner(f"جاري تحليل {_selected_pair} وجلب أحدث البيانات..."):
+        DATA_SOURCES_USED.clear()
+        _detail, _detail_error = analyze_selected_pair_detail(_selected_pair)
+        st.session_state.bp_selected_detail = _detail
+        st.session_state.bp_selected_detail_pair = _selected_pair
+        st.session_state.bp_selected_detail_error = _detail_error
+        _used_sources = sorted(DATA_SOURCES_USED)
+        st.session_state.analysis_sources = " + ".join(_used_sources) if _used_sources else "لم تُجلب بيانات سعرية من أي مصدر"
+        st.session_state.analysis_time = datetime.now(timezone.utc)
 
-if _str_res:
-    if _str_res.get("status") == "NONE":
-        st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
-                    unsafe_allow_html=True)
-        _msg = _str_res.get("message", "لا توجد إشارات صالحة الآن.")
-        st.warning(f"⏸️ **{_msg}**")
-        st.caption(f"البوابة تتطلب: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% **و** "
-                   f"تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100")
+# Reuse the already-computed top-scan result when it belongs to this pair.
+_detail = None
+if st.session_state.get("bp_selected_detail_pair") == _selected_pair:
+    _detail = st.session_state.get("bp_selected_detail")
+if _detail is None and _str_res.get("status") == "FOUND":
+    for _candidate in _str_res.get("trades", []):
+        if _candidate.get("pair") == _selected_pair:
+            _detail = _candidate
+            break
 
+if _detail:
+    _r = _detail.get("result", {})
+    _lv = _r.get("levels") or {}
+    _sig = _r.get("signal", "WAIT")
+    _conf = float(_r.get("confidence", 0) or 0)
+    _ec_obj = _detail.get("ec") or {}
+    _confirm = float(_ec_obj.get("score", _r.get("confirmation_score", 0)) or 0)
+    _buy = float(_r.get("buy_score", 0) or 0)
+    _sell = float(_r.get("sell_score", 0) or 0)
+    _is_trade = _sig in ("BUY", "SELL") and bool(_lv)
+    _accent = "#7cd4a0" if _sig == "BUY" else ("#f57a7a" if _sig == "SELL" else "#e6c87c")
+    _gate_ok = bool(_detail.get("gate_ok", False))
+    _status = "✅ اجتازت بوابة التنفيذ" if _gate_ok else ("⚠️ مراقبة فقط — لا دخول" if _is_trade else "⏸️ انتظار — لا توجد صفقة مؤكدة")
+    st.markdown(f"""<div class="bp-panel" style="border-color:{_accent}88">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+       <div><div style="color:#aab7c8;font-size:.8rem">السوق المحدد</div><div style="font-size:1.45rem;font-weight:900;color:#f4f6fa">{_selected_pair}</div></div>
+       <div style="text-align:right"><div style="color:#aab7c8;font-size:.8rem">السيناريو الحالي</div><div style="font-size:2rem;font-weight:900;color:{_accent}">{_sig}</div></div>
+      </div><div style="margin-top:10px;color:{_accent};font-weight:800">{_status}</div>
+      <div style="color:#aab7c8;font-size:.82rem;margin-top:5px">{_detail.get('gate_msg','') if not _gate_ok else 'شروط الدخول اجتازت بوابة النظام'}</div>
+    </div>""", unsafe_allow_html=True)
 
+    if _is_trade:
+        _cols = st.columns(5)
+        _items = [("💵 السعر", fmt_price(_detail.get("price"), _selected_pair)),
+                  ("📍 الدخول", fmt_price(_lv.get("entry"), _selected_pair) if _lv.get("entry") is not None else fmt_price(_detail.get("price"), _selected_pair)),
+                  ("🛑 وقف الخسارة", fmt_price(_lv.get("stop_loss"), _selected_pair)),
+                  ("🎯 الهدف 1", fmt_price(_lv.get("target1"), _selected_pair)),
+                  ("🎯 الهدف 2", fmt_price(_lv.get("target2"), _selected_pair))]
+        for _c, (_label, _value) in zip(_cols, _items):
+            with _c: st.metric(_label, _value)
+        _cols2 = st.columns(3)
+        for _c, (_label, _key) in zip(_cols2, [("🎯 الهدف 3","target3"),("⚖️ العائد/المخاطرة 1","risk_reward_1"),("⚖️ العائد/المخاطرة 2","risk_reward_2")]):
+            with _c:
+                _v = _lv.get(_key)
+                st.metric(_label, fmt_price(_v, _selected_pair) if _key == "target3" else (f"1:{float(_v):.2f}" if _v is not None else "—"))
+    else:
+        st.info("محرك التحليل لا يرى حالياً فرصة BUY أو SELL مستوفية لشروط تكوين مستويات الصفقة. لا يتم اختراع دخول أو أهداف في حالة الانتظار.")
 
-
-    elif _str_res.get("status") == "FOUND":
-        _trades = _str_res.get("trades", [])
-        _n = len(_trades)
-        _n_pass = _str_res.get("n_pass", 0)
-        _n_watch = _n - _n_pass
-
-
-
-
-        if _n_pass > 0 and _n_watch > 0:
-            _summ_color = "#7cd4a0"
-            _summ_icon = "🎯"
-            _summ_text = (f"**{_n_pass}** عابرة البوابة ✅ · "
-                          f"**{_n_watch}** قوية لكن تحت البوابة ⚠️")
-        elif _n_pass > 0:
-            _summ_color = "#7cd4a0"
-            _summ_icon = "🎯"
-            _summ_text = f"كل الصفقات ({_n_pass}) عابرة البوابة ✅"
-        else:
-            _summ_color = "#f5c87a"
-            _summ_icon = "⚠️"
-            _summ_text = (f"لا صفقات عابرة البوابة الآن — "
-                          f"أقوى {_n} إشارات للمراقبة فقط ⚠️")
-
-
-
-
-        st.markdown(f"""
-        <div style="background:{_summ_color}22; padding:14px 20px;
-                    border-radius:12px; margin:20px 0;
-                    border:2px solid {_summ_color}66;">
-            <span style="color:{_summ_color}; font-weight:800; font-size:1.05rem;">
-                {_summ_icon} {_summ_text}
-            </span>
-            <div style="color:#8b95a8; font-size:0.82rem; margin-top:6px;">
-                بوابة الجودة: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% و تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-
-
-        for idx, t in enumerate(_trades, 1):
-            _bp = t["pair"]; _br = t["result"]; _blv = _br["levels"]
-            _bsig = _br["signal"]; _bc = _br["confidence"]
-            _bprice = t["price"]; _ec = t.get("ec")
-            _gate_ok = t.get("gate_ok", False)
-            _gate_msg = t.get("gate_msg", "")
-            _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
-            _rank_icon = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"#{idx}")
-
-
-
-
-            if _gate_ok:
-                _badge = (
-                    f'<span style="background:#7cd4a022; color:#7cd4a0; '
-                    f'padding:4px 12px; border-radius:16px; font-size:0.8rem; '
-                    f'font-weight:800; border:1px solid #7cd4a066; margin-left:8px;">'
-                    f'✅ عابرة البوابة</span>')
-                _border = "#7cd4a0"
-                _opacity = "1.0"
-            else:
-                _badge = (
-                    f'<span style="background:#f5c87a22; color:#f5c87a; '
-                    f'padding:4px 12px; border-radius:16px; font-size:0.8rem; '
-                    f'font-weight:800; border:1px solid #f5c87a66; margin-left:8px;">'
-                    f'⚠️ تحت البوابة — مراقبة فقط</span>')
-                _border = "#f5c87a"
-                _opacity = "0.92"
-
-
-
-
-            st.markdown(
-                f'<div style="margin:24px 0 14px 0; padding:12px 18px; '
-                f'background:linear-gradient(90deg, {_bacc}22, transparent); '
-                f'border-left:4px solid {_bacc}; border-radius:10px; opacity:{_opacity};">'
-                f'<span style="color:{_bacc}; font-size:1.15rem; font-weight:800;">'
-                f'{_rank_icon} صفقة #{idx}</span>'
-                f'<span style="color:#e8edf5; font-size:1.15rem; font-weight:700; '
-                f'margin:0 10px;">— {_bp}</span>'
-                f'<span style="color:{_bacc}; font-size:1.1rem; font-weight:800;">'
-                f'· {_bsig} · {_bc:.1f}% · {_br["trade_grade"]}</span>'
-                f'{_badge}'
-                f'</div>',
-                unsafe_allow_html=True)
-
-
-
-
-            _bs1, _bs2 = st.columns([1.4, 1.2])
-            with _bs1:
-                st.markdown(f"""
-                <div style="background:linear-gradient(145deg, #0a1a12, #0d1710);
-                            padding:22px 18px; border-radius:20px; text-align:center;
-                            border:2px solid {_border};
-                            box-shadow:0 0 25px {_border}44, 0 12px 30px rgba(0,0,0,0.6);">
-                    <div style="color:#7cd4a0; font-size:0.75rem; font-weight:800;
-                                letter-spacing:2px;">{_rank_icon} RANK #{idx}</div>
-                    <div style="color:#e8edf5; font-size:1.15rem; font-weight:800;
-                                margin-top:6px;">{_bp}</div>
-                    <div style="font-size:2.8rem; font-weight:900; color:{_bacc};
-                                letter-spacing:3px; margin:8px 0; line-height:1;">
-                        {_bsig}</div>
-                    <div style="color:#c8d2e2; font-size:1rem;">
-                        Confidence: <b>{_bc:.1f}%</b></div>
-                    <div style="color:{_bacc}; font-size:1rem; font-weight:800;
-                                margin-top:6px; letter-spacing:1.5px;">
-                        Grade: {_br['trade_grade']}</div>
-                </div>""", unsafe_allow_html=True)
-
-
-
-
-            with _bs2:
-                st.metric("💵 السعر", fmt_price(_bprice, _bp))
-                if _blv:
-                    st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
-                              help=_blv.get("sources", {}).get("sl", ""))
-                    st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp),
-                              help=_blv.get("sources", {}).get("tp1", ""))
-                    st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp),
-                              help=_blv.get("sources", {}).get("tp2", ""))
-                    st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp),
-                              help=_blv.get("sources", {}).get("tp3", ""))
-
-
-
-
-            if _blv:
-                _rr1 = _blv["risk_reward_1"]; _rr2 = _blv["risk_reward_2"]
-                _rr3 = _blv["risk_reward_3"]
-                _src = _blv.get("sources", {})
-                st.markdown(
-                    f'<div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">'
-                    f'<span style="background:rgba(245,122,122,0.15); padding:5px 12px; '
-                    f'border-radius:16px; color:#f57a7a; font-size:0.78rem; '
-                    f'border:1px solid rgba(245,122,122,0.35); font-weight:600;">'
-                    f'🛑 SL: {_src.get("sl","—")}</span>'
-                    f'<span style="background:rgba(230,200,124,0.15); padding:5px 12px; '
-                    f'border-radius:16px; color:#e6c87c; font-size:0.78rem; '
-                    f'border:1px solid rgba(230,200,124,0.35);">'
-                    f'RR1 1:{_rr1:.2f}</span>'
-                    f'<span style="background:rgba(124,212,160,0.12); padding:5px 12px; '
-                    f'border-radius:16px; color:#7cd4a0; font-size:0.78rem; '
-                    f'border:1px solid rgba(124,212,160,0.35);">'
-                    f'RR2 1:{_rr2:.2f}</span>'
-                    f'<span style="background:rgba(124,212,160,0.12); padding:5px 12px; '
-                    f'border-radius:16px; color:#7cd4a0; font-size:0.78rem; '
-                    f'border:1px solid rgba(124,212,160,0.35);">'
-                    f'RR3 1:{_rr3:.2f}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True)
-
-
-
-
-                if not _gate_ok and _gate_msg:
-                    st.markdown(
-                        f'<div style="margin-top:10px; padding:8px 14px; '
-                        f'background:#f5c87a18; border-left:3px solid #f5c87a; '
-                        f'border-radius:8px; color:#f5c87a; font-size:0.82rem;">'
-                        f'🔒 <b>سبب عدم الاجتياز:</b> {_gate_msg} — '
-                        f'انتظر تحسّن الشروط قبل الدخول</div>',
-                        unsafe_allow_html=True)
-
-
-
-
-            st.markdown("---")
-
-
-
-
+    st.markdown("#### إحصائيات ومؤشرات الزوج المحدد فقط")
+    _m = st.columns(6)
+    _metrics = [("الثقة", f"{_conf:.1f}%"),("تأكيد الدخول", f"{_confirm:.1f}/100"),
+                ("قوة الشراء", f"{_buy:.1f}"),("قوة البيع", f"{_sell:.1f}"),
+                ("التقييم", str(_r.get("trade_grade", "—"))),
+                ("تغير آخر شمعة", f"{float(_detail.get('price_change') or 0):+.2f}%")]
+    for _c, (_label,_value) in zip(_m,_metrics):
+        with _c: st.metric(_label,_value)
+    _m2 = st.columns(4)
+    _extra = [("الاتجاه متعدد الأطر", str(_r.get("mtf_bias","—"))),
+              ("الاتجاه الأسبوعي", str(_r.get("weekly_bias","—"))),
+              ("حالة السوق", str(_r.get("regime","—"))),
+              ("التنفيذ", str(_r.get("execution_status","—")))]
+    for _c,(_label,_value) in zip(_m2,_extra):
+        with _c: st.metric(_label,_value)
+    with st.expander("تفاصيل التحليل وأسباب الإشارة", expanded=False):
+        _reasons = _r.get("reasons", []) or []
+        if _reasons:
+            for _reason in _reasons: st.write(f"• {_reason}")
+        else: st.write("لا توجد أسباب تفصيلية متاحة لهذه النتيجة.")
+        st.caption(f"مصدر السعر: {_detail.get('price_source','حسب مزود البيانات')} · الفريم المستخدم في محرك التحليل: H4")
+elif st.session_state.get("bp_selected_detail_error") and st.session_state.get("bp_selected_detail_pair") == _selected_pair:
+    st.warning(st.session_state.bp_selected_detail_error)
 else:
-    st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
-                unsafe_allow_html=True)
-    st.info(f"🎯 اضغط **'أعثر على {MAX_STRONG_TRADES} صفقات قوية'** أعلاه لبدء البحث "
-            f"في جميع الأزواج ({len(PAIRS)} زوج). سيتم عرض أفضل {MAX_STRONG_TRADES} "
-            f"إشارات (العابرة للبوابة أولاً ثم الأقوى).")
-
-
-
-
-
-
-
+    st.info(f"اخترت {_selected_pair}. اضغط «تحليل الزوج المحدد» لعرض سيناريوهاته وإحصائياته فقط. لن تظهر بيانات أزواج أخرى في هذه الشاشة.")
 
 # ═══════════════════════════════════════════════
 # FOOTER + STOP
