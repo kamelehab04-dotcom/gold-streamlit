@@ -592,97 +592,28 @@ def get_yfinance(symbol, period="3mo", interval="4h", min_rows=50):
 
 
 
-TWELVE_DATA_LAST_ERROR = ""
-TWELVE_DATA_LAST_STATUS = "لم يتم اختبار الاتصال بعد"
-
-
-def twelve_symbol(symbol):
-    """Convert Yahoo-style symbols to Twelve Data symbols where possible."""
-    mp = {"GC=F":"XAU/USD", "SI=F":"XAG/USD", "DX-Y.NYB":"DXY",
-          "DX=F":"DXY", "EURUSD=X":"EUR/USD", "GBPUSD=X":"GBP/USD",
-          "USDJPY=X":"USD/JPY", "USDCHF=X":"USD/CHF", "AUDUSD=X":"AUD/USD",
-          "NZDUSD=X":"NZD/USD", "USDCAD=X":"USD/CAD", "BTC-USD":"BTC/USD",
-          "ETH-USD":"ETH/USD"}
-    if symbol in mp:
-        return mp[symbol]
-    clean = str(symbol).strip()
-    if clean.endswith("=X") and len(clean) >= 8:
-        pair = clean[:-2]
-        if len(pair) == 6 and pair.isalpha():
-            return pair[:3] + "/" + pair[3:]
-    return sanitize_yf_symbol(clean)
-
-
 @st.cache_data(ttl=120, show_spinner=False)
 def get_twelve_data(symbol, interval="4h", outputsize=500, min_rows=50):
-    global TWELVE_DATA_LAST_ERROR
     api_key = get_secret("TWELVE_API_KEY")
-    if not api_key:
-        TWELVE_DATA_LAST_ERROR = "لم يتم إدخال مفتاح Twelve Data"
-        return None
-    td = twelve_symbol(symbol)
-    im = {"15m":"15min", "1h":"1h", "4h":"4h", "1d":"1day"}
+    if not api_key: return None
+    mp = {"GC=F":"XAU/USD","SI=F":"XAG/USD","DX-Y.NYB":"DXY","EURUSD=X":"EUR/USD",
+          "GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY","USDCHF=X":"USD/CHF",
+          "AUDUSD=X":"AUD/USD","NZDUSD=X":"NZD/USD","USDCAD=X":"USD/CAD",
+          "BTC-USD":"BTC/USD","ETH-USD":"ETH/USD"}
+    td = mp.get(symbol, sanitize_yf_symbol(symbol))
+    im = {"15m":"15min","1h":"1h","4h":"4h","1d":"1day"}
     try:
         r = requests.get("https://api.twelvedata.com/time_series",
             params={"symbol": td, "interval": im.get(interval, interval),
-                    "outputsize": outputsize, "apikey": api_key, "format":"JSON"},
-            timeout=15)
-        try:
-            data = r.json()
-        except Exception:
-            TWELVE_DATA_LAST_ERROR = f"استجابة غير مفهومة من Twelve Data (HTTP {r.status_code})"
-            return None
-        if r.status_code != 200:
-            TWELVE_DATA_LAST_ERROR = f"Twelve Data HTTP {r.status_code}: {data.get('message', 'خطأ اتصال')}"
-            return None
-        if "values" not in data:
-            TWELVE_DATA_LAST_ERROR = str(data.get("message") or data.get("code") or "لم تصل بيانات من Twelve Data")
-            return None
+                    "outputsize": outputsize, "apikey": api_key,
+                    "format":"JSON"}, timeout=10)
+        data = r.json()
+        if "values" not in data: return None
         df = pd.DataFrame(data["values"])
-        if df.empty or "datetime" not in df.columns:
-            TWELVE_DATA_LAST_ERROR = "Twelve Data أعاد بيانات فارغة أو غير مكتملة"
-            return None
-        df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-        df = df.dropna(subset=["datetime"]).set_index("datetime").sort_index()
-        normalized = normalize_ohlcv(df, min_rows=min_rows)
-        if normalized is None:
-            TWELVE_DATA_LAST_ERROR = f"البيانات وصلت من Twelve Data لكن عدد الشموع أقل من المطلوب ({min_rows}) أو غير مكتملة"
-            return None
-        TWELVE_DATA_LAST_ERROR = ""
-        return normalized
-    except requests.exceptions.Timeout:
-        TWELVE_DATA_LAST_ERROR = "انتهت مهلة الاتصال بـ Twelve Data"
-    except requests.exceptions.RequestException as exc:
-        TWELVE_DATA_LAST_ERROR = f"تعذر الاتصال بـ Twelve Data: {exc}"
-    except Exception as exc:
-        TWELVE_DATA_LAST_ERROR = f"خطأ أثناء معالجة Twelve Data: {exc}"
-    return None
-
-
-def test_twelve_data_connection():
-    """Live API-key test using a small EUR/USD intraday response."""
-    global TWELVE_DATA_LAST_ERROR, TWELVE_DATA_LAST_STATUS
-    key = get_secret("TWELVE_API_KEY")
-    if not key:
-        TWELVE_DATA_LAST_STATUS = "❌ أدخل مفتاح Twelve Data أولاً"
-        return False, TWELVE_DATA_LAST_STATUS
-    try:
-        response = requests.get("https://api.twelvedata.com/time_series",
-            params={"symbol":"EUR/USD", "interval":"1h", "outputsize":2,
-                    "apikey":key, "format":"JSON"}, timeout=15)
-        data = response.json()
-        if response.status_code == 200 and data.get("values"):
-            TWELVE_DATA_LAST_ERROR = ""
-            TWELVE_DATA_LAST_STATUS = "✅ الاتصال ناجح والمفتاح صالح وتم استلام بيانات EUR/USD"
-            return True, TWELVE_DATA_LAST_STATUS
-        message = data.get("message") or data.get("code") or f"HTTP {response.status_code}"
-        TWELVE_DATA_LAST_ERROR = str(message)
-        TWELVE_DATA_LAST_STATUS = f"❌ فشل اختبار Twelve Data: {message}"
-        return False, TWELVE_DATA_LAST_STATUS
-    except Exception as exc:
-        TWELVE_DATA_LAST_ERROR = str(exc)
-        TWELVE_DATA_LAST_STATUS = f"❌ تعذر اختبار الاتصال: {exc}"
-        return False, TWELVE_DATA_LAST_STATUS
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        df = df.set_index("datetime").sort_index()
+        return normalize_ohlcv(df, min_rows=min_rows)
+    except Exception: return None
 
 
 
@@ -691,13 +622,6 @@ def test_twelve_data_connection():
 DATA_SOURCES_USED = set()
 
 def get_historical_data(symbol, period="3mo", interval="4h"):
-    # Twelve Data is the preferred provider whenever a key is configured.
-    if get_secret("TWELVE_API_KEY"):
-        df = get_twelve_data(symbol, interval, 500)
-        if df is not None and len(df) >= 50:
-            DATA_SOURCES_USED.add("Twelve Data")
-            return df
-    # Yahoo Finance remains the automatic fallback.
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         df = get_yfinance(s, period, interval)
         if df is not None and len(df) >= 50:
@@ -707,7 +631,12 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
     if df is not None and len(df) >= 50:
         DATA_SOURCES_USED.add("Yahoo Finance")
         return df
+    df = get_twelve_data(symbol, interval, 500)
+    if df is not None and len(df) >= 50:
+        DATA_SOURCES_USED.add("Twelve Data")
+        return df
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
+        # المسار الاحتياطي يقبل 30 شمعة فعلًا؛ لا نطلب 50 داخل normalize_ohlcv.
         df = get_yfinance(s, "1mo", interval, min_rows=30)
         if df is not None and len(df) >= 30:
             DATA_SOURCES_USED.add("Yahoo Finance")
@@ -719,28 +648,29 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_spot_price(symbol):
-    if get_secret("TWELVE_API_KEY"):
-        df = get_twelve_data(symbol, "1h", 5, min_rows=2)
-        if df is not None and len(df) >= 2:
-            DATA_SOURCES_USED.add("Twelve Data")
-            pc = float(df["close"].iloc[-2]); lt = float(df["close"].iloc[-1])
-            return lt, ((lt - pc) / pc * 100) if pc else 0.0
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         for p, i in [("5d","1h"),("1mo","1d")]:
             try:
                 df = normalize_ohlcv(yf.download(sanitize_yf_symbol(s), period=p,
-                    interval=i, auto_adjust=False, progress=False, threads=False), min_rows=2)
+                    interval=i, auto_adjust=False, progress=False, threads=False),
+                    min_rows=2)
                 if df is not None and len(df) >= 2:
-                    DATA_SOURCES_USED.add("Yahoo Finance")
                     pc = float(df["close"].iloc[-2]); lt = float(df["close"].iloc[-1])
                     return lt, ((lt - pc) / pc * 100) if pc else 0.0
             except Exception: continue
     try:
+        df = get_twelve_data(symbol, "1h", 5, min_rows=2)
+        if df is not None and len(df) >= 2:
+            pc = float(df["close"].iloc[-2]); lt = float(df["close"].iloc[-1])
+            return lt, ((lt - pc) / pc * 100) if pc else 0.0
+    except Exception: pass
+    try:
         df = get_historical_data(symbol, "3mo", "4h")
-        if df is not None and not df.empty:
-            return float(df["close"].iloc[-1]), 0.0
+        if df is not None and not df.empty: return float(df["close"].iloc[-1]), 0.0
     except Exception: pass
     return None, None
+
+
 
 
 
@@ -2825,9 +2755,38 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
 
     checks = []; total = 0
+    # Smart Entry: avoid chasing an already-extended impulse at the edge of its
+    # recent range. This is an entry-timing gate only; directional scoring and
+    # the underlying strategy rules remain unchanged.
+    late_entry = False
+    late_entry_reason = ""
+    try:
+        recent = df.iloc[-21:-1] if len(df) > 21 else df.iloc[:-1]
+        if len(recent) >= 10:
+            close_now = safe_float(last.get("close"), 0)
+            close_3 = safe_float(df.iloc[-4].get("close"), close_now) if len(df) >= 4 else close_now
+            recent_high = safe_float(recent["high"].max(), close_now)
+            recent_low = safe_float(recent["low"].min(), close_now)
+            impulse = abs(close_now - close_3) / atr
+            edge_dist = ((close_now - recent_low) / atr if direction == "SELL"
+                         else (recent_high - close_now) / atr)
+            at_exhaustion_edge = edge_dist <= 0.35
+            impulse_aligned = ((direction == "SELL" and close_now < close_3) or
+                               (direction == "BUY" and close_now > close_3))
+            if at_exhaustion_edge and impulse_aligned and impulse >= 1.20:
+                late_entry = True
+                late_entry_reason = ("بيع متأخر قرب قاع النطاق بعد اندفاع قوي" if direction == "SELL"
+                                     else "شراء متأخر قرب قمة النطاق بعد اندفاع قوي")
+    except Exception:
+        late_entry = False
 
-
-
+    if late_entry:
+        checks.append({"name": "Smart Entry: دخول متأخر", "pass": False,
+                       "score": 0, "icon": "⏳", "reason": late_entry_reason})
+    else:
+        checks.append({"name": "Smart Entry: لا يوجد مطاردة للسعر", "pass": True,
+                       "score": 5, "icon": "🎯"})
+        total += 5
 
     if direction == "BUY":
         candle_ok = float(last["close"]) > float(last["open"]) and \
@@ -2973,7 +2932,12 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
 
 
-    if final_total >= enter_thr:
+    if late_entry:
+        # Keep the directional signal visible, but block immediate execution until
+        # price retraces and a fresh confirmation can be evaluated.
+        final_total = min(final_total, max(0, enter_thr - 1))
+        verdict = "WAIT_RETRACE"; vtext = f"🟡 {late_entry_reason} — انتظر إعادة اختبار"; vcolor = "#f5c87a"
+    elif final_total >= enter_thr:
         verdict = "ENTER_NOW"; vtext = "🟢 ادخل الآن"; vcolor = "#7cd4a0"
     elif final_total >= retr_thr:
         verdict = "WAIT_RETRACE"; vtext = "🟡 انتظر ارتداد"; vcolor = "#f5c87a"
@@ -2987,7 +2951,8 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
     return {"score": final_total, "raw_score": total,
             "verdict": verdict, "verdict_text": vtext,
-            "verdict_color": vcolor, "checks": checks}
+            "verdict_color": vcolor, "checks": checks,
+            "late_entry": late_entry, "late_entry_reason": late_entry_reason}
 
 
 
@@ -4075,7 +4040,8 @@ with hr:
 # ═══════════════════════════════════════════════
 st.markdown('<div class="section-title">🔑 مفاتيح المصادر <span>API Keys · Data Sources</span></div>',
             unsafe_allow_html=True)
-st.caption("Twelve Data هو المصدر الأساسي للأسعار عند إدخال مفتاح صالح، وYahoo Finance يعمل تلقائيًا كاحتياطي. تُحفظ المفاتيح في الجلسة الحالية فقط (Session).")
+st.caption("أدخل مفاتيح API لجلب البيانات من مصادر إضافية. "
+           "يتم الحفظ في الجلسة الحالية فقط (Session).")
 
 
 
@@ -4095,24 +4061,9 @@ with kc1:
         type="password",
         key="_td_api_input",
         placeholder="مفتاح TwelveData للأسعار",
-        help="Twelve Data هو المصدر الأساسي؛ Yahoo Finance احتياطي عند فشل الاتصال.")
-    # Make the currently entered key available to the connection test immediately,
-    # while retaining change detection so cached API responses are invalidated.
-    _td_key_changed = td_val != get_secret("TWELVE_API_KEY", "")
-    st.session_state.TWELVE_API_KEY = td_val
-    _td_status = "🔑 المفتاح مُدخل — يلزم اختبار صلاحيته" if td_val else "⚪ غير مفعّل (سيستخدم Yahoo Finance)"
+        help="بديل مجاني: yfinance (مدمج). TwelveData يعطي دقة أعلى للفوركس.")
+    _td_status = "✅ نشط" if td_val else "⚪ غير مفعّل (يستخدم yfinance)"
     st.caption(f"الحالة: {_td_status}")
-    if st.button("🧪 اختبار اتصال Twelve Data", key="btn_test_twelve"):
-        with st.spinner("جارٍ اختبار المفتاح والاتصال بـ Twelve Data..."):
-            _ok, _msg = test_twelve_data_connection()
-        if _ok:
-            st.success(_msg)
-        else:
-            st.error(_msg)
-    if TWELVE_DATA_LAST_STATUS != "لم يتم اختبار الاتصال بعد":
-        st.caption(TWELVE_DATA_LAST_STATUS)
-    if TWELVE_DATA_LAST_ERROR and td_val:
-        st.caption(f"آخر خطأ من Twelve Data: {TWELVE_DATA_LAST_ERROR}")
 
 
 
@@ -4130,9 +4081,10 @@ with kc2:
 
 
 
-_changed = _td_key_changed
+_changed = False
 if td_val != st.session_state.get("TWELVE_API_KEY", ""):
     st.session_state.TWELVE_API_KEY = td_val
+    _changed = True
 if fmp_val != st.session_state.get("FMP_API_KEY", ""):
     st.session_state.FMP_API_KEY = fmp_val
     _changed = True
