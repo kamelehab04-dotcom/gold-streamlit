@@ -12,6 +12,11 @@ import logging
 import warnings
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo
+    CAIRO_TZ = ZoneInfo("Africa/Cairo")
+except Exception:
+    CAIRO_TZ = timezone.utc
 import concurrent.futures
 import time
 import math
@@ -613,19 +618,29 @@ def get_twelve_data(symbol, interval="4h", outputsize=500, min_rows=50):
 
 
 
-@st.cache_data(ttl=90, show_spinner=False)
+# Track the providers that actually returned historical price data during a scan.
+DATA_SOURCES_USED = set()
+
 def get_historical_data(symbol, period="3mo", interval="4h"):
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         df = get_yfinance(s, period, interval)
-        if df is not None and len(df) >= 50: return df
+        if df is not None and len(df) >= 50:
+            DATA_SOURCES_USED.add("Yahoo Finance")
+            return df
     df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
-    if df is not None and len(df) >= 50: return df
+    if df is not None and len(df) >= 50:
+        DATA_SOURCES_USED.add("Yahoo Finance")
+        return df
     df = get_twelve_data(symbol, interval, 500)
-    if df is not None and len(df) >= 50: return df
+    if df is not None and len(df) >= 50:
+        DATA_SOURCES_USED.add("Twelve Data")
+        return df
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         # المسار الاحتياطي يقبل 30 شمعة فعلًا؛ لا نطلب 50 داخل normalize_ohlcv.
         df = get_yfinance(s, "1mo", interval, min_rows=30)
-        if df is not None and len(df) >= 30: return df
+        if df is not None and len(df) >= 30:
+            DATA_SOURCES_USED.add("Yahoo Finance")
+            return df
     return None
 
 
@@ -3886,12 +3901,32 @@ with hl:
 
 with hr:
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    _last_analysis = st.session_state.get("analysis_time")
+    if _last_analysis:
+        try:
+            if _last_analysis.tzinfo is None:
+                _last_analysis = _last_analysis.replace(tzinfo=timezone.utc)
+            _last_analysis_text = _last_analysis.astimezone(CAIRO_TZ).strftime("%Y-%m-%d  %H:%M:%S")
+        except Exception:
+            _last_analysis_text = str(_last_analysis)
+    else:
+        _last_analysis_text = "لم يتم التحليل بعد"
+    _sources_text = " + ".join(sorted(DATA_SOURCES_USED)) if DATA_SOURCES_USED else "سيظهر بعد أول تحليل"
+    st.markdown(
+        f'<div style="background:rgba(230,200,124,0.07);border:1px solid rgba(230,200,124,0.2);'
+        f'border-radius:12px;padding:10px 14px;margin:0 0 12px 0;direction:rtl;">'
+        f'<div style="color:#e6c87c;font-size:0.82rem;font-weight:700;">🕒 آخر تحليل: '
+        f'<span style="color:#e8edf5;font-weight:500;">{_last_analysis_text} (القاهرة)</span></div>'
+        f'<div style="color:#e6c87c;font-size:0.82rem;font-weight:700;margin-top:5px;">📡 مصدر الأسعار: '
+        f'<span style="color:#e8edf5;font-weight:500;">{_sources_text}</span></div></div>',
+        unsafe_allow_html=True)
     br = st.columns([1, 1])
     with br[0]:
         if st.button("🔄 تحديث", width="stretch", key="btn_ref"):
             with st.spinner("🔄 تحديث البيانات وإعادة تحليل الصفقات..."):
                 # مسح البيانات المخزنة حتى يتم جلب أسعار جديدة
                 st.cache_data.clear()
+                DATA_SOURCES_USED.clear()
 
                 # تحديث التقويم الاقتصادي
                 st.session_state.economic_events = get_fmp_economic_calendar()
@@ -3910,8 +3945,10 @@ with hr:
     with br[1]:
         if st.button(f"🎯 أعثر على {MAX_STRONG_TRADES} صفقات قوية", width="stretch", key="btn_strong"):
             with st.spinner(f"🔍 جاري البحث عن أفضل {MAX_STRONG_TRADES} صفقات..."):
+                DATA_SOURCES_USED.clear()
                 st.session_state.strong_trade_result = find_strongest_trades(
                     max_trades=MAX_STRONG_TRADES)
+                st.session_state.analysis_time = datetime.now(timezone.utc)
             st.rerun()
 
 
