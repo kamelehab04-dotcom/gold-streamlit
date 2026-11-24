@@ -81,7 +81,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2010.5 UI"
+APP_VERSION = "v2010.6 ADVANCED INTELLIGENCE"
 
 
 
@@ -1513,6 +1513,77 @@ def smc_quality(df):
 
 
 
+
+
+def calc_adx_dmi(df, period=14):
+    """Wilder DMI/ADX; returns +DI, -DI and ADX series."""
+    up = df["high"].diff(); down = -df["low"].diff()
+    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
+    pc = df["close"].shift(1)
+    tr = pd.concat([(df["high"]-df["low"]), (df["high"]-pc).abs(),
+                    (df["low"]-pc).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+    pdi = 100 * plus_dm.ewm(alpha=1/period, adjust=False, min_periods=period).mean() / atr.replace(0, np.nan)
+    mdi = 100 * minus_dm.ewm(alpha=1/period, adjust=False, min_periods=period).mean() / atr.replace(0, np.nan)
+    dx = 100 * (pdi-mdi).abs() / (pdi+mdi).replace(0, np.nan)
+    adx = dx.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+    return pdi.fillna(0), mdi.fillna(0), adx.fillna(0)
+
+
+def calc_ichimoku(df):
+    high, low = df["high"], df["low"]
+    tenkan = (high.rolling(9).max()+low.rolling(9).min())/2
+    kijun = (high.rolling(26).max()+low.rolling(26).min())/2
+    span_a = (tenkan+kijun)/2
+    span_b = (high.rolling(52).max()+low.rolling(52).min())/2
+    return tenkan, kijun, span_a, span_b
+
+
+def calc_volume_profile(df, lookback=120, bins=32):
+    """Rolling price-bin volume approximation (not exchange order-book volume)."""
+    out_poc = pd.Series(np.nan, index=df.index, dtype=float)
+    out_vah = out_poc.copy(); out_val = out_poc.copy()
+    start = max(0, len(df)-lookback)
+    w = df.iloc[start:]
+    lo, hi = float(w["low"].min()), float(w["high"].max())
+    if not np.isfinite(lo+hi) or hi <= lo: return out_poc, out_vah, out_val
+    typical = (w["high"]+w["low"]+w["close"])/3
+    vol = w["volume"].clip(lower=0).fillna(0)
+    edges = np.linspace(lo, hi, bins+1)
+    idx = np.clip(np.digitize(typical, edges)-1, 0, bins-1)
+    hist = np.bincount(idx, weights=vol, minlength=bins).astype(float)
+    centers = (edges[:-1]+edges[1:])/2
+    if hist.sum() <= 0: return out_poc, out_vah, out_val
+    poc_i = int(hist.argmax()); target = hist.sum()*0.70
+    chosen = {poc_i}; acc = hist[poc_i]; left=poc_i-1; right=poc_i+1
+    while acc < target and (left >= 0 or right < bins):
+        lv = hist[left] if left >= 0 else -1
+        rv = hist[right] if right < bins else -1
+        if rv > lv: chosen.add(right); acc += max(0,rv); right += 1
+        else: chosen.add(left); acc += max(0,lv); left -= 1
+    poc, val, vah = centers[poc_i], centers[min(chosen)], centers[max(chosen)]
+    out_poc.iloc[-1]=poc; out_val.iloc[-1]=val; out_vah.iloc[-1]=vah
+    return out_poc.ffill(), out_vah.ffill(), out_val.ffill()
+
+
+def reversal_state(df):
+    if df is None or len(df)<5: return "NEUTRAL", 0.0
+    x=df.iloc[-1]; prev=df.iloc[-2]
+    bull=bear=0.0
+    if safe_float(x.get("plus_di"),0)>safe_float(x.get("minus_di"),0): bull+=1
+    else: bear+=1
+    if safe_float(x.get("tenkan"),np.nan)>safe_float(x.get("kijun"),np.nan): bull+=1
+    else: bear+=1
+    if x["close"]>x.get("kumo_top",np.inf): bull+=1
+    elif x["close"]<x.get("kumo_bottom",-np.inf): bear+=1
+    if x["close"]>prev["high"]: bull+=1.5
+    if x["close"]<prev["low"]: bear+=1.5
+    if bull>=3 and bear<=1: return "BULLISH_REVERSAL", min(95,55+10*bull)
+    if bear>=3 and bull<=1: return "BEARISH_REVERSAL", min(95,55+10*bear)
+    return "NEUTRAL", 50.0
+
+
 def build_features(df, profile, use_rvwap=True):
     out = df.copy()
     out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
@@ -1524,6 +1595,11 @@ def build_features(df, profile, use_rvwap=True):
     out["bb_upper"], out["bb_mid"], out["bb_lower"] = calc_bollinger(
         out["close"], profile["bb_period"], profile["bb_std"])
     out["chaikin_mf"] = calc_chaikin(out, 21)
+    out["plus_di"], out["minus_di"], out["adx"] = calc_adx_dmi(out, 14)
+    out["tenkan"], out["kijun"], out["senkou_a"], out["senkou_b"] = calc_ichimoku(out)
+    out["kumo_top"] = out[["senkou_a", "senkou_b"]].max(axis=1)
+    out["kumo_bottom"] = out[["senkou_a", "senkou_b"]].min(axis=1)
+    out["vp_poc"], out["vp_vah"], out["vp_val"] = calc_volume_profile(out)
     try: bh = (out.index[-1] - out.index[-2]).total_seconds()/3600
     except Exception: bh = 4.0
     if use_rvwap and bh >= 3.5:
@@ -1902,6 +1978,19 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
     if va and np.isfinite(va) and l["volume"] > va:
         if l["close"] > l["open"]: sc["BUY"]["volume"] += 20
         elif l["close"] < l["open"]: sc["SELL"]["volume"] += 20
+    # New intelligence confluence: ADX/DMI, Ichimoku and rolling volume profile.
+    adx = safe_float(l.get("adx"), 0); pdi = safe_float(l.get("plus_di"), 0); mdi = safe_float(l.get("minus_di"), 0)
+    if adx >= 20:
+        if pdi > mdi: sc["BUY"]["trend"] += 12; rs.append(f"ADX اتجاه صاعد {adx:.0f}")
+        elif mdi > pdi: sc["SELL"]["trend"] += 12; rs.append(f"ADX اتجاه هابط {adx:.0f}")
+    kt, kb = safe_float(l.get("kumo_top"), np.nan), safe_float(l.get("kumo_bottom"), np.nan)
+    if np.isfinite(kt) and np.isfinite(kb):
+        if l["close"] > kt and l["tenkan"] > l["kijun"]: sc["BUY"]["trend"] += 10
+        elif l["close"] < kb and l["tenkan"] < l["kijun"]: sc["SELL"]["trend"] += 10
+    poc = safe_float(l.get("vp_poc"), np.nan)
+    if np.isfinite(poc):
+        if l["close"] > poc: sc["BUY"]["volume"] += 8
+        elif l["close"] < poc: sc["SELL"]["volume"] += 8
     if dxy_bias is None: dxy_bias, _, _ = get_dxy_context()
     ui, um = get_pair_usd_context(pair_name, dxy_bias=dxy_bias)
     if ui > 0: sc["BUY"]["context"] += 25; rs.append("DXY يدعم")
@@ -3194,7 +3283,20 @@ def generate_signal(df, current_price, pair_name, symbol,
             es, er = "WAIT", "لا اجتياز"
     conf = ec
     adv = ", ".join(f"{n}({p})" for n,p in sp) or "None"
+    _rev_state, _rev_score = reversal_state(df)
+    _last_feature = df.iloc[-1]
+    _adx_value = safe_float(_last_feature.get("adx"), 0)
+    _trade_quality = clamp(0.45*conf + 0.35*cs + 0.20*wc, 0, 100)
     return {"signal": signal, "confidence": conf, "raw_confidence": rc,
+            "reversal_state": _rev_state, "reversal_score": _rev_score,
+            "adx": _adx_value, "plus_di": safe_float(_last_feature.get("plus_di"),0),
+            "minus_di": safe_float(_last_feature.get("minus_di"),0),
+            "ichimoku_tenkan": safe_float(_last_feature.get("tenkan"),np.nan),
+            "ichimoku_kijun": safe_float(_last_feature.get("kijun"),np.nan),
+            "volume_profile_poc": safe_float(_last_feature.get("vp_poc"),np.nan),
+            "volume_profile_vah": safe_float(_last_feature.get("vp_vah"),np.nan),
+            "volume_profile_val": safe_float(_last_feature.get("vp_val"),np.nan),
+            "trade_quality_score": _trade_quality,
             "buy_score": buy, "sell_score": sell, "weighted_confluence": wc,
             "pillars": pil, "mtf_bias": mtf, "mtf_conf": mtfc, "mtf_details": mtfd,
             "weekly_bias": wk, "levels": lv if rok else None, "df": df,
@@ -4231,6 +4333,17 @@ if _detail:
               ("التنفيذ", str(_r.get("execution_status","—")))]
     for _c,(_label,_value) in zip(_m2,_extra):
         with _c: st.metric(_label,_value)
+    st.markdown("#### محركات الذكاء المتقدمة")
+    _adv = st.columns(5)
+    _adv_metrics = [("ADX", f"{float(_r.get('adx',0) or 0):.1f}"),
+                    ("+DI / -DI", f"{float(_r.get('plus_di',0) or 0):.1f} / {float(_r.get('minus_di',0) or 0):.1f}"),
+                    ("Ichimoku", "صاعد" if float(_r.get('ichimoku_tenkan',0) or 0)>float(_r.get('ichimoku_kijun',0) or 0) else "هابط/محايد"),
+                    ("Volume POC", fmt_price(_r.get("volume_profile_poc"), _selected_pair) if np.isfinite(safe_float(_r.get("volume_profile_poc"),np.nan)) else "—"),
+                    ("جودة الصفقة", f"{float(_r.get('trade_quality_score',0) or 0):.1f}/100")]
+    for _c,(_label,_value) in zip(_adv,_adv_metrics):
+        with _c: st.metric(_label,_value)
+    _rev = _r.get("reversal_state", "NEUTRAL")
+    st.caption(f"اكتشاف الانعكاس: {_rev} · قوة الإشارة: {float(_r.get('reversal_score',50) or 50):.0f}/100 · Volume Profile هو تقدير موزع على نطاق الأسعار من بيانات OHLCV، وليس دفتر أوامر مركزيًا.")
     with st.expander("تفاصيل التحليل وأسباب الإشارة", expanded=False):
         _reasons = _r.get("reasons", []) or []
         if _reasons:
@@ -4241,6 +4354,24 @@ elif st.session_state.get("bp_selected_detail_error") and st.session_state.get("
     st.warning(st.session_state.bp_selected_detail_error)
 else:
     st.info(f"اخترت {_selected_pair}. اضغط «تحليل الزوج المحدد» لعرض سيناريوهاته وإحصائياته فقط. لن تظهر بيانات أزواج أخرى في هذه الشاشة.")
+
+# SELECTED PAIR PERFORMANCE — isolated per instrument
+if _detail:
+    st.markdown("#### الأداء التاريخي للزوج المختار فقط")
+    if st.button("🧪 تشغيل الاختبار التاريخي للزوج المحدد", key="bp_selected_backtest"):
+        with st.spinner("جاري اختبار الاستراتيجية على البيانات التاريخية..."):
+            _bt = quick_backtest(PAIRS[_selected_pair], _selected_pair, lookback=200, run_mc=True)
+            st.session_state.bp_selected_backtest = _bt
+            st.session_state.bp_selected_backtest_pair = _selected_pair
+    _bt = st.session_state.get("bp_selected_backtest") if st.session_state.get("bp_selected_backtest_pair")==_selected_pair else None
+    if _bt:
+        if _bt.get("error"): st.warning(f"تعذر الاختبار: {_bt['error']}")
+        else:
+            _bc=st.columns(5)
+            _bmetrics=[("الصفقات",str(_bt.get("trades",0))),("Win Rate",f"{_bt.get('win_rate',0):.1f}%"),("Profit Factor",f"{_bt.get('profit_factor',0):.2f}"),("Expectancy",f"{_bt.get('expectancy',0):.2f} R"),("Max Drawdown",f"{_bt.get('max_drawdown',0):.2f} R")]
+            for _c,(_label,_value) in zip(_bc,_bmetrics):
+                with _c: st.metric(_label,_value)
+            st.caption(f"إجمالي العائد: {_bt.get('total_R',0):.2f}R · الاختبار التاريخي ليس ضمانًا للأداء المستقبلي، والنتائج تتأثر بجودة وتغطية بيانات المصدر.")
 
 # ═══════════════════════════════════════════════
 # FOOTER + STOP
