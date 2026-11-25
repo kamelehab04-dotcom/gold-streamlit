@@ -1754,7 +1754,7 @@ def htf_zone_filter(symbol, direction, profile_key):
 
 @st.cache_data(ttl=180, show_spinner=False)
 def intraday_m15_m5_confirmation(symbol, direction, profile_key):
-    """Strong, independent bearish confirmation on both M15 and M5."""
+    """Require bearish structure plus multi-factor confirmation on closed M15/M5 candles."""
     if direction != "SELL":
         return True, "غير مطلوب", {"M15": 0.0, "M5": 0.0}
 
@@ -1763,29 +1763,71 @@ def intraday_m15_m5_confirmation(symbol, direction, profile_key):
         if d is None or len(d) < 40:
             return None, f"بيانات {interval} غير كافية"
         x = build_features(d, ASSET_PROFILES[profile_key])
-        if len(x) < 3:
+        if len(x) < 8:
             return None, f"بيانات {interval} غير كافية"
-        l, prev = x.iloc[-1], x.iloc[-2]
-        score = 0.0; structure = False
-        if safe_bool(l.get("bos_bearish")) or safe_bool(l.get("mss_bearish")):
-            score += 2.0; structure = True
-        elif safe_float(l.get("close"), 0) < safe_float(prev.get("low"), 0):
-            score += 1.75; structure = True
-        if safe_float(l.get("ema20"), np.inf) < safe_float(l.get("ema50"), -np.inf): score += 0.75
-        if safe_float(l.get("macd_histogram"), 0) < 0: score += 0.5
-        if safe_float(l.get("rsi"), 50) < 48: score += 0.5
-        if safe_bool(l.get("liquidity_sweep_bearish")): score += 0.75
+
+        # استخدم آخر شمعة مغلقة بدل الشمعة الحالية التي قد تكون لم تكتمل بعد.
+        l = x.iloc[-2]
+        prev = x.iloc[-3]
+        recent = x.iloc[-7:-1]
+        score = 0.0
+        structure = False
+        reasons = []
+
+        # BOS/MSS خلال آخر 5 شمعات مغلقة، وليس الشمعة الأخيرة فقط.
+        try:
+            bos_recent = ("bos_bearish" in recent.columns and recent["bos_bearish"].fillna(False).astype(bool).any())
+            mss_recent = ("mss_bearish" in recent.columns and recent["mss_bearish"].fillna(False).astype(bool).any())
+            if bos_recent or mss_recent:
+                score += 2.0
+                structure = True
+                reasons.append("BOS/MSS هابط حديث")
+        except Exception:
+            pass
+
+        # بديل هيكلي: إغلاق أسفل قاع الشموع الثلاث السابقة.
+        try:
+            prior_lows = x["low"].iloc[-5:-2]
+            if len(prior_lows) >= 3 and safe_float(l.get("close"), np.inf) < safe_float(prior_lows.min(), -np.inf):
+                if not structure:
+                    score += 1.75
+                structure = True
+                reasons.append("كسر قاع قريب")
+        except Exception:
+            pass
+
+        if safe_float(l.get("ema20"), np.inf) < safe_float(l.get("ema50"), -np.inf):
+            score += 0.75; reasons.append("EMA هابط")
+        if safe_float(l.get("macd_histogram"), 0) < 0:
+            score += 0.5; reasons.append("MACD سلبي")
+        if safe_float(l.get("rsi"), 50) < 48:
+            score += 0.5; reasons.append("RSI هابط")
+        if safe_bool(l.get("liquidity_sweep_bearish")) or ("liquidity_sweep_bearish" in recent.columns and recent["liquidity_sweep_bearish"].fillna(False).astype(bool).any()):
+            score += 0.75; reasons.append("سحب سيولة هابط")
+
         body = abs(safe_float(l.get("close"), 0) - safe_float(l.get("open"), 0))
         rng = max(safe_float(l.get("high"), 0) - safe_float(l.get("low"), 0), 1e-12)
-        if safe_float(l.get("close"), 0) < safe_float(l.get("open"), 0) and body / rng >= 0.45: score += 0.5
-        return (score, structure), ""
+        if safe_float(l.get("close"), 0) < safe_float(l.get("open"), 0) and body / rng >= 0.40:
+            score += 0.5; reasons.append("شمعة هابطة قوية")
 
-    m15, e15 = frame_score("15m"); m5, e5 = frame_score("5m")
+        return (score, structure, reasons), ""
+
+    m15, e15 = frame_score("15m")
+    m5, e5 = frame_score("5m")
     if m15 is None or m5 is None:
         return False, e15 or e5 or "بيانات M15/M5 غير متاحة", {"M15": 0.0, "M5": 0.0}
-    s15, st15 = m15; s5, st5 = m5
-    ok15 = s15 >= 2.75 and st15; ok5 = s5 >= 2.75 and st5
-    msg = f"M15 {s15:.2f}/5 {'✓' if ok15 else '✗'} | M5 {s5:.2f}/5 {'✓' if ok5 else '✗'}"
+
+    s15, st15, r15 = m15
+    s5, st5, r5 = m5
+    # لا يكفي مجموع النقاط وحده: يلزم دليل هيكلي هابط على كل فريم.
+    ok15 = s15 >= 2.50 and st15
+    ok5 = s5 >= 2.50 and st5
+    msg = (f"M15 {s15:.2f}/5 {'✓' if ok15 else '✗'} | "
+           f"M5 {s5:.2f}/5 {'✓' if ok5 else '✗'}")
+    if not ok15 and r15:
+        msg += " | M15: " + ", ".join(r15)
+    if not ok5 and r5:
+        msg += " | M5: " + ", ".join(r5)
     return bool(ok15 and ok5), msg, {"M15": round(s15, 2), "M5": round(s5, 2)}
 
 
