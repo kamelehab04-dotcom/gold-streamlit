@@ -12,11 +12,6 @@ import logging
 import warnings
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-try:
-    from zoneinfo import ZoneInfo
-    CAIRO_TZ = ZoneInfo("Africa/Cairo")
-except Exception:
-    CAIRO_TZ = timezone.utc
 import concurrent.futures
 import time
 import math
@@ -81,7 +76,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2012.0 COUNTER-DISCOUNT SELL + TARGET ROOM"
+APP_VERSION = "v2010.3"
 
 
 
@@ -324,7 +319,7 @@ def init_state():
         "show_market_status": False, "trade_journal": [],
         "ml_model": None, "_ccy_strength_cache": {},
         "show_details": False,
-        "strong_trade_result": None, "analysis_sources": "لم يتم التحليل بعد"}
+        "strong_trade_result": None}
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
 
@@ -618,29 +613,19 @@ def get_twelve_data(symbol, interval="4h", outputsize=500, min_rows=50):
 
 
 
-# Track the providers that actually returned historical price data during a scan.
-DATA_SOURCES_USED = set()
-
+@st.cache_data(ttl=90, show_spinner=False)
 def get_historical_data(symbol, period="3mo", interval="4h"):
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         df = get_yfinance(s, period, interval)
-        if df is not None and len(df) >= 50:
-            DATA_SOURCES_USED.add("Yahoo Finance")
-            return df
+        if df is not None and len(df) >= 50: return df
     df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
-    if df is not None and len(df) >= 50:
-        DATA_SOURCES_USED.add("Yahoo Finance")
-        return df
+    if df is not None and len(df) >= 50: return df
     df = get_twelve_data(symbol, interval, 500)
-    if df is not None and len(df) >= 50:
-        DATA_SOURCES_USED.add("Twelve Data")
-        return df
+    if df is not None and len(df) >= 50: return df
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         # المسار الاحتياطي يقبل 30 شمعة فعلًا؛ لا نطلب 50 داخل normalize_ohlcv.
         df = get_yfinance(s, "1mo", interval, min_rows=30)
-        if df is not None and len(df) >= 30:
-            DATA_SOURCES_USED.add("Yahoo Finance")
-            return df
+        if df is not None and len(df) >= 30: return df
     return None
 
 
@@ -1513,77 +1498,6 @@ def smc_quality(df):
 
 
 
-
-
-def calc_adx_dmi(df, period=14):
-    """Wilder DMI/ADX; returns +DI, -DI and ADX series."""
-    up = df["high"].diff(); down = -df["low"].diff()
-    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
-    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
-    pc = df["close"].shift(1)
-    tr = pd.concat([(df["high"]-df["low"]), (df["high"]-pc).abs(),
-                    (df["low"]-pc).abs()], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
-    pdi = 100 * plus_dm.ewm(alpha=1/period, adjust=False, min_periods=period).mean() / atr.replace(0, np.nan)
-    mdi = 100 * minus_dm.ewm(alpha=1/period, adjust=False, min_periods=period).mean() / atr.replace(0, np.nan)
-    dx = 100 * (pdi-mdi).abs() / (pdi+mdi).replace(0, np.nan)
-    adx = dx.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
-    return pdi.fillna(0), mdi.fillna(0), adx.fillna(0)
-
-
-def calc_ichimoku(df):
-    high, low = df["high"], df["low"]
-    tenkan = (high.rolling(9).max()+low.rolling(9).min())/2
-    kijun = (high.rolling(26).max()+low.rolling(26).min())/2
-    span_a = (tenkan+kijun)/2
-    span_b = (high.rolling(52).max()+low.rolling(52).min())/2
-    return tenkan, kijun, span_a, span_b
-
-
-def calc_volume_profile(df, lookback=120, bins=32):
-    """Rolling price-bin volume approximation (not exchange order-book volume)."""
-    out_poc = pd.Series(np.nan, index=df.index, dtype=float)
-    out_vah = out_poc.copy(); out_val = out_poc.copy()
-    start = max(0, len(df)-lookback)
-    w = df.iloc[start:]
-    lo, hi = float(w["low"].min()), float(w["high"].max())
-    if not np.isfinite(lo+hi) or hi <= lo: return out_poc, out_vah, out_val
-    typical = (w["high"]+w["low"]+w["close"])/3
-    vol = w["volume"].clip(lower=0).fillna(0)
-    edges = np.linspace(lo, hi, bins+1)
-    idx = np.clip(np.digitize(typical, edges)-1, 0, bins-1)
-    hist = np.bincount(idx, weights=vol, minlength=bins).astype(float)
-    centers = (edges[:-1]+edges[1:])/2
-    if hist.sum() <= 0: return out_poc, out_vah, out_val
-    poc_i = int(hist.argmax()); target = hist.sum()*0.70
-    chosen = {poc_i}; acc = hist[poc_i]; left=poc_i-1; right=poc_i+1
-    while acc < target and (left >= 0 or right < bins):
-        lv = hist[left] if left >= 0 else -1
-        rv = hist[right] if right < bins else -1
-        if rv > lv: chosen.add(right); acc += max(0,rv); right += 1
-        else: chosen.add(left); acc += max(0,lv); left -= 1
-    poc, val, vah = centers[poc_i], centers[min(chosen)], centers[max(chosen)]
-    out_poc.iloc[-1]=poc; out_val.iloc[-1]=val; out_vah.iloc[-1]=vah
-    return out_poc.ffill(), out_vah.ffill(), out_val.ffill()
-
-
-def reversal_state(df):
-    if df is None or len(df)<5: return "NEUTRAL", 0.0
-    x=df.iloc[-1]; prev=df.iloc[-2]
-    bull=bear=0.0
-    if safe_float(x.get("plus_di"),0)>safe_float(x.get("minus_di"),0): bull+=1
-    else: bear+=1
-    if safe_float(x.get("tenkan"),np.nan)>safe_float(x.get("kijun"),np.nan): bull+=1
-    else: bear+=1
-    if x["close"]>x.get("kumo_top",np.inf): bull+=1
-    elif x["close"]<x.get("kumo_bottom",-np.inf): bear+=1
-    if x["close"]>prev["high"]: bull+=1.5
-    if x["close"]<prev["low"]: bear+=1.5
-    if bull>=3 and bear<=1: return "BULLISH_REVERSAL", min(95,55+10*bull)
-    if bear>=3 and bull<=1: return "BEARISH_REVERSAL", min(95,55+10*bear)
-    return "NEUTRAL", 50.0
-
-
 def build_features(df, profile, use_rvwap=True):
     out = df.copy()
     out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
@@ -1595,11 +1509,6 @@ def build_features(df, profile, use_rvwap=True):
     out["bb_upper"], out["bb_mid"], out["bb_lower"] = calc_bollinger(
         out["close"], profile["bb_period"], profile["bb_std"])
     out["chaikin_mf"] = calc_chaikin(out, 21)
-    out["plus_di"], out["minus_di"], out["adx"] = calc_adx_dmi(out, 14)
-    out["tenkan"], out["kijun"], out["senkou_a"], out["senkou_b"] = calc_ichimoku(out)
-    out["kumo_top"] = out[["senkou_a", "senkou_b"]].max(axis=1)
-    out["kumo_bottom"] = out[["senkou_a", "senkou_b"]].min(axis=1)
-    out["vp_poc"], out["vp_vah"], out["vp_val"] = calc_volume_profile(out)
     try: bh = (out.index[-1] - out.index[-2]).total_seconds()/3600
     except Exception: bh = 4.0
     if use_rvwap and bh >= 3.5:
@@ -1736,131 +1645,19 @@ def detect_regime(df):
 
 @st.cache_data(ttl=180, show_spinner=False)
 def htf_zone_filter(symbol, direction, profile_key):
-    """Daily Premium/Discount is context, not an absolute intraday veto."""
     try:
         d = get_historical_data(symbol, "1y", "1d")
         if d is None or len(d) < 60: return True, "HTF غير متاح", "UNKNOWN"
         x = build_features(d, ASSET_PROFILES[profile_key]); l = x.iloc[-1]
         ip = safe_bool(l.get("in_premium")); id_ = safe_bool(l.get("in_discount"))
-        if direction == "BUY" and ip:
-            return False, "BUY مرفوض: HTF Premium", "PREMIUM"
-        if direction == "SELL" and id_:
-            return True, "⚠️ SELL عكس Daily Discount — يتطلب تأكيدًا هابطًا قويًا على M15 وM5", "DISCOUNT_COUNTER_TREND"
+        if direction == "BUY" and ip: return False, "BUY مرفوض: HTF Premium", "PREMIUM"
+        if direction == "SELL" and id_: return False, "SELL مرفوض: HTF Discount", "DISCOUNT"
         if direction == "BUY" and id_: return True, "BUY في Discount ✅", "DISCOUNT"
         if direction == "SELL" and ip: return True, "SELL في Premium ✅", "PREMIUM"
         return True, "HTF محايد", "MID"
     except Exception: return True, "HTF فشل", "UNKNOWN"
 
 
-@st.cache_data(ttl=180, show_spinner=False)
-def intraday_m15_m5_confirmation(symbol, direction, profile_key):
-    """Require bearish structure plus multi-factor confirmation on closed M15/M5 candles."""
-    if direction != "SELL":
-        return True, "غير مطلوب", {"M15": 0.0, "M5": 0.0}
-
-    def frame_score(interval):
-        d = get_historical_data(symbol, "60d", interval)
-        if d is None or len(d) < 40:
-            return None, f"بيانات {interval} غير كافية"
-        x = build_features(d, ASSET_PROFILES[profile_key])
-        if len(x) < 8:
-            return None, f"بيانات {interval} غير كافية"
-
-        # استخدم آخر شمعة مغلقة بدل الشمعة الحالية التي قد تكون لم تكتمل بعد.
-        l = x.iloc[-2]
-        prev = x.iloc[-3]
-        recent = x.iloc[-7:-1]
-        score = 0.0
-        structure = False
-        reasons = []
-
-        # BOS/MSS خلال آخر 5 شمعات مغلقة، وليس الشمعة الأخيرة فقط.
-        try:
-            bos_recent = ("bos_bearish" in recent.columns and recent["bos_bearish"].fillna(False).astype(bool).any())
-            mss_recent = ("mss_bearish" in recent.columns and recent["mss_bearish"].fillna(False).astype(bool).any())
-            if bos_recent or mss_recent:
-                score += 2.0
-                structure = True
-                reasons.append("BOS/MSS هابط حديث")
-        except Exception:
-            pass
-
-        # بديل هيكلي: إغلاق أسفل قاع الشموع الثلاث السابقة.
-        try:
-            prior_lows = x["low"].iloc[-5:-2]
-            if len(prior_lows) >= 3 and safe_float(l.get("close"), np.inf) < safe_float(prior_lows.min(), -np.inf):
-                if not structure:
-                    score += 1.75
-                structure = True
-                reasons.append("كسر قاع قريب")
-        except Exception:
-            pass
-
-        if safe_float(l.get("ema20"), np.inf) < safe_float(l.get("ema50"), -np.inf):
-            score += 0.75; reasons.append("EMA هابط")
-        if safe_float(l.get("macd_histogram"), 0) < 0:
-            score += 0.5; reasons.append("MACD سلبي")
-        if safe_float(l.get("rsi"), 50) < 48:
-            score += 0.5; reasons.append("RSI هابط")
-        if safe_bool(l.get("liquidity_sweep_bearish")) or ("liquidity_sweep_bearish" in recent.columns and recent["liquidity_sweep_bearish"].fillna(False).astype(bool).any()):
-            score += 0.75; reasons.append("سحب سيولة هابط")
-
-        body = abs(safe_float(l.get("close"), 0) - safe_float(l.get("open"), 0))
-        rng = max(safe_float(l.get("high"), 0) - safe_float(l.get("low"), 0), 1e-12)
-        if safe_float(l.get("close"), 0) < safe_float(l.get("open"), 0) and body / rng >= 0.40:
-            score += 0.5; reasons.append("شمعة هابطة قوية")
-
-        return (score, structure, reasons), ""
-
-    m15, e15 = frame_score("15m")
-    m5, e5 = frame_score("5m")
-    if m15 is None or m5 is None:
-        return False, e15 or e5 or "بيانات M15/M5 غير متاحة", {"M15": 0.0, "M5": 0.0}
-
-    s15, st15, r15 = m15
-    s5, st5, r5 = m5
-    # لا يكفي مجموع النقاط وحده: يلزم دليل هيكلي هابط على كل فريم.
-    ok15 = s15 >= 2.50 and st15
-    ok5 = s5 >= 2.50 and st5
-    msg = (f"M15 {s15:.2f}/5 {'✓' if ok15 else '✗'} | "
-           f"M5 {s5:.2f}/5 {'✓' if ok5 else '✗'}")
-    if not ok15 and r15:
-        msg += " | M15: " + ", ".join(r15)
-    if not ok5 and r5:
-        msg += " | M5: " + ", ".join(r5)
-    return bool(ok15 and ok5), msg, {"M15": round(s15, 2), "M5": round(s5, 2)}
-
-
-def intraday_target_reachability(df, current_price, pair_name, direction):
-    """Check if at least 150 FX points remain before the nearest opposing barrier."""
-    if asset_type_from_name(pair_name) != "forex":
-        return True, "فحص المساحة غير مطبق على هذا الأصل", None
-    point_size = 0.001 if "JPY" in str(pair_name).upper() else 0.00001
-    atr = safe_float(df["atr"].iloc[-1], 0) if df is not None and len(df) else 0
-    candidates = []
-    try:
-        candidates.extend(safe_float(v, np.nan) for v in collect_sr_levels(df, 200))
-    except Exception: pass
-    try:
-        lo, hi = latest_structure_levels(df); candidates.extend([lo, hi])
-    except Exception: pass
-    try:
-        liq = find_nearest_liquidity(df, current_price, direction)
-        candidates.extend(safe_float(z.get("level"), np.nan) for z in liq)
-    except Exception: pass
-    if direction == "SELL":
-        barriers = [v for v in candidates if np.isfinite(v) and v < current_price - max(0.10*atr, point_size)]
-        barriers.append(float(df["low"].iloc[-20:].min()))
-        nearest = max((v for v in barriers if v < current_price), default=np.nan)
-    else:
-        barriers = [v for v in candidates if np.isfinite(v) and v > current_price + max(0.10*atr, point_size)]
-        barriers.append(float(df["high"].iloc[-20:].max()))
-        nearest = min((v for v in barriers if v > current_price), default=np.nan)
-    if not np.isfinite(nearest): return True, "لا يوجد عائق قريب محدد؛ المساحة غير مؤكدة", None
-    room_points = abs(current_price - nearest) / point_size
-    ok = room_points >= 150.0
-    msg = f"المساحة حتى أقرب عائق: {room_points:.0f} نقطة ({'مناسبة' if ok else 'أقل من 150 نقطة'})"
-    return ok, msg, round(room_points, 1)
 
 
 @st.cache_data(ttl=180, show_spinner=False)
@@ -2090,19 +1887,6 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
     if va and np.isfinite(va) and l["volume"] > va:
         if l["close"] > l["open"]: sc["BUY"]["volume"] += 20
         elif l["close"] < l["open"]: sc["SELL"]["volume"] += 20
-    # New intelligence confluence: ADX/DMI, Ichimoku and rolling volume profile.
-    adx = safe_float(l.get("adx"), 0); pdi = safe_float(l.get("plus_di"), 0); mdi = safe_float(l.get("minus_di"), 0)
-    if adx >= 20:
-        if pdi > mdi: sc["BUY"]["trend"] += 12; rs.append(f"ADX اتجاه صاعد {adx:.0f}")
-        elif mdi > pdi: sc["SELL"]["trend"] += 12; rs.append(f"ADX اتجاه هابط {adx:.0f}")
-    kt, kb = safe_float(l.get("kumo_top"), np.nan), safe_float(l.get("kumo_bottom"), np.nan)
-    if np.isfinite(kt) and np.isfinite(kb):
-        if l["close"] > kt and l["tenkan"] > l["kijun"]: sc["BUY"]["trend"] += 10
-        elif l["close"] < kb and l["tenkan"] < l["kijun"]: sc["SELL"]["trend"] += 10
-    poc = safe_float(l.get("vp_poc"), np.nan)
-    if np.isfinite(poc):
-        if l["close"] > poc: sc["BUY"]["volume"] += 8
-        elif l["close"] < poc: sc["SELL"]["volume"] += 8
     if dxy_bias is None: dxy_bias, _, _ = get_dxy_context()
     ui, um = get_pair_usd_context(pair_name, dxy_bias=dxy_bias)
     if ui > 0: sc["BUY"]["context"] += 25; rs.append("DXY يدعم")
@@ -2462,7 +2246,7 @@ def find_order_block_levels(df, current_price, direction, lookback=100):
 
 
 
-def calculate_ict_sl_tp(df, direction, current_price, profile, pair_name=None, signal_strength=50.0):
+def calculate_ict_sl_tp(df, direction, current_price, profile):
     atr = safe_float(df["atr"].iloc[-1], np.nan)
     if not np.isfinite(atr) or atr <= 0: return None
     all_levels = []
@@ -2631,58 +2415,26 @@ def calculate_ict_sl_tp(df, direction, current_price, profile, pair_name=None, s
 
 
     RR1, RR2, RR3 = MIN_RR_TP1, MIN_RR_TP2, MIN_RR_TP3
-
-    # Intraday Forex targets: 150 / 200 / 250-300 broker points.
-    # 5-digit quotes: 0.00001 per point; JPY pairs: 0.001 per point.
-    # Non-Forex instruments keep the original structure/RR target engine.
-    is_forex_pair = bool(pair_name and asset_type_from_name(pair_name) == "forex")
-    if is_forex_pair:
-        point_size = 0.001 if "JPY" in str(pair_name).upper() else 0.00001
-        strength = clamp(safe_float(signal_strength, 50.0), 0, 100)
-        tp3_points = 300.0 if strength >= 80 else 250.0
-        risk_points = risk / point_size
-        p1 = min(max(150.0, risk_points * RR1), 300.0)
-        p2 = min(max(200.0, risk_points * RR2), 300.0)
-        p3 = min(max(tp3_points, risk_points * RR3), 300.0)
-        p2 = max(p2, p1 + 1.0)
-        p3 = max(p3, p2 + 1.0)
-        p3 = min(p3, 300.0)
-        p2 = min(p2, p3 - 1.0)
-        p1 = min(p1, p2 - 1.0)
-        sign = 1.0 if direction == "BUY" else -1.0
-        t1 = current_price + sign * p1 * point_size
-        t2 = current_price + sign * p2 * point_size
-        t3 = current_price + sign * p3 * point_size
-
-        def _nearby_target_name(target_price, tolerance_points=20.0):
-            for level, name in tp_cands:
-                if abs(level - target_price) <= tolerance_points * point_size:
-                    return name
-            return f"{int(round(abs(target_price-current_price)/point_size))} points"
-        t1n, t2n, t3n = (_nearby_target_name(t1), _nearby_target_name(t2),
-                         _nearby_target_name(t3))
-    else:
-        min_t1 = current_price + risk * RR1 if direction == "BUY" else current_price - risk * RR1
-        min_t2 = current_price + risk * RR2 if direction == "BUY" else current_price - risk * RR2
-        min_t3 = current_price + risk * RR3 if direction == "BUY" else current_price - risk * RR3
-        valid_t1 = [c for c in tp_cands
-                    if (direction == "BUY" and c[0] >= min_t1) or
-                       (direction == "SELL" and c[0] <= min_t1)]
-        if valid_t1: t1, t1n = valid_t1[0]
-        else: t1 = min_t1; t1n = f"{RR1}R"
-        thr2 = max(min_t2, t1 + 0.3*atr) if direction == "BUY" else min(min_t2, t1 - 0.3*atr)
-        valid_t2 = [c for c in tp_cands
-                    if (direction == "BUY" and c[0] >= thr2) or
-                       (direction == "SELL" and c[0] <= thr2)]
-        if valid_t2: t2, t2n = valid_t2[0]
-        else: t2 = min_t2; t2n = f"{RR2}R"
-        thr3 = max(min_t3, t2 + 0.3*atr) if direction == "BUY" else min(min_t3, t2 - 0.3*atr)
-        valid_t3 = [c for c in tp_cands
-                    if (direction == "BUY" and c[0] >= thr3) or
-                       (direction == "SELL" and c[0] <= thr3)]
-        if valid_t3: t3, t3n = valid_t3[0]
-        else: t3 = min_t3; t3n = f"{RR3}R"
-
+    min_t1 = current_price + risk * RR1 if direction == "BUY" else current_price - risk * RR1
+    min_t2 = current_price + risk * RR2 if direction == "BUY" else current_price - risk * RR2
+    min_t3 = current_price + risk * RR3 if direction == "BUY" else current_price - risk * RR3
+    valid_t1 = [c for c in tp_cands
+                if (direction == "BUY" and c[0] >= min_t1) or
+                   (direction == "SELL" and c[0] <= min_t1)]
+    if valid_t1: t1, t1n = valid_t1[0]
+    else: t1 = min_t1; t1n = f"{RR1}R"
+    thr2 = max(min_t2, t1 + 0.3*atr) if direction == "BUY" else min(min_t2, t1 - 0.3*atr)
+    valid_t2 = [c for c in tp_cands
+                if (direction == "BUY" and c[0] >= thr2) or
+                   (direction == "SELL" and c[0] <= thr2)]
+    if valid_t2: t2, t2n = valid_t2[0]
+    else: t2 = min_t2; t2n = f"{RR2}R"
+    thr3 = max(min_t3, t2 + 0.3*atr) if direction == "BUY" else min(min_t3, t2 - 0.3*atr)
+    valid_t3 = [c for c in tp_cands
+                if (direction == "BUY" and c[0] >= thr3) or
+                   (direction == "SELL" and c[0] <= thr3)]
+    if valid_t3: t3, t3n = valid_t3[0]
+    else: t3 = min_t3; t3n = f"{RR3}R"
     rr1 = abs(t1 - current_price) / risk
     rr2 = abs(t2 - current_price) / risk
     rr3 = abs(t3 - current_price) / risk
@@ -2690,14 +2442,15 @@ def calculate_ict_sl_tp(df, direction, current_price, profile, pair_name=None, s
             "target1": t1, "target2": t2, "target3": t3, "risk": risk,
             "risk_reward_1": rr1, "risk_reward_2": rr2, "risk_reward_3": rr3,
             "sources": {"sl": chosen_name, "tp1": t1n, "tp2": t2n, "tp3": t3n},
-            "target_points": ({"tp1": round(abs(t1-current_price)/point_size, 1),
-                               "tp2": round(abs(t2-current_price)/point_size, 1),
-                               "tp3": round(abs(t3-current_price)/point_size, 1)}
-                              if is_forex_pair else None),
-            "target_mode": "INTRADAY_FLEX_150_300" if is_forex_pair else "STRUCTURE_RR",
             "idm": idm, "obs": obs, "fvgs": fvgs, "liq": liq,
             "fibs": fibs, "pivots": pv, "impulse": imp,
             "sl_level_price": chosen_level}
+
+
+
+
+
+
 
 
 def validate_levels(signal, levels, profile):
@@ -2987,38 +2740,9 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
 
     checks = []; total = 0
-    # Smart Entry: avoid chasing an already-extended impulse at the edge of its
-    # recent range. This is an entry-timing gate only; directional scoring and
-    # the underlying strategy rules remain unchanged.
-    late_entry = False
-    late_entry_reason = ""
-    try:
-        recent = df.iloc[-21:-1] if len(df) > 21 else df.iloc[:-1]
-        if len(recent) >= 10:
-            close_now = safe_float(last.get("close"), 0)
-            close_3 = safe_float(df.iloc[-4].get("close"), close_now) if len(df) >= 4 else close_now
-            recent_high = safe_float(recent["high"].max(), close_now)
-            recent_low = safe_float(recent["low"].min(), close_now)
-            impulse = abs(close_now - close_3) / atr
-            edge_dist = ((close_now - recent_low) / atr if direction == "SELL"
-                         else (recent_high - close_now) / atr)
-            at_exhaustion_edge = edge_dist <= 0.35
-            impulse_aligned = ((direction == "SELL" and close_now < close_3) or
-                               (direction == "BUY" and close_now > close_3))
-            if at_exhaustion_edge and impulse_aligned and impulse >= 1.20:
-                late_entry = True
-                late_entry_reason = ("بيع متأخر قرب قاع النطاق بعد اندفاع قوي" if direction == "SELL"
-                                     else "شراء متأخر قرب قمة النطاق بعد اندفاع قوي")
-    except Exception:
-        late_entry = False
 
-    if late_entry:
-        checks.append({"name": "Smart Entry: دخول متأخر", "pass": False,
-                       "score": 0, "icon": "⏳", "reason": late_entry_reason})
-    else:
-        checks.append({"name": "Smart Entry: لا يوجد مطاردة للسعر", "pass": True,
-                       "score": 5, "icon": "🎯"})
-        total += 5
+
+
 
     if direction == "BUY":
         candle_ok = float(last["close"]) > float(last["open"]) and \
@@ -3164,12 +2888,7 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
 
 
-    if late_entry:
-        # Keep the directional signal visible, but block immediate execution until
-        # price retraces and a fresh confirmation can be evaluated.
-        final_total = min(final_total, max(0, enter_thr - 1))
-        verdict = "WAIT_RETRACE"; vtext = f"🟡 {late_entry_reason} — انتظر إعادة اختبار"; vcolor = "#f5c87a"
-    elif final_total >= enter_thr:
+    if final_total >= enter_thr:
         verdict = "ENTER_NOW"; vtext = "🟢 ادخل الآن"; vcolor = "#7cd4a0"
     elif final_total >= retr_thr:
         verdict = "WAIT_RETRACE"; vtext = "🟡 انتظر ارتداد"; vcolor = "#f5c87a"
@@ -3183,8 +2902,7 @@ def entry_confirmation_score(df, direction, levels, pair_name):
 
     return {"score": final_total, "raw_score": total,
             "verdict": verdict, "verdict_text": vtext,
-            "verdict_color": vcolor, "checks": checks,
-            "late_entry": late_entry, "late_entry_reason": late_entry_reason}
+            "verdict_color": vcolor, "checks": checks}
 
 
 
@@ -3317,9 +3035,7 @@ def generate_signal(df, current_price, pair_name, symbol,
                 sp.append(("شمعة ضد", PENALTY_WEAK_CANDLE))
     if mc and signal in ("BUY","SELL"): sp.append(("MSS Conflict", 8))
     cand = signal if signal in ("BUY","SELL") else ("BUY" if buy > sell else "SELL")
-    lv = calculate_ict_sl_tp(df, cand, current_price, profile,
-                             pair_name=pair_name,
-                             signal_strength=0.60*conf + 0.40*max(buy, sell))
+    lv = calculate_ict_sl_tp(df, cand, current_price, profile)
     rok, rmsg = validate_levels(cand, lv, profile) if lv else (False, "")
     if signal in ("BUY","SELL") and not rok: signal = "WAIT"; conf = 0
     pil = sc["pillars"]; wc = weighted_confluence(pil, cand)
@@ -3331,25 +3047,11 @@ def generate_signal(df, current_price, pair_name, symbol,
            "Kill Zone","OTE","Displacement","News Window"]
     if skip_external_filters:
         for n in efn: flt[n] = {"pass": True, "msg": "Backtest"}
-        flt["Counter-Zone M15/M5"] = {"pass": True, "msg": "Backtest"}
-        flt["Target Reachability"] = {"pass": True, "msg": "Backtest"}
         ntb = False
     else:
         ho, hm, hz = htf_zone_filter(symbol, cand, profile_key)
         flt["HTF Zone"] = {"pass": ho, "msg": hm, "zone": hz}
         if not ho: ap = False; br_ = hm
-
-        # Counter-zone SELL in Daily Discount needs strong confirmation on BOTH M15 and M5.
-        if cand == "SELL" and hz == "DISCOUNT_COUNTER_TREND":
-            czo, czm, czscores = intraday_m15_m5_confirmation(symbol, cand, profile_key)
-            flt["Counter-Zone M15/M5"] = {"pass": czo, "msg": czm, "scores": czscores}
-            if not czo:
-                ap = False; br_ = br_ or ("SELL داخل Daily Discount بدون تأكيد M15/M5 كافٍ: " + czm)
-            else:
-                flt["HTF Zone"]["msg"] = hm + " | تأكيد M15/M5 قوي ✓"
-        else:
-            flt["Counter-Zone M15/M5"] = {"pass": True, "msg": "غير مطلوب"}
-
         lo_, lm = ltf_entry_trigger(symbol, cand, profile_key)
         flt["LTF Trigger"] = {"pass": lo_, "msg": lm}
         if not lo_: sp.append(("LTF", 6))
@@ -3376,12 +3078,6 @@ def generate_signal(df, current_price, pair_name, symbol,
         ntb, ntm = news_time_block(st.session_state.get("economic_events") or [], pair_name)
         flt["News Window"] = {"pass": not ntb, "msg": ntm or "لا خبر"}
         if ntb: ap = False; br_ = br_ or ntm
-    # Target-room validation is applied in live mode and backtests alike.
-    room_ok, room_msg, room_points = intraday_target_reachability(df, current_price, pair_name, cand)
-    flt["Target Reachability"] = {"pass": room_ok, "msg": room_msg, "room_points": room_points}
-    if not room_ok:
-        ap = False; br_ = br_ or ("المساحة السعرية لا تسمح بهدف 150 نقطة: " + room_msg)
-
     mo, mm = is_market_open(pair_name)
     flt["Market Open"] = {"pass": mo, "msg": mm}
     if not mo and not skip_external_filters: ap = False; br_ = br_ or mm
@@ -3448,20 +3144,7 @@ def generate_signal(df, current_price, pair_name, symbol,
             es, er = "WAIT", "لا اجتياز"
     conf = ec
     adv = ", ".join(f"{n}({p})" for n,p in sp) or "None"
-    _rev_state, _rev_score = reversal_state(df)
-    _last_feature = df.iloc[-1]
-    _adx_value = safe_float(_last_feature.get("adx"), 0)
-    _trade_quality = clamp(0.45*conf + 0.35*cs + 0.20*wc, 0, 100)
     return {"signal": signal, "confidence": conf, "raw_confidence": rc,
-            "reversal_state": _rev_state, "reversal_score": _rev_score,
-            "adx": _adx_value, "plus_di": safe_float(_last_feature.get("plus_di"),0),
-            "minus_di": safe_float(_last_feature.get("minus_di"),0),
-            "ichimoku_tenkan": safe_float(_last_feature.get("tenkan"),np.nan),
-            "ichimoku_kijun": safe_float(_last_feature.get("kijun"),np.nan),
-            "volume_profile_poc": safe_float(_last_feature.get("vp_poc"),np.nan),
-            "volume_profile_vah": safe_float(_last_feature.get("vp_vah"),np.nan),
-            "volume_profile_val": safe_float(_last_feature.get("vp_val"),np.nan),
-            "trade_quality_score": _trade_quality,
             "buy_score": buy, "sell_score": sell, "weighted_confluence": wc,
             "pillars": pil, "mtf_bias": mtf, "mtf_conf": mtfc, "mtf_details": mtfd,
             "weekly_bias": wk, "levels": lv if rok else None, "df": df,
@@ -3722,9 +3405,7 @@ def get_all_signals_parallel():
                 "SLsrc": lv.get("sources", {}).get("sl", "—"),
                 "TP1": fmt_price(lv.get("target1"), pn),
                 "RR3": round(lv.get("risk_reward_3", 0), 2) if lv else 0,
-                "_ec_score": ec_score, "_flip_ec_score": flip_ec_score,
-                "_flip_levels_raw": (fl.get("new_levels") if sig_ in ("BUY", "SELL") and 'fl' in locals() and isinstance(fl, dict) else None),
-                "_flip_trigger_count": (len(fl.get("triggers", [])) if sig_ in ("BUY", "SELL") and 'fl' in locals() and isinstance(fl, dict) else 0)}
+                "_ec_score": ec_score, "_flip_ec_score": flip_ec_score}
         except Exception: return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(one, p, s): (p, i) for i, (p, s) in enumerate(PAIRS.items())}
@@ -3816,55 +3497,25 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
         sym = PAIRS.get(pair)
         if not sym:
             continue
-        # Re-analysis is useful for fresh levels, but must never erase a valid
-        # candidate already found by the parallel market scan.
         price, _ = get_spot_price(sym)
         data = get_historical_data(sym, "6mo", "4h")
-        result = None
-        recheck_note = ""
-        if price is not None and data is not None and not data.empty:
-            try:
-                candidate_result = generate_signal(
-                    data, price, pair, sym, skip_external_filters=False)
-                if candidate_result.get("signal") in ("BUY", "SELL") and candidate_result.get("levels"):
-                    result = candidate_result
-                else:
-                    recheck_note = "إعادة الفحص لم تؤكد الإشارة؛ نعرض نتيجة المسح الأولي للمراجعة"
-            except Exception as exc:
-                recheck_note = f"تعذرت إعادة الفحص: {type(exc).__name__}"
-        else:
-            recheck_note = "تعذر تحديث السعر/البيانات؛ نعرض نتيجة المسح الأولي"
-
-        # Fallback uses only values returned by the initial scan. It does not
-        # invent SL/TP values or mark the candidate executable.
-        if result is None:
-            price = price if price is not None else None
-            result = {
-                "signal": str(best.get("الإشارة", "WAIT")),
-                "confidence": safe_float(best.get("الثقة", 0), 0),
-                "levels": None,
-                "execution_status": "MONITOR",
-                "execution_reason": recheck_note or "بانتظار تأكيد إعادة التحليل",
-                "all_filters_passed": False,
-                "buy_score": safe_float(best.get("BUY", 0), 0),
-                "sell_score": safe_float(best.get("SELL", 0), 0),
-                "trade_grade": best.get("Grade", "WAIT"),
-                "mtf_bias": best.get("MTF", "—"),
-                "weekly_bias": best.get("Weekly", "—"),
-                "regime": best.get("Regime", "—"),
-                "weighted_confluence": safe_float(best.get("Conf", 0), 0),
-                "confirmation_score": safe_float(best.get("Confirm", 0), 0),
-                "reasons": [recheck_note] if recheck_note else [],
-            }
+        if price is None or data is None:
+            continue
+        try:
+            result = generate_signal(data, price, pair, sym,
+                                     skip_external_filters=False)
+        except Exception:
+            continue
+        if result["signal"] == "WAIT" or result["levels"] is None:
+            continue
 
 
 
 
         ec = None
         try:
-            if result.get("levels") and result.get("df") is not None:
-                ec = entry_confirmation_score(
-                    result.get("df"), result["signal"], result["levels"], pair)
+            ec = entry_confirmation_score(
+                result.get("df"), result["signal"], result["levels"], pair)
         except Exception:
             ec = None
 
@@ -3872,53 +3523,22 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
 
 
         ec_s = ec["score"] if ec else 0
-        row_data = best.to_dict()
-        selected_by_flip = False
-        flip_conf = best.get("Flip Conf%", 0)
-        flip_ec = best.get("_flip_ec_score", 0)
-        flip_levels = best.get("_flip_levels_raw")
-        flip_triggers = best.get("_flip_trigger_count", 0)
-
-        # نعتمد الاتجاه العكسي للعرض فقط عند انعكاس قوي + تأكيد مستقل + أكثر من دليل.
-        # لا يتم فتح صفقة أو تمريرها إلى بوابة التنفيذ تلقائياً.
-        if (best.get("Flip Status") == "STRONG_FLIP"
-                and isinstance(flip_conf, (int, float)) and flip_conf >= 65
-                and isinstance(flip_ec, (int, float)) and flip_ec >= 65
-                and isinstance(flip_triggers, (int, float)) and flip_triggers >= 2
-                and isinstance(flip_levels, dict)
-                and flip_levels.get("stop_loss") is not None):
-            opposite = best.get("🔄 Flip", "")
-            opposite = "BUY" if "BUY" in str(opposite) else ("SELL" if "SELL" in str(opposite) else None)
-            if opposite:
-                result["signal"] = opposite
-                result["levels"] = flip_levels
-                result["confidence"] = float(flip_conf)
-                result["execution_status"] = "MONITOR"
-                result["execution_reason"] = "انعكاس قوي مؤكد — راجع الإشارة قبل الدخول"
-                result["all_filters_passed"] = False
-                row_data["الإشارة"] = opposite
-                row_data["Grade"] = "مراقبة انعكاس"
-                selected_by_flip = True
-
-        confidence_for_gate = result["confidence"]
-        confirmation_for_gate = ec_s
         confidence_ok, gate_msg = passes_confidence_gate(
-            confidence_for_gate, confirmation_for_gate)
-        has_fresh_levels = bool(result.get("levels"))
-        gate_ok = (has_fresh_levels and not selected_by_flip and confidence_ok and
+            result["confidence"], ec_s)
+        gate_ok = (confidence_ok and
                    result.get("execution_status") == "EXECUTE" and
                    result.get("all_filters_passed", False))
-        if selected_by_flip:
-            gate_msg = "انعكاس قوي؛ الاتجاه محدث للعرض فقط — القرار لك"
-        elif not gate_ok and not gate_msg:
+        if not gate_ok and not gate_msg:
             gate_msg = result.get("execution_reason", "لم تجتز فلاتر التنفيذ")
+
+
+
 
         trades.append({
             "pair": pair, "price": price, "sym": sym,
-            "result": result, "row": row_data,
+            "result": result, "row": best.to_dict(),
             "ec": ec,
             "gate_ok": gate_ok, "gate_msg": gate_msg,
-            "selected_by_flip": selected_by_flip,
             "score": float(best.get("_final_score", 0))})
 
 
@@ -3942,39 +3562,6 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
 
 
 
-
-
-
-def analyze_selected_pair_detail(pair_name):
-    """تحليل الزوج المختار بنفس محرك الإشارات والبوابة الحالية دون تغيير الاستراتيجية."""
-    sym = PAIRS.get(pair_name)
-    if not sym:
-        return None, "الزوج غير موجود في قائمة الأدوات"
-    price, price_change = get_spot_price(sym)
-    data = get_historical_data(sym, "6mo", "4h")
-    price_source = " + ".join(sorted(DATA_SOURCES_USED)) or "مصدر احتياطي"
-    if price is None or data is None or data.empty:
-        return None, "تعذر جلب بيانات كافية لهذا الزوج من مصادر الأسعار"
-    try:
-        result = generate_signal(data, price, pair_name, sym, skip_external_filters=False)
-        signal = result.get("signal", "WAIT")
-        levels = result.get("levels")
-        confirmation = None
-        if signal in ("BUY", "SELL") and levels:
-            confirmation = entry_confirmation_score(result.get("df"), signal, levels, pair_name)
-        confirmation_score = confirmation.get("score", 0) if confirmation else result.get("confirmation_score", 0)
-        conf_ok, gate_msg = passes_confidence_gate(result.get("confidence", 0), confirmation_score)
-        gate_ok = (signal in ("BUY", "SELL") and conf_ok and
-                   result.get("execution_status") == "EXECUTE" and
-                   result.get("all_filters_passed", False))
-        if not gate_msg and not gate_ok:
-            gate_msg = result.get("execution_reason", "لم تجتز بوابة التنفيذ")
-        return {"pair": pair_name, "price": price, "sym": sym,
-                "price_source": price_source, "price_change": price_change, "result": result,
-                "ec": confirmation, "gate_ok": gate_ok,
-                "gate_msg": gate_msg, "score": result.get("weighted_confluence", 0)}, None
-    except Exception as exc:
-        return None, f"تعذر تحليل الزوج: {exc}"
 
 
 
@@ -4130,14 +3717,6 @@ def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c",
     rr1.metric("RR·TP1", f"1:{levels['risk_reward_1']:.2f}")
     rr2.metric("RR·TP2", f"1:{levels['risk_reward_2']:.2f}")
     rr3.metric("RR·TP3", f"1:{levels['risk_reward_3']:.2f}")
-    target_points = levels.get("target_points")
-    if target_points:
-        st.caption(
-            "🎯 أهداف Intraday مرنة: "
-            f"TP1 {target_points['tp1']:.0f} نقطة · "
-            f"TP2 {target_points['tp2']:.0f} نقطة · "
-            f"TP3 {target_points['tp3']:.0f} نقطة"
-        )
 
 
 
@@ -4307,64 +3886,17 @@ with hl:
 
 with hr:
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
-    _last_analysis = st.session_state.get("analysis_time")
-    if _last_analysis:
-        try:
-            if _last_analysis.tzinfo is None:
-                _last_analysis = _last_analysis.replace(tzinfo=timezone.utc)
-            _last_analysis_text = _last_analysis.astimezone(CAIRO_TZ).strftime("%Y-%m-%d  %H:%M:%S")
-        except Exception:
-            _last_analysis_text = str(_last_analysis)
-    else:
-        _last_analysis_text = "لم يتم التحليل بعد"
-    _sources_text = st.session_state.get("analysis_sources", "لم يتم التحليل بعد")
-    st.markdown(
-        f'<div style="background:rgba(230,200,124,0.07);border:1px solid rgba(230,200,124,0.2);'
-        f'border-radius:12px;padding:10px 14px;margin:0 0 12px 0;direction:rtl;">'
-        f'<div style="color:#e6c87c;font-size:0.82rem;font-weight:700;">🕒 آخر تحليل: '
-        f'<span style="color:#e8edf5;font-weight:500;">{_last_analysis_text} (القاهرة)</span></div>'
-        f'<div style="color:#e6c87c;font-size:0.82rem;font-weight:700;margin-top:5px;">📡 مصدر الأسعار: '
-        f'<span style="color:#e8edf5;font-weight:500;">{_sources_text}</span></div></div>',
-        unsafe_allow_html=True)
     br = st.columns([1, 1])
     with br[0]:
         if st.button("🔄 تحديث", width="stretch", key="btn_ref"):
-            with st.spinner("🔄 تحديث البيانات وإعادة تحليل الصفقات..."):
-                # مسح البيانات المخزنة حتى يتم جلب أسعار جديدة
-                st.cache_data.clear()
-                DATA_SOURCES_USED.clear()
-
-                # تحديث التقويم الاقتصادي
-                st.session_state.economic_events = get_fmp_economic_calendar()
-
-                # إلغاء نتيجة التحليل القديمة وإعادة حساب الصفقات
-                st.session_state.strong_trade_result = None
-                st.session_state.all_signals = None
-                st.session_state.strong_trade_result = find_strongest_trades(
-                    max_trades=MAX_STRONG_TRADES)
-                _used_sources = sorted(DATA_SOURCES_USED)
-                st.session_state.analysis_sources = (
-                    " + ".join(_used_sources) if _used_sources
-                    else "لم تُجلب بيانات سعرية من أي مصدر"
-                )
-
-                # تسجيل وقت آخر تحليل
-                st.session_state.analysis_time = datetime.now(timezone.utc)
-
-            st.toast("✅ تم تحديث البيانات وإعادة التحليل")
-            st.rerun()
+            st.session_state.economic_events = get_fmp_economic_calendar()
+            st.cache_data.clear()
+            st.toast("✅ تم التحديث")
     with br[1]:
         if st.button(f"🎯 أعثر على {MAX_STRONG_TRADES} صفقات قوية", width="stretch", key="btn_strong"):
             with st.spinner(f"🔍 جاري البحث عن أفضل {MAX_STRONG_TRADES} صفقات..."):
-                DATA_SOURCES_USED.clear()
                 st.session_state.strong_trade_result = find_strongest_trades(
                     max_trades=MAX_STRONG_TRADES)
-                _used_sources = sorted(DATA_SOURCES_USED)
-                st.session_state.analysis_sources = (
-                    " + ".join(_used_sources) if _used_sources
-                    else "لم تُجلب بيانات سعرية من أي مصدر"
-                )
-                st.session_state.analysis_time = datetime.now(timezone.utc)
             st.rerun()
 
 
@@ -4438,170 +3970,214 @@ if _changed:
 
 
 # ═══════════════════════════════════════════════
-# SELECTED PAIR TERMINAL — SINGLE PAIR VIEW
+# STRONGEST TRADES DISPLAY
 # ═══════════════════════════════════════════════
-_str_res = st.session_state.get("strong_trade_result") or {}
+_str_res = st.session_state.get("strong_trade_result")
 
-# Always render the Top-4 scan result independently of the selected-pair panel.
-st.markdown('<div class="section-title">🏆 أفضل 4 فرص <span>TOP 4 MARKET SCAN</span></div>',
-            unsafe_allow_html=True)
-if _str_res.get("status") == "FOUND" and _str_res.get("trades"):
-    _top4_rows = []
-    for _t in _str_res.get("trades", [])[:MAX_STRONG_TRADES]:
-        _row = _t.get("row", {}) or {}
-        _res = _t.get("result", {}) or {}
-        _lv = _res.get("levels") or {}
-        _top4_rows.append({
-            "الزوج": _t.get("pair", "—"),
-            "الإشارة": _res.get("signal", _row.get("الإشارة", "—")),
-            "الثقة": f"{safe_float(_res.get('confidence', _row.get('الثقة', 0)), 0):.1f}%",
-            "السعر": fmt_price(_t.get("price"), _t.get("pair")) if _t.get("price") is not None else _row.get("السعر", "—"),
-            "وقف الخسارة": fmt_price(_lv.get("stop_loss"), _t.get("pair")) if _lv.get("stop_loss") is not None else _row.get("SL", "—"),
-            "الهدف الأول": fmt_price(_lv.get("target1"), _t.get("pair")) if _lv.get("target1") is not None else _row.get("TP1", "—"),
-            "حالة التنفيذ": "اجتازت الفلاتر" if _t.get("gate_ok") else "مراقبة فقط",
-            "ملاحظة": _t.get("gate_msg", ""),
-        })
-    st.dataframe(pd.DataFrame(_top4_rows), use_container_width=True, hide_index=True)
-elif _str_res.get("status") == "NONE":
-    st.info(_str_res.get("message", "لا توجد فرص مطابقة حالياً."))
-else:
-    st.caption("اضغط «أعثر على 4 صفقات قوية» أو «تحديث» لبدء مسح جميع الأزواج وعرض أفضل أربع فرص.")
 
-_all_pairs = list(PAIRS.keys())
-if st.session_state.get("selected_pair") not in PAIRS:
-    st.session_state.selected_pair = _all_pairs[0]
 
-st.markdown('<div class="section-title">📊 شاشة الزوج المختار <span>SELECTED MARKET · LIVE SCENARIO</span></div>',
-            unsafe_allow_html=True)
-st.caption("اختر زوجًا من الشريط؛ ستتغير تفاصيل الصفقة ومؤشرات القوة والإحصائيات لتخص هذا الزوج فقط.")
 
-# Horizontal, scroll-friendly instrument selector
-st.markdown("""<style>
-div[data-testid="stRadio"] > div[role="radiogroup"]{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:7px;padding:8px 2px 13px;scrollbar-width:thin}
-div[data-testid="stRadio"] label{white-space:nowrap;min-width:max-content;background:rgba(230,200,124,.07);border:1px solid rgba(230,200,124,.22);border-radius:10px;padding:7px 12px;margin:0}
-div[data-testid="stRadio"] label:has(input:checked){background:rgba(230,200,124,.18);border-color:#e6c87c}
-.bp-panel{background:linear-gradient(145deg,#0b1420,#111d2b);border:1px solid rgba(230,200,124,.28);border-radius:18px;padding:18px;margin:12px 0}
-.bp-level{background:#101c29;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:12px;text-align:center}
-.bp-k{color:#9aa9bb;font-size:.78rem}.bp-v{color:#f2f5fa;font-size:1.05rem;font-weight:800;margin-top:5px}
-</style>""", unsafe_allow_html=True)
-_selected_pair = st.radio("الأزواج والأسواق", options=_all_pairs,
-    index=_all_pairs.index(st.session_state.selected_pair), horizontal=True,
-    key="bp_pair_selector", label_visibility="collapsed")
-st.session_state.selected_pair = _selected_pair
+if _str_res:
+    if _str_res.get("status") == "NONE":
+        st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
+                    unsafe_allow_html=True)
+        _msg = _str_res.get("message", "لا توجد إشارات صالحة الآن.")
+        st.warning(f"⏸️ **{_msg}**")
+        st.caption(f"البوابة تتطلب: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% **و** "
+                   f"تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100")
 
-if st.button("🔎 تحليل الزوج المحدد", key="bp_analyze_selected", type="primary", width="stretch"):
-    with st.spinner(f"جاري تحليل {_selected_pair} وجلب أحدث البيانات..."):
-        DATA_SOURCES_USED.clear()
-        _detail, _detail_error = analyze_selected_pair_detail(_selected_pair)
-        st.session_state.bp_selected_detail = _detail
-        st.session_state.bp_selected_detail_pair = _selected_pair
-        st.session_state.bp_selected_detail_error = _detail_error
-        _used_sources = sorted(DATA_SOURCES_USED)
-        st.session_state.analysis_sources = " + ".join(_used_sources) if _used_sources else "لم تُجلب بيانات سعرية من أي مصدر"
-        st.session_state.analysis_time = datetime.now(timezone.utc)
 
-# Reuse the already-computed top-scan result when it belongs to this pair.
-_detail = None
-if st.session_state.get("bp_selected_detail_pair") == _selected_pair:
-    _detail = st.session_state.get("bp_selected_detail")
-if _detail is None and _str_res.get("status") == "FOUND":
-    for _candidate in _str_res.get("trades", []):
-        if _candidate.get("pair") == _selected_pair:
-            _detail = _candidate
-            break
 
-if _detail:
-    _r = _detail.get("result", {}) or {}
-    _lv = _r.get("levels") or {}
-    _sig = _r.get("signal", "WAIT")
-    _conf = float(_r.get("confidence", 0) or 0)
-    _ec_obj = _detail.get("ec") or {}
-    _confirm = float(_ec_obj.get("score", _r.get("confirmation_score", 0)) or 0)
-    _buy = float(_r.get("buy_score", 0) or 0)
-    _sell = float(_r.get("sell_score", 0) or 0)
-    _is_trade = _sig in ("BUY", "SELL") and bool(_lv)
-    _accent = "#7cd4a0" if _sig == "BUY" else ("#f57a7a" if _sig == "SELL" else "#e6c87c")
-    _gate_ok = bool(_detail.get("gate_ok", False))
-    _status = "✅ اجتازت بوابة التنفيذ" if _gate_ok else ("⚠️ مراقبة فقط — لا دخول" if _is_trade else "⏸️ انتظار — لا توجد صفقة مؤكدة")
-    st.markdown(f"""<div class="bp-panel" style="border-color:{_accent}88">
-      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
-       <div><div style="color:#aab7c8;font-size:.8rem">السوق المحدد</div><div style="font-size:1.45rem;font-weight:900;color:#f4f6fa">{_selected_pair}</div></div>
-       <div style="text-align:right"><div style="color:#aab7c8;font-size:.8rem">السيناريو الحالي</div><div style="font-size:2rem;font-weight:900;color:{_accent}">{_sig}</div></div>
-      </div><div style="margin-top:10px;color:{_accent};font-weight:800">{_status}</div>
-      <div style="color:#aab7c8;font-size:.82rem;margin-top:5px">{_detail.get('gate_msg','') if not _gate_ok else 'شروط الدخول اجتازت بوابة النظام'}</div>
-    </div>""", unsafe_allow_html=True)
 
-    if _is_trade:
-        _cols = st.columns(5)
-        _items = [("💵 السعر", fmt_price(_detail.get("price"), _selected_pair)),
-                  ("📍 الدخول", fmt_price(_lv.get("entry"), _selected_pair) if _lv.get("entry") is not None else fmt_price(_detail.get("price"), _selected_pair)),
-                  ("🛑 وقف الخسارة", fmt_price(_lv.get("stop_loss"), _selected_pair)),
-                  ("🎯 الهدف 1", fmt_price(_lv.get("target1"), _selected_pair)),
-                  ("🎯 الهدف 2", fmt_price(_lv.get("target2"), _selected_pair))]
-        for _c, (_label, _value) in zip(_cols, _items):
-            with _c: st.metric(_label, _value)
-        _cols2 = st.columns(3)
-        for _c, (_label, _key) in zip(_cols2, [("🎯 الهدف 3","target3"),("⚖️ العائد/المخاطرة 1","risk_reward_1"),("⚖️ العائد/المخاطرة 2","risk_reward_2")]):
-            with _c:
-                _v = _lv.get(_key)
-                st.metric(_label, fmt_price(_v, _selected_pair) if _key == "target3" else (f"1:{float(_v):.2f}" if _v is not None else "—"))
-    else:
-        st.info("محرك التحليل لا يرى حالياً فرصة BUY أو SELL مستوفية لشروط تكوين مستويات الصفقة. لا يتم اختراع دخول أو أهداف في حالة الانتظار.")
+    elif _str_res.get("status") == "FOUND":
+        _trades = _str_res.get("trades", [])
+        _n = len(_trades)
+        _n_pass = _str_res.get("n_pass", 0)
+        _n_watch = _n - _n_pass
 
-    st.markdown("#### إحصائيات ومؤشرات الزوج المحدد فقط")
-    _m = st.columns(6)
-    _metrics = [("الثقة", f"{_conf:.1f}%"),("تأكيد الدخول", f"{_confirm:.1f}/100"),
-                ("قوة الشراء", f"{_buy:.1f}"),("قوة البيع", f"{_sell:.1f}"),
-                ("التقييم", str(_r.get("trade_grade", "—"))),
-                ("تغير آخر شمعة", f"{float(_detail.get('price_change') or 0):+.2f}%")]
-    for _c, (_label,_value) in zip(_m,_metrics):
-        with _c: st.metric(_label,_value)
-    _m2 = st.columns(4)
-    _extra = [("الاتجاه متعدد الأطر", str(_r.get("mtf_bias","—"))),
-              ("الاتجاه الأسبوعي", str(_r.get("weekly_bias","—"))),
-              ("حالة السوق", str(_r.get("regime","—"))),
-              ("التنفيذ", str(_r.get("execution_status","—")))]
-    for _c,(_label,_value) in zip(_m2,_extra):
-        with _c: st.metric(_label,_value)
-    st.markdown("#### محركات الذكاء المتقدمة")
-    _adv = st.columns(5)
-    _adv_metrics = [("ADX", f"{float(_r.get('adx',0) or 0):.1f}"),
-                    ("+DI / -DI", f"{float(_r.get('plus_di',0) or 0):.1f} / {float(_r.get('minus_di',0) or 0):.1f}"),
-                    ("Ichimoku", "صاعد" if float(_r.get('ichimoku_tenkan',0) or 0)>float(_r.get('ichimoku_kijun',0) or 0) else "هابط/محايد"),
-                    ("Volume POC", fmt_price(_r.get("volume_profile_poc"), _selected_pair) if np.isfinite(safe_float(_r.get("volume_profile_poc"),np.nan)) else "—"),
-                    ("جودة الصفقة", f"{float(_r.get('trade_quality_score',0) or 0):.1f}/100")]
-    for _c,(_label,_value) in zip(_adv,_adv_metrics):
-        with _c: st.metric(_label,_value)
-    _rev = _r.get("reversal_state", "NEUTRAL")
-    st.caption(f"اكتشاف الانعكاس: {_rev} · قوة الإشارة: {float(_r.get('reversal_score',50) or 50):.0f}/100 · Volume Profile هو تقدير موزع على نطاق الأسعار من بيانات OHLCV، وليس دفتر أوامر مركزيًا.")
-    with st.expander("تفاصيل التحليل وأسباب الإشارة", expanded=False):
-        _reasons = _r.get("reasons", []) or []
-        if _reasons:
-            for _reason in _reasons: st.write(f"• {_reason}")
-        else: st.write("لا توجد أسباب تفصيلية متاحة لهذه النتيجة.")
-        st.caption(f"مصدر السعر: {_detail.get('price_source','حسب مزود البيانات')} · الفريم المستخدم في محرك التحليل: H4")
-elif st.session_state.get("bp_selected_detail_error") and st.session_state.get("bp_selected_detail_pair") == _selected_pair:
-    st.warning(st.session_state.bp_selected_detail_error)
-else:
-    st.info(f"اخترت {_selected_pair}. اضغط «تحليل الزوج المحدد» لعرض سيناريوهاته وإحصائياته فقط. لن تظهر بيانات أزواج أخرى في هذه الشاشة.")
 
-# SELECTED PAIR PERFORMANCE — isolated per instrument
-if _detail:
-    st.markdown("#### الأداء التاريخي للزوج المختار فقط")
-    if st.button("🧪 تشغيل الاختبار التاريخي للزوج المحدد", key="bp_selected_backtest"):
-        with st.spinner("جاري اختبار الاستراتيجية على البيانات التاريخية..."):
-            _bt = quick_backtest(PAIRS[_selected_pair], _selected_pair, lookback=200, run_mc=True)
-            st.session_state.bp_selected_backtest = _bt
-            st.session_state.bp_selected_backtest_pair = _selected_pair
-    _bt = st.session_state.get("bp_selected_backtest") if st.session_state.get("bp_selected_backtest_pair")==_selected_pair else None
-    if _bt:
-        if _bt.get("error"): st.warning(f"تعذر الاختبار: {_bt['error']}")
+
+
+        if _n_pass > 0 and _n_watch > 0:
+            _summ_color = "#7cd4a0"
+            _summ_icon = "🎯"
+            _summ_text = (f"**{_n_pass}** عابرة البوابة ✅ · "
+                          f"**{_n_watch}** قوية لكن تحت البوابة ⚠️")
+        elif _n_pass > 0:
+            _summ_color = "#7cd4a0"
+            _summ_icon = "🎯"
+            _summ_text = f"كل الصفقات ({_n_pass}) عابرة البوابة ✅"
         else:
-            _bc=st.columns(5)
-            _bmetrics=[("الصفقات",str(_bt.get("trades",0))),("Win Rate",f"{_bt.get('win_rate',0):.1f}%"),("Profit Factor",f"{_bt.get('profit_factor',0):.2f}"),("Expectancy",f"{_bt.get('expectancy',0):.2f} R"),("Max Drawdown",f"{_bt.get('max_drawdown',0):.2f} R")]
-            for _c,(_label,_value) in zip(_bc,_bmetrics):
-                with _c: st.metric(_label,_value)
-            st.caption(f"إجمالي العائد: {_bt.get('total_R',0):.2f}R · الاختبار التاريخي ليس ضمانًا للأداء المستقبلي، والنتائج تتأثر بجودة وتغطية بيانات المصدر.")
+            _summ_color = "#f5c87a"
+            _summ_icon = "⚠️"
+            _summ_text = (f"لا صفقات عابرة البوابة الآن — "
+                          f"أقوى {_n} إشارات للمراقبة فقط ⚠️")
+
+
+
+
+        st.markdown(f"""
+        <div style="background:{_summ_color}22; padding:14px 20px;
+                    border-radius:12px; margin:20px 0;
+                    border:2px solid {_summ_color}66;">
+            <span style="color:{_summ_color}; font-weight:800; font-size:1.05rem;">
+                {_summ_icon} {_summ_text}
+            </span>
+            <div style="color:#8b95a8; font-size:0.82rem; margin-top:6px;">
+                بوابة الجودة: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% و تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+
+
+        for idx, t in enumerate(_trades, 1):
+            _bp = t["pair"]; _br = t["result"]; _blv = _br["levels"]
+            _bsig = _br["signal"]; _bc = _br["confidence"]
+            _bprice = t["price"]; _ec = t.get("ec")
+            _gate_ok = t.get("gate_ok", False)
+            _gate_msg = t.get("gate_msg", "")
+            _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
+            _rank_icon = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"#{idx}")
+
+
+
+
+            if _gate_ok:
+                _badge = (
+                    f'<span style="background:#7cd4a022; color:#7cd4a0; '
+                    f'padding:4px 12px; border-radius:16px; font-size:0.8rem; '
+                    f'font-weight:800; border:1px solid #7cd4a066; margin-left:8px;">'
+                    f'✅ عابرة البوابة</span>')
+                _border = "#7cd4a0"
+                _opacity = "1.0"
+            else:
+                _badge = (
+                    f'<span style="background:#f5c87a22; color:#f5c87a; '
+                    f'padding:4px 12px; border-radius:16px; font-size:0.8rem; '
+                    f'font-weight:800; border:1px solid #f5c87a66; margin-left:8px;">'
+                    f'⚠️ تحت البوابة — مراقبة فقط</span>')
+                _border = "#f5c87a"
+                _opacity = "0.92"
+
+
+
+
+            st.markdown(
+                f'<div style="margin:24px 0 14px 0; padding:12px 18px; '
+                f'background:linear-gradient(90deg, {_bacc}22, transparent); '
+                f'border-left:4px solid {_bacc}; border-radius:10px; opacity:{_opacity};">'
+                f'<span style="color:{_bacc}; font-size:1.15rem; font-weight:800;">'
+                f'{_rank_icon} صفقة #{idx}</span>'
+                f'<span style="color:#e8edf5; font-size:1.15rem; font-weight:700; '
+                f'margin:0 10px;">— {_bp}</span>'
+                f'<span style="color:{_bacc}; font-size:1.1rem; font-weight:800;">'
+                f'· {_bsig} · {_bc:.1f}% · {_br["trade_grade"]}</span>'
+                f'{_badge}'
+                f'</div>',
+                unsafe_allow_html=True)
+
+
+
+
+            _bs1, _bs2 = st.columns([1.4, 1.2])
+            with _bs1:
+                st.markdown(f"""
+                <div style="background:linear-gradient(145deg, #0a1a12, #0d1710);
+                            padding:22px 18px; border-radius:20px; text-align:center;
+                            border:2px solid {_border};
+                            box-shadow:0 0 25px {_border}44, 0 12px 30px rgba(0,0,0,0.6);">
+                    <div style="color:#7cd4a0; font-size:0.75rem; font-weight:800;
+                                letter-spacing:2px;">{_rank_icon} RANK #{idx}</div>
+                    <div style="color:#e8edf5; font-size:1.15rem; font-weight:800;
+                                margin-top:6px;">{_bp}</div>
+                    <div style="font-size:2.8rem; font-weight:900; color:{_bacc};
+                                letter-spacing:3px; margin:8px 0; line-height:1;">
+                        {_bsig}</div>
+                    <div style="color:#c8d2e2; font-size:1rem;">
+                        Confidence: <b>{_bc:.1f}%</b></div>
+                    <div style="color:{_bacc}; font-size:1rem; font-weight:800;
+                                margin-top:6px; letter-spacing:1.5px;">
+                        Grade: {_br['trade_grade']}</div>
+                </div>""", unsafe_allow_html=True)
+
+
+
+
+            with _bs2:
+                st.metric("💵 السعر", fmt_price(_bprice, _bp))
+                if _blv:
+                    st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
+                              help=_blv.get("sources", {}).get("sl", ""))
+                    st.metric("🎯 TP1", fmt_price(_blv["target1"], _bp),
+                              help=_blv.get("sources", {}).get("tp1", ""))
+                    st.metric("🎯 TP2", fmt_price(_blv["target2"], _bp),
+                              help=_blv.get("sources", {}).get("tp2", ""))
+                    st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp),
+                              help=_blv.get("sources", {}).get("tp3", ""))
+
+
+
+
+            if _blv:
+                _rr1 = _blv["risk_reward_1"]; _rr2 = _blv["risk_reward_2"]
+                _rr3 = _blv["risk_reward_3"]
+                _src = _blv.get("sources", {})
+                st.markdown(
+                    f'<div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">'
+                    f'<span style="background:rgba(245,122,122,0.15); padding:5px 12px; '
+                    f'border-radius:16px; color:#f57a7a; font-size:0.78rem; '
+                    f'border:1px solid rgba(245,122,122,0.35); font-weight:600;">'
+                    f'🛑 SL: {_src.get("sl","—")}</span>'
+                    f'<span style="background:rgba(230,200,124,0.15); padding:5px 12px; '
+                    f'border-radius:16px; color:#e6c87c; font-size:0.78rem; '
+                    f'border:1px solid rgba(230,200,124,0.35);">'
+                    f'RR1 1:{_rr1:.2f}</span>'
+                    f'<span style="background:rgba(124,212,160,0.12); padding:5px 12px; '
+                    f'border-radius:16px; color:#7cd4a0; font-size:0.78rem; '
+                    f'border:1px solid rgba(124,212,160,0.35);">'
+                    f'RR2 1:{_rr2:.2f}</span>'
+                    f'<span style="background:rgba(124,212,160,0.12); padding:5px 12px; '
+                    f'border-radius:16px; color:#7cd4a0; font-size:0.78rem; '
+                    f'border:1px solid rgba(124,212,160,0.35);">'
+                    f'RR3 1:{_rr3:.2f}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+
+
+
+
+                if not _gate_ok and _gate_msg:
+                    st.markdown(
+                        f'<div style="margin-top:10px; padding:8px 14px; '
+                        f'background:#f5c87a18; border-left:3px solid #f5c87a; '
+                        f'border-radius:8px; color:#f5c87a; font-size:0.82rem;">'
+                        f'🔒 <b>سبب عدم الاجتياز:</b> {_gate_msg} — '
+                        f'انتظر تحسّن الشروط قبل الدخول</div>',
+                        unsafe_allow_html=True)
+
+
+
+
+            st.markdown("---")
+
+
+
+
+else:
+    st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
+                unsafe_allow_html=True)
+    st.info(f"🎯 اضغط **'أعثر على {MAX_STRONG_TRADES} صفقات قوية'** أعلاه لبدء البحث "
+            f"في جميع الأزواج ({len(PAIRS)} زوج). سيتم عرض أفضل {MAX_STRONG_TRADES} "
+            f"إشارات (العابرة للبوابة أولاً ثم الأقوى).")
+
+
+
+
+
+
+
 
 # ═══════════════════════════════════════════════
 # FOOTER + STOP
@@ -4617,4 +4193,3 @@ st.markdown(f"""
 
 
 st.stop()
-
