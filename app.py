@@ -1,5 +1,5 @@
 # ============================================================
-# BLACK PYRAMID v2010.5 — SMC SEQUENCE BACKTEST
+# BLACK PYRAMID v2010.6 — FULL ANALYSIS + SMC SEQUENCE BACKTEST
 # Institutional Analysis Terminal
 # ============================================================
 
@@ -76,13 +76,13 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2010.4+PAIR-DATA-UI"
+APP_VERSION = "v2010.6+FULL-ANALYSIS"
 
 
 
 
 MODE = "balanced"
-MAX_STRONG_TRADES = 4
+MAX_STRONG_TRADES = 3
 
 
 
@@ -109,6 +109,7 @@ B_MIN               = _p["b"]
 C_MIN               = _p["c"]
 MIN_SIGNAL_GAP      = _p["gap"]
 MIN_EMIT_CONFIDENCE = _p["gate"]
+MIN_ANALYSIS_COMPLETENESS = 65.0
 
 
 
@@ -3036,6 +3037,163 @@ def passes_confidence_gate(signal_conf, entry_score=None):
 
 
 
+
+def build_full_analysis_audit(df, signal_result, mtf_details=None, filters=None,
+                             smc_setup=None, levels=None, pair_name=""):
+    """Transparent audit of which analysis families produced usable data."""
+    mtf_details = mtf_details or {}
+    filters = filters or {}
+    smc_setup = smc_setup or {}
+    levels = levels or {}
+
+    def present_columns(cols):
+        if df is None or not all(c in df.columns for c in cols):
+            return False
+        try:
+            return all(pd.notna(df.iloc[-1][c]) for c in cols)
+        except Exception:
+            return False
+
+    technical_groups = {
+        "Trend / EMA": {"columns": ["ema20", "ema50", "ema200"]},
+        "Momentum (RSI/MACD)": {"columns": ["rsi", "macd", "macd_signal", "macd_histogram"]},
+        "Volatility (ATR/BB)": {"columns": ["atr", "bb_upper", "bb_lower"]},
+        "Volume / VWAP / CMF": {"columns": ["vwap", "chaikin_mf", "volume"]},
+        "Market structure": {"columns": ["swing_high", "swing_low", "bos_bullish", "bos_bearish",
+                                          "mss_bullish", "mss_bearish"]},
+        "SMC liquidity / zones": {"columns": ["liquidity_sweep_bullish", "liquidity_sweep_bearish",
+                                               "fvg_bullish", "fvg_bearish",
+                                               "order_block_bullish", "order_block_bearish"]},
+        "Premium / Discount": {"columns": ["in_premium", "in_discount"]},
+        "Divergence": {"available": df is not None and len(df) >= 30},
+        "Candle confirmation": {"available": signal_result.get("confirmation_score") is not None},
+        "Technical Levels (Pivot/Fib/SR)": {"available": bool(levels and levels.get("sources"))},
+    }
+    technical = {}
+    for name, spec in technical_groups.items():
+        ok = spec.get("available", present_columns(spec.get("columns", [])))
+        _detail = ("تم فحصها؛ لا توجد إشارة Divergence" if name == "Divergence" and
+                   signal_result.get("divergence") is None else
+                   "المكونات الحسابية متاحة" if ok else "أعمدة/بيانات غير مكتملة")
+        technical[name] = {"status": "AVAILABLE" if ok else "MISSING_DATA",
+                           "detail": _detail}
+
+    mtf_items = {}
+    for tf, info in mtf_details.items():
+        if tf == "consensus":
+            continue
+        info = info or {}
+        mtf_items[tf] = {
+            "status": "AVAILABLE" if info.get("available") else "MISSING_DATA",
+            "bias": info.get("bias", "UNKNOWN"),
+            "source": info.get("source", "—"),
+            "data_time": info.get("data_time", "—"),
+            "strength": info.get("strength", 0),
+        }
+    mtf_available = sum(v["status"] == "AVAILABLE" for v in mtf_items.values())
+    mtf_total = len(mtf_items)
+
+    base_ccy, quote_ccy = parse_pair_currencies(pair_name)
+    _ccy_data = signal_result.get("currency_strength_data") or {}
+    _rates_applicable = base_ccy in CENTRAL_BANK_RATES and quote_ccy in CENTRAL_BANK_RATES
+    _strength_applicable = base_ccy in _ccy_data and quote_ccy in _ccy_data
+    _is_gold = "GOLD" in str(pair_name).upper() or "XAU" in str(pair_name).upper()
+    _ml_status = signal_result.get("ml_status", "no_model")
+    context_states = {
+        "DXY Context": ("AVAILABLE" if signal_result.get("dxy_bias") not in (None, "UNKNOWN") else "UNAVAILABLE",
+                        str(signal_result.get("dxy_bias", "—"))),
+        "Currency Strength": ("AVAILABLE" if _strength_applicable and
+                             any(np.isfinite(safe_float(v, np.nan)) for v in
+                                 [_ccy_data.get(base_ccy), _ccy_data.get(quote_ccy)])
+                             else "UNAVAILABLE_OR_NOT_APPLICABLE",
+                            f"{base_ccy}/{quote_ccy}"),
+        "Interest Rate Differential": ("AVAILABLE" if _rates_applicable else "NOT_APPLICABLE",
+                                      f"فرق المعدلات: {signal_result.get('rate_diff', '—')}"),
+        "Risk Sentiment": ("AVAILABLE" if signal_result.get("risk_data") and
+                           signal_result["risk_data"].get("vix") is not None else "UNAVAILABLE",
+                           str((signal_result.get("risk_data") or {}).get("msg", "VIX غير متاح"))),
+        "Bond Yields": ("AVAILABLE" if signal_result.get("bond_data") and
+                        signal_result["bond_data"].get("us10y") is not None else "UNAVAILABLE",
+                        str((signal_result.get("bond_data") or {}).get("us10y_trend", "غير متاح"))),
+        "Retail Sentiment": ("AVAILABLE" if signal_result.get("sentiment_data") and
+                             "غير كافية" not in str(signal_result["sentiment_data"].get("msg",""))
+                             else "UNAVAILABLE",
+                            str((signal_result.get("sentiment_data") or {}).get("msg", "—"))),
+        "Gold/DXY Correlation": ("AVAILABLE" if signal_result.get("gold_corr") is not None else
+                                 "UNAVAILABLE" if _is_gold else "NOT_APPLICABLE",
+                                str(signal_result.get("gold_corr", "لا ينطبق"))),
+        "Divergence": ("AVAILABLE" if signal_result.get("divergence") is not None else "NO_SIGNAL",
+                      str(signal_result.get("divergence", "لم يظهر تضارب"))),
+        "Fundamental Score": ("AVAILABLE" if signal_result.get("fund_buy") is not None and
+                              signal_result.get("fund_sell") is not None else "UNAVAILABLE",
+                             f"BUY {signal_result.get('fund_buy', '—')} / SELL {signal_result.get('fund_sell', '—')}"),
+        "Machine Learning": ("AVAILABLE" if _ml_status == "applied" else "OPTIONAL_NOT_ACTIVE",
+                            str(_ml_status)),
+    }
+    context = {k: {"status": status, "detail": detail}
+               for k, (status, detail) in context_states.items()}
+
+    timing = {}
+    for name, info in filters.items():
+        timing[name] = {"status": "PASS" if info.get("pass") else "BLOCK/CAUTION",
+                        "detail": info.get("msg", "—")}
+    time_filter_names = {"Session", "Kill Zone", "News Window", "Market Open"}
+    time_items = {k:v for k,v in timing.items() if k in time_filter_names}
+    timing_count = sum(1 for v in time_items.values() if v["status"] == "PASS")
+    timing_total = len(time_items)
+    timing_score = round(100 * timing_count / timing_total, 1) if timing_total else None
+
+    smc_tools = {
+        "Sequential Setup Engine": {"status": smc_setup.get("state", "UNKNOWN"),
+                                    "detail": smc_setup.get("label", "—")},
+        "SMC Quality": {"status": "AVAILABLE", "detail": "تقييم العناصر البنيوية"},
+    }
+    smc_score, smc_reasons = smc_quality(df) if df is not None else (0.0, [])
+    risk = {
+        "SL/TP Levels": {"status": "VALID" if levels else "UNAVAILABLE",
+                         "detail": "مستويات صالحة" if levels else "لم يتم إنشاء مستويات"},
+        "Entry Confirmation": {"status": "AVAILABLE",
+                                "detail": f"{signal_result.get('confirmation_score', 0):.1f}/100"},
+        "Execution Gate": {"status": signal_result.get("execution_status", "UNKNOWN"),
+                           "detail": signal_result.get("execution_reason", "—")},
+    }
+
+    # Coverage reports availability, not bullish/bearish agreement. Missing/not-applicable
+    # tools are explicitly disclosed instead of being treated as positive evidence.
+    sections = {
+        "technical": technical,
+        "mtf": mtf_items,
+        "context": context,
+        "timing": timing,
+        "smc": smc_tools,
+        "risk_execution": risk,
+    }
+    counts = {}
+    for section, items in sections.items():
+        if section == "mtf":
+            counts[section] = {"available": mtf_available, "total": mtf_total}
+        elif section == "timing":
+            counts[section] = {"available": len(items), "total": len(items)}
+        else:
+            vals = list(items.values())
+            unavailable_states = {"MISSING_DATA", "UNAVAILABLE", "UNAVAILABLE_OR_NOT_APPLICABLE",
+                                  "UNKNOWN", "INSUFFICIENT_DATA", "—"}
+            excluded_states = {"NOT_APPLICABLE", "OPTIONAL_NOT_ACTIVE"}
+            counts[section] = {
+                "available": sum(v.get("status") not in unavailable_states | excluded_states
+                                for v in vals),
+                "total": sum(v.get("status") not in excluded_states for v in vals)}
+    total_avail = sum(v["available"] for v in counts.values())
+    total_items = sum(v["total"] for v in counts.values())
+    completeness = round(100 * total_avail / total_items, 1) if total_items else 0.0
+    return {
+        "sections": sections, "counts": counts, "completeness": completeness,
+        "smc_quality": smc_score, "smc_quality_reasons": smc_reasons,
+        "mtf_available": mtf_available, "mtf_total": mtf_total,
+        "temporal_score": timing_score,
+    }
+
+
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
@@ -3239,7 +3397,23 @@ def generate_signal(df, current_price, pair_name, symbol,
     conf = ec
     adv = ", ".join(f"{n}({p})" for n,p in sp) or "None"
     smc_setup = smc_setup_engine(df, lookback=40)
+    analysis_audit = build_full_analysis_audit(
+        df, {"divergence": sc.get("divergence"), "confirmation_score": cs,
+             "dxy_bias": sc.get("dxy_bias"), "rate_diff": rd,
+             "sentiment_data": sent, "risk_data": rk, "bond_data": bd,
+             "fund_buy": sc.get("fund_buy"), "fund_sell": sc.get("fund_sell"),
+             "currency_strength_data": ccs, "gold_corr": gc, "ml_status": mlstat,
+             "execution_status": es, "execution_reason": er},
+        mtf_details=mtfd, filters=flt, smc_setup=smc_setup, levels=lv if rok else None,
+        pair_name=pair_name)
     return {"signal": signal, "confidence": conf, "raw_confidence": rc, "smc_setup": smc_setup,
+            "analysis_audit": analysis_audit,
+            "analysis_completeness": analysis_audit["completeness"],
+            "smc_quality_score": analysis_audit["smc_quality"],
+            "smc_quality_reasons": analysis_audit["smc_quality_reasons"],
+            "mtf_available_count": analysis_audit["mtf_available"],
+            "mtf_total_count": analysis_audit["mtf_total"],
+            "temporal_score": analysis_audit["temporal_score"],
             "buy_score": buy, "sell_score": sell, "weighted_confluence": wc,
             "pillars": pil, "mtf_bias": mtf, "mtf_conf": mtfc, "mtf_details": mtfd,
             "weekly_bias": wk, "levels": lv if rok else None, "df": df,
@@ -3253,7 +3427,8 @@ def generate_signal(df, current_price, pair_name, symbol,
             "divergence": sc["divergence"], "reasons": sc["reasons"] + cr,
             "fund_details": sc.get("fund_details", []),
             "fund_buy": sc.get("fund_buy", 0), "fund_sell": sc.get("fund_sell", 0),
-            "bond_data": bd, "sentiment_data": sent, "sentiment_msg": smsg,
+            "bond_data": bd, "risk_data": rk, "gold_corr": gc,
+            "sentiment_data": sent, "sentiment_msg": smsg,
             "ml_probability": mlprob, "ml_status": mlstat,
             "rate_diff": rd, "pair_name": pair_name}
 
@@ -3549,9 +3724,15 @@ def get_all_signals_parallel():
 
 
 
-            orig_gate_ok = False; orig_gate = "—"
+            orig_gate_ok = False; orig_gate = "—"; orig_gate_msg = "—"
             if sig_ in ("BUY","SELL"):
-                orig_gate_ok, _ = passes_confidence_gate(r["confidence"], ec_score)
+                orig_gate_ok, orig_gate_msg = passes_confidence_gate(r["confidence"], ec_score)
+                if r.get("execution_status") != "EXECUTE":
+                    orig_gate_ok = False
+                    orig_gate_msg = r.get("execution_reason", "Execution filters did not pass")
+                if safe_float(r.get("analysis_completeness"), 0) < MIN_ANALYSIS_COMPLETENESS:
+                    orig_gate_ok = False
+                    orig_gate_msg = f"Analysis coverage below {MIN_ANALYSIS_COMPLETENESS:.0f}%"
                 orig_gate = "✅" if orig_gate_ok else "❌"
 
 
@@ -3595,6 +3776,8 @@ def get_all_signals_parallel():
                                     flip_confidence_pct, fc["score"])
                         flip_gate_ok, _ = passes_confidence_gate(
                             flip_confidence_pct, flip_ec_score)
+                        if r.get("execution_status") != "EXECUTE" or safe_float(r.get("analysis_completeness"),0) < MIN_ANALYSIS_COMPLETENESS:
+                            flip_gate_ok = False
                         flip_gate = "✅" if flip_gate_ok else "❌"
                 except Exception: pass
 
@@ -3605,7 +3788,7 @@ def get_all_signals_parallel():
                 "الزوج": pn, "الإشارة": sig_,
                 "الثقة": round(r["confidence"], 1),
                 "🎯 تأكيد": f"{ec_verdict} ({ec_score})" if ec_verdict != "—" else "—",
-                "🚦 أصلي": orig_gate,
+                "🚦 أصلي": orig_gate, "Gate Reason": orig_gate_msg,
                 "Grade": r.get("trade_grade", "WAIT"),
                 "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
                 "Flip Raw": flip_conf_raw if flip_conf_raw > 0 else "—",
@@ -3618,10 +3801,15 @@ def get_all_signals_parallel():
                 "🎯 F-TP1": flip_tp1, "🎯 F-TP2": flip_tp2, "🎯 F-TP3": flip_tp3,
                 "F-RR1": flip_rr1, "F-SL Src": flip_sl_src,
                 "BUY": round(r["buy_score"], 1), "SELL": round(r["sell_score"], 1),
-                "MTF": r["mtf_bias"], "Weekly": r["weekly_bias"],
+                "MTF": r["mtf_bias"], "MTF Confidence": round(r.get("mtf_conf",0),1),
+                "Weekly": r["weekly_bias"],
                 "Regime": r["regime"],
                 "Conf": round(r["weighted_confluence"], 0),
                 "Confirm": round(r["confirmation_score"], 1),
+                "Analysis Coverage": r.get("analysis_completeness", 0),
+                "SMC Quality": r.get("smc_quality_score", 0),
+                "Temporal": r.get("temporal_score", 0),
+                "MTF Available": f"{r.get('mtf_available_count',0)}/{r.get('mtf_total_count',0)}",
                 "Execution": r["execution_status"],
                 "السعر": fmt_price(p, pn),
                 "SL": fmt_price(lv.get("stop_loss"), pn),
@@ -3644,9 +3832,17 @@ def get_all_signals_parallel():
         if row.get("🚦 أصلي") == "✅": gate_score += 100
         if row.get("🚦 Flip") == "✅": gate_score += 100
         max_score = max(row.get("_ec_score", 0), row.get("_flip_ec_score", 0))
+        coverage = safe_float(row.get("Analysis Coverage"), 0)
+        smc = safe_float(row.get("SMC Quality"), 0)
+        temporal = safe_float(row.get("Temporal"), 0)
+        confluence = safe_float(row.get("Conf"), 0)
+        mtf_available = str(row.get("MTF Available", "0/0")).split("/")
+        mtf_ratio = (safe_float(mtf_available[0], 0) / max(safe_float(mtf_available[-1], 0), 1))
+        composite = 0.35*max_score + 0.20*safe_float(row.get("الثقة"),0) + \
+                    0.15*confluence + 0.10*smc + 0.10*temporal + 0.10*coverage
         sig = row["الإشارة"]
         sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
-        return (-gate_score, -max_score, sp_)
+        return (-gate_score, -coverage, -composite, -mtf_ratio, sp_)
     out["_sort"] = out.apply(sort_key, axis=1)
     out = out.sort_values("_sort").drop(columns=["_sort"])
     return out
@@ -3681,17 +3877,21 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
 
 
     def calc_score(row):
-        ec_o = row.get("_ec_score", 0) or 0
-        conf_o = row.get("الثقة", 0) or 0
-        s_o = ec_o * 0.6 + conf_o * 0.4
-
-
-
-
-        fc = row.get("Flip Conf%", 0)
-        fc = fc if isinstance(fc, (int, float)) else 0
-        ec_f = row.get("_flip_ec_score", 0) or 0
-        s_f = ec_f * 0.6 + fc * 0.4
+        ec_o = safe_float(row.get("_ec_score"), 0)
+        conf_o = safe_float(row.get("الثقة"), 0)
+        confluence = safe_float(row.get("Conf"), 0)
+        smc = safe_float(row.get("SMC Quality"), 0)
+        temporal = safe_float(row.get("Temporal"), 0)
+        coverage = safe_float(row.get("Analysis Coverage"), 0)
+        mtf_available = str(row.get("MTF Available", "0/0")).split("/")
+        mtf_ratio = safe_float(mtf_available[0], 0) / max(safe_float(mtf_available[-1], 0), 1)
+        mtf_conf = safe_float(row.get("MTF Confidence"), 50) * mtf_ratio
+        s_o = (0.20*ec_o + 0.20*conf_o + 0.15*confluence + 0.15*mtf_conf +
+               0.10*smc + 0.10*temporal + 0.10*coverage)
+        fc = safe_float(row.get("Flip Conf%"), 0)
+        ec_f = safe_float(row.get("_flip_ec_score"), 0)
+        s_f = (0.20*ec_f + 0.20*fc + 0.15*confluence + 0.15*mtf_conf +
+               0.10*smc + 0.10*temporal + 0.10*coverage)
         return max(s_o, s_f)
 
 
@@ -3704,19 +3904,22 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
 
     def sort_priority(row):
         passing = (row.get("🚦 أصلي") == "✅") or (row.get("🚦 Flip") == "✅")
-        return (1000.0 if passing else 0.0) + float(row.get("_final_score", 0))
+        coverage = safe_float(row.get("Analysis Coverage"), 0)
+        return (1000.0 if passing else 0.0) + coverage*0.5 + float(row.get("_final_score", 0))
 
 
 
 
     valid["_sort"] = valid.apply(sort_priority, axis=1)
-    valid = valid.sort_values("_sort", ascending=False).head(max_trades)
+    valid = valid.sort_values("_sort", ascending=False)
 
 
 
 
     trades = []
     for _, best in valid.iterrows():
+        if len(trades) >= max_trades:
+            break
         pair = best["الزوج"]
         sym = PAIRS.get(pair)
         if not sym:
@@ -3749,8 +3952,22 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
         ec_s = ec["score"] if ec else 0
         gate_ok, gate_msg = passes_confidence_gate(
             result["confidence"], ec_s)
-
-
+        if result.get("execution_status") != "EXECUTE":
+            gate_ok = False
+            gate_msg = result.get("execution_reason", "Execution filters did not pass")
+        if safe_float(result.get("analysis_completeness"),0) < MIN_ANALYSIS_COMPLETENESS:
+            gate_ok = False
+            gate_msg = f"اكتمال التحليل أقل من {MIN_ANALYSIS_COMPLETENESS:.0f}%"
+        _fresh_mtf_ratio = (result.get("mtf_available_count",0) /
+                            max(result.get("mtf_total_count",0),1))
+        _fresh_score = (
+            0.20*safe_float(ec_s,0) +
+            0.20*safe_float(result.get("confidence"),0) +
+            0.15*safe_float(result.get("weighted_confluence"),0) +
+            0.15*safe_float(result.get("mtf_conf"),0)*_fresh_mtf_ratio +
+            0.10*safe_float(result.get("smc_quality_score"),0) +
+            0.10*safe_float(result.get("temporal_score"),0) +
+            0.10*safe_float(result.get("analysis_completeness"),0))
 
 
         trades.append({
@@ -3758,7 +3975,11 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
             "result": result, "row": best.to_dict(),
             "ec": ec,
             "gate_ok": gate_ok, "gate_msg": gate_msg,
-            "score": float(best.get("_final_score", 0))})
+            "analysis_completeness": result.get("analysis_completeness", 0),
+            "smc_quality": result.get("smc_quality_score", 0),
+            "temporal_score": result.get("temporal_score", 0),
+            "mtf_conf": result.get("mtf_conf", 0),
+            "score": float(_fresh_score)})
 
 
 
@@ -4329,6 +4550,22 @@ if _pair_analysis and _pair_analysis.get("pair") == _selected:
         _meta1.caption(f"🕒 وقت التحليل: {_pair_analysis['analysis_time']}")
         _meta2.caption(f"📡 المصدر: {_pair_analysis['source']}")
         _meta3.caption(f"🕯️ آخر شمعة: {_pair_analysis['data_time']}")
+        _audit = _ar.get("analysis_audit", {}) or {}
+        _ac1,_ac2,_ac3 = st.columns(3)
+        _ac1.metric("اكتمال التحليل", f"{_audit.get('completeness',0):.1f}%")
+        _ac2.metric("SMC Quality", f"{_audit.get('smc_quality',0):.1f}/100")
+        _ac3.metric("تقييم التوقيت", f"{_audit.get('temporal_score',0):.1f}/100" if _audit.get('temporal_score') is not None else "غير متاح")
+        with st.expander("🧾 تقرير تدقيق جميع أدوات التحليل — ما عمل وما لم يتوفر"):
+            _audit_rows=[]
+            for _section_name,_section in (_audit.get("sections",{}) or {}).items():
+                for _tool_name,_tool_info in (_section or {}).items():
+                    _audit_rows.append({"المجموعة":_section_name,"الأداة":_tool_name,
+                        "الحالة":_tool_info.get("status","—"),"التفاصيل":_tool_info.get("detail","—"),
+                        "الاتجاه":_tool_info.get("bias","—"),"المصدر":_tool_info.get("source","—"),
+                        "آخر بيانات":_tool_info.get("data_time","—")})
+            if _audit_rows:
+                st.dataframe(pd.DataFrame(_audit_rows),hide_index=True,use_container_width=True)
+            st.caption("درجة الاكتمال تقيس توافر البيانات والأدوات، ولا تعني نسبة نجاح الصفقة. العناصر غير المتاحة أو غير المنطبقة تظهر صراحة.")
         _setup = _ar.get("smc_setup", {}) or {}
         st.markdown("### 🧩 SMC Setup Engine — تسلسل النموذج")
         _setup_color = "#7cd4a0" if _setup.get("state") == "ENTRY_CONFIRMED" else "#f5c87a" if _setup.get("state","").startswith("WAITING") else "#aab2bd"
@@ -4428,8 +4665,8 @@ if _str_res:
                     unsafe_allow_html=True)
         _msg = _str_res.get("message", "لا توجد إشارات صالحة الآن.")
         st.warning(f"⏸️ **{_msg}**")
-        st.caption(f"البوابة تتطلب: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% **و** "
-                   f"تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100")
+        st.caption(f"البوابة تتطلب: ثقة وتأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}%، "
+                   f"Execution=EXECUTE، واكتمال تحليل ≥ {MIN_ANALYSIS_COMPLETENESS:.0f}%")
 
 
 
@@ -4469,7 +4706,7 @@ if _str_res:
                 {_summ_icon} {_summ_text}
             </span>
             <div style="color:#8b95a8; font-size:0.82rem; margin-top:6px;">
-                بوابة الجودة: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% و تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100
+                بوابة الجودة: ثقة وتأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Execution=EXECUTE · Analysis Coverage ≥ {MIN_ANALYSIS_COMPLETENESS:.0f}%
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -4552,6 +4789,10 @@ if _str_res:
 
             with _bs2:
                 st.metric("💵 السعر", fmt_price(_bprice, _bp))
+                _trm1,_trm2 = st.columns(2)
+                _trm1.metric("اكتمال التحليل", f"{t.get('analysis_completeness',0):.1f}%")
+                _trm2.metric("درجة SMC", f"{t.get('smc_quality',0):.1f}/100")
+                st.caption(f"MTF {t.get('mtf_conf',0):.1f} · توقيت {t.get('temporal_score',0):.1f} · Composite {t.get('score',0):.1f}")
                 if _blv:
                     st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
                               help=_blv.get("sources", {}).get("sl", ""))
