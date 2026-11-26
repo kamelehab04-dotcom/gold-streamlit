@@ -1,5 +1,5 @@
 # ============================================================
-# BLACK PYRAMID v2010.4 — MULTI-TIMEFRAME DASHBOARD
+# BLACK PYRAMID v2010.5 — SMC SEQUENCE BACKTEST
 # Institutional Analysis Terminal
 # ============================================================
 
@@ -3301,6 +3301,138 @@ def _weekly_bias_from_slice(df_s, pair_name):
 
 
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def backtest_smc_sequence(symbol, pair_name, period="1y", interval="4h",
+                          lookback=40, max_holding_bars=20):
+    """Conservative SMC sequence backtest; signal uses data up to bar i, entry at i+1 open."""
+    try:
+        raw = get_historical_data(symbol, period, interval)
+        if raw is None or len(raw) < 120:
+            return {"error": "بيانات تاريخية غير كافية للاختبار (يلزم 120 شمعة على الأقل)."}
+        df = raw.copy().reset_index(drop=False)
+        # Normalize OHLC column names while preserving calculated indicator columns.
+        cols = {str(c).lower(): c for c in df.columns}
+        for required in ("open", "high", "low", "close"):
+            if required not in cols:
+                return {"error": f"عمود {required.upper()} غير موجود في البيانات."}
+        df = df.rename(columns={cols[k]: k for k in ("open", "high", "low", "close")})
+        if "atr" not in df.columns:
+            return {"error": "ATR غير متوفر؛ لا يمكن اختبار وقف الخسارة بشكل موثوق."}
+
+        trades, skipped = [], 0
+        i = max(60, lookback)
+        while i < len(df) - max_holding_bars - 2:
+            hist = df.iloc[:i+1].copy()
+            setup = smc_setup_engine(hist, lookback=lookback)
+            if setup.get("state") != "ENTRY_CONFIRMED":
+                i += 1
+                continue
+
+            direction = setup.get("direction")
+            zone_lo, zone_hi = setup.get("zone_low"), setup.get("zone_high")
+            atr = safe_float(hist.iloc[-1].get("atr"), 0)
+            if direction not in ("BUY", "SELL") or not atr or atr <= 0 or zone_lo is None or zone_hi is None:
+                skipped += 1
+                i += 1
+                continue
+
+            entry_i = i + 1
+            entry = safe_float(df.iloc[entry_i].get("open"), np.nan)
+            if not np.isfinite(entry):
+                skipped += 1
+                i += 1
+                continue
+            buffer = 0.20 * atr
+            sl = (float(zone_lo) - buffer) if direction == "BUY" else (float(zone_hi) + buffer)
+            risk = abs(entry - sl)
+            if risk <= 0:
+                skipped += 1
+                i += 1
+                continue
+
+            candidate_target = safe_float(setup.get("target"), np.nan)
+            if direction == "BUY":
+                target = candidate_target if np.isfinite(candidate_target) and candidate_target > entry else entry + 2.0*risk
+                rr = (target-entry)/risk
+            else:
+                target = candidate_target if np.isfinite(candidate_target) and candidate_target < entry else entry - 2.0*risk
+                rr = (entry-target)/risk
+            if rr < 1.0:
+                target = entry + 2.0*risk if direction == "BUY" else entry - 2.0*risk
+                rr = 2.0
+
+            outcome, exit_price, exit_i = "OPEN", None, None
+            end_i = min(len(df)-1, entry_i+max_holding_bars)
+            for j in range(entry_i, end_i+1):
+                bar = df.iloc[j]
+                hi, lo = safe_float(bar.get("high"), np.nan), safe_float(bar.get("low"), np.nan)
+                if not np.isfinite(hi) or not np.isfinite(lo):
+                    continue
+                # Conservative ordering: if stop and target are both touched in one bar, count stop first.
+                if direction == "BUY":
+                    if lo <= sl:
+                        outcome, exit_price, exit_i = "LOSS", sl, j
+                        break
+                    if hi >= target:
+                        outcome, exit_price, exit_i = "WIN", target, j
+                        break
+                else:
+                    if hi >= sl:
+                        outcome, exit_price, exit_i = "LOSS", sl, j
+                        break
+                    if lo <= target:
+                        outcome, exit_price, exit_i = "WIN", target, j
+                        break
+            if outcome == "OPEN":
+                exit_price = safe_float(df.iloc[end_i].get("close"), entry)
+                exit_i = end_i
+                outcome = "TIME_EXIT"
+                r_value = ((exit_price-entry)/risk) if direction == "BUY" else ((entry-exit_price)/risk)
+            else:
+                r_value = rr if outcome == "WIN" else -1.0
+
+            trades.append({
+                "signal_time": str(df.iloc[i].get("Date", df.index[i])),
+                "entry_time": str(df.iloc[entry_i].get("Date", df.index[entry_i])),
+                "direction": direction, "entry": entry, "stop": sl, "target": target,
+                "outcome": outcome, "R": float(r_value), "bars_held": int(exit_i-entry_i),
+                "setup_state": setup.get("state")
+            })
+            # Avoid overlapping trades: resume after the simulated position closes.
+            i = max(i+1, exit_i+1)
+
+        if not trades:
+            return {"trades": 0, "wins": 0, "losses": 0, "timeouts": 0,
+                    "win_rate": 0.0, "total_R": 0.0, "expectancy_R": 0.0,
+                    "profit_factor": 0.0, "max_drawdown_R": 0.0,
+                    "trades_log": [], "skipped": skipped,
+                    "note": "لم تُكتشف نماذج مكتملة وفق شروط المحرك خلال الفترة المختارة."}
+
+        vals = [t["R"] for t in trades]
+        wins = sum(t["outcome"] == "WIN" for t in trades)
+        losses = sum(t["outcome"] == "LOSS" for t in trades)
+        timeouts = sum(t["outcome"] == "TIME_EXIT" for t in trades)
+        gross_win = sum(x for x in vals if x > 0)
+        gross_loss = abs(sum(x for x in vals if x < 0))
+        equity, peak, max_dd = 0.0, 0.0, 0.0
+        for r in vals:
+            equity += r
+            peak = max(peak, equity)
+            max_dd = max(max_dd, peak-equity)
+        return {
+            "trades": len(trades), "wins": wins, "losses": losses, "timeouts": timeouts,
+            "win_rate": wins/len(trades)*100, "total_R": sum(vals),
+            "expectancy_R": sum(vals)/len(vals),
+            "profit_factor": gross_win/max(gross_loss, 1e-9),
+            "max_drawdown_R": max_dd, "trades_log": trades[-100:],
+            "skipped": skipped,
+            "note": "اختبار محافظ: الدخول عند افتتاح الشمعة التالية، والوقف يُحسب أولًا عند لمس الوقف والهدف داخل الشمعة نفسها. لا يشمل السبريد/العمولة/الانزلاق."
+        }
+    except Exception as exc:
+        return {"error": f"تعذر إجراء اختبار SMC: {exc}"}
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
     try:
@@ -4210,6 +4342,34 @@ if _pair_analysis and _pair_analysis.get("pair") == _selected:
         if _setup.get("zone_low") is not None and _setup.get("zone_high") is not None:
             st.caption(f"FVG Zone: {_setup.get('zone_low')} – {_setup.get('zone_high')} · Target liquidity: {_setup.get('target','—')}")
         st.caption("تنبيه: محرك النماذج في هذه المرحلة تشخيصي؛ لا يفرض دخولًا ولا يستبدل بوابات التنفيذ وإدارة المخاطر.")
+
+        st.markdown("### 🧪 اختبار تاريخي لنموذج SMC")
+        st.caption("يختبر تسلسل النموذج على بيانات 4 ساعات؛ الدخول عند افتتاح الشمعة التالية لتقليل الانحياز المستقبلي.")
+        _bt_period = st.selectbox("فترة الاختبار", ["6mo", "1y", "2y"], index=1,
+                                  key=f"smc_bt_period_{_selected}")
+        if st.button(f"▶️ تشغيل اختبار SMC على {_selected}", key=f"smc_bt_run_{_selected}", width="stretch"):
+            with st.spinner("يتم اختبار النماذج التاريخية..."):
+                _bt = backtest_smc_sequence(_sel_symbol, _selected, period=_bt_period, interval="4h")
+                st.session_state[f"smc_bt_result_{_selected}"] = _bt
+        _bt_saved = st.session_state.get(f"smc_bt_result_{_selected}")
+        if _bt_saved:
+            if _bt_saved.get("error"):
+                st.error(_bt_saved["error"])
+            else:
+                _bc1,_bc2,_bc3,_bc4 = st.columns(4)
+                _bc1.metric("عدد الصفقات", _bt_saved.get("trades",0))
+                _bc2.metric("Win Rate", f"{_bt_saved.get('win_rate',0):.1f}%")
+                _bc3.metric("صافي R", f"{_bt_saved.get('total_R',0):.2f}R")
+                _bc4.metric("Expectancy", f"{_bt_saved.get('expectancy_R',0):.2f}R")
+                _bc5,_bc6,_bc7 = st.columns(3)
+                _bc5.metric("Profit Factor", f"{_bt_saved.get('profit_factor',0):.2f}")
+                _bc6.metric("Max Drawdown", f"{_bt_saved.get('max_drawdown_R',0):.2f}R")
+                _bc7.metric("خروج زمني", _bt_saved.get("timeouts",0))
+                if _bt_saved.get("trades_log"):
+                    st.dataframe(pd.DataFrame(_bt_saved["trades_log"]), hide_index=True, use_container_width=True)
+                if _bt_saved.get("note"):
+                    st.info(_bt_saved["note"])
+
         st.markdown("**ملخص الاتجاه والعوامل**")
         _d1,_d2,_d3,_d4 = st.columns(4)
         _d1.metric("MTF",_ar.get("mtf_bias","—"))
