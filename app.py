@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # BLACK PYRAMID v2010.3 — MULTI-MODE FREQUENCY EDITION
 # Institutional Analysis Terminal
 # ============================================================
@@ -60,7 +60,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 # ============================================================
 
 
-APP_VERSION = "v2010.3"
+APP_VERSION = "v2010.4 · API CHECK + PAIR ANALYSIS"
 
 
 MODE = "balanced"
@@ -255,7 +255,8 @@ def init_state():
         "show_market_status": False, "trade_journal": [],
         "ml_model": None, "_ccy_strength_cache": {},
         "show_details": False,
-        "strong_trade_result": None}
+        "strong_trade_result": None, "pair_analysis_result": None,
+        "pair_analysis_pair": None, "api_test_results": None, "api_test_time": None}
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
 
@@ -467,9 +468,12 @@ def normalize_ohlcv(df, min_rows=50):
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
     try:
-        return normalize_ohlcv(yf.download(sanitize_yf_symbol(symbol),
+        df = normalize_ohlcv(yf.download(sanitize_yf_symbol(symbol),
             period=period, interval=interval, auto_adjust=False,
             progress=False, threads=False))
+        if df is not None:
+            df.attrs["data_source"] = f"Yahoo Finance ({sanitize_yf_symbol(symbol)})"
+        return df
     except Exception: return None
 
 
@@ -493,7 +497,10 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
         df = pd.DataFrame(data["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         df = df.set_index("datetime").sort_index()
-        return normalize_ohlcv(df)
+        df = normalize_ohlcv(df)
+        if df is not None:
+            df.attrs["data_source"] = f"Twelve Data ({td})"
+        return df
     except Exception: return None
 
 
@@ -501,14 +508,22 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
 def get_historical_data(symbol, period="3mo", interval="4h"):
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         df = get_yfinance(s, period, interval)
-        if df is not None and len(df) >= 50: return df
+        if df is not None and len(df) >= 50:
+            df.attrs["data_source"] = f"Yahoo Finance ({sanitize_yf_symbol(s)})"
+            return df
     df = get_yfinance(sanitize_yf_symbol(symbol), period, interval)
-    if df is not None and len(df) >= 50: return df
+    if df is not None and len(df) >= 50:
+        df.attrs["data_source"] = f"Yahoo Finance ({sanitize_yf_symbol(symbol)})"
+        return df
     df = get_twelve_data(symbol, interval, 500)
-    if df is not None and len(df) >= 50: return df
+    if df is not None and len(df) >= 50:
+        df.attrs["data_source"] = "Twelve Data API"
+        return df
     for s in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
         df = get_yfinance(s, "1mo", interval)
-        if df is not None and len(df) >= 30: return df
+        if df is not None and len(df) >= 30:
+            df.attrs["data_source"] = f"Yahoo Finance fallback ({sanitize_yf_symbol(s)})"
+            return df
     return None
 
 
@@ -3421,6 +3436,169 @@ if _changed:
     st.cache_data.clear()
 
 
+# ═══════════════════════════════════════════════
+# API CONNECTION TEST
+# ═══════════════════════════════════════════════
+st.markdown('<div class="section-title">🧪 اختبار المفاتيح وجلب البيانات</div>',
+            unsafe_allow_html=True)
+st.caption("الاختبار يرسل طلبًا فعليًا لكل API مفعّل؛ نجاح وجود المفتاح وحده لا يُعتبر نجاحًا.")
+if st.button("🔐 اختبار المفاتيح والتأكد من جلب البيانات", key="btn_test_api",
+             width="stretch"):
+    _tests = {}
+    _now_test = datetime.now(timezone.utc)
+    if td_val.strip():
+        try:
+            _probe_symbol = "XAU/USD"
+            _tr = requests.get("https://api.twelvedata.com/time_series",
+                params={"symbol": _probe_symbol, "interval": "1h",
+                        "outputsize": 2, "apikey": td_val.strip(),
+                        "format": "JSON"}, timeout=15)
+            _tj = _tr.json()
+            if _tr.ok and isinstance(_tj, dict) and _tj.get("values"):
+                _tests["Twelve Data"] = {"ok": True,
+                    "message": f"تم جلب {len(_tj['values'])} شموع فعلية للذهب"}
+            else:
+                _tests["Twelve Data"] = {"ok": False,
+                    "message": str(_tj.get("message") or _tj.get("code") or "لم تصل بيانات أسعار")}
+        except Exception as _e:
+            _tests["Twelve Data"] = {"ok": False, "message": str(_e)[:220]}
+    else:
+        _tests["Twelve Data"] = {"ok": None, "message": "لم يتم إدخال المفتاح"}
+
+    if fmp_val.strip():
+        try:
+            _fr = requests.get("https://financialmodelingprep.com/api/v3/economic_calendar",
+                params={"from": _now_test.strftime("%Y-%m-%d"),
+                        "to": (_now_test + timedelta(days=7)).strftime("%Y-%m-%d"),
+                        "apikey": fmp_val.strip()}, timeout=15)
+            _fj = _fr.json()
+            if _fr.ok and isinstance(_fj, list):
+                _tests["Financial Modeling Prep"] = {"ok": True,
+                    "message": f"الاتصال ناجح — تم استلام {len(_fj)} حدثًا من التقويم"}
+            else:
+                _tests["Financial Modeling Prep"] = {"ok": False,
+                    "message": str(_fj.get("Error Message") if isinstance(_fj, dict) else "استجابة غير صالحة")[:220]}
+        except Exception as _e:
+            _tests["Financial Modeling Prep"] = {"ok": False, "message": str(_e)[:220]}
+    else:
+        _tests["Financial Modeling Prep"] = {"ok": None, "message": "لم يتم إدخال المفتاح"}
+    st.session_state.api_test_results = _tests
+    st.session_state.api_test_time = _now_test.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+if st.session_state.get("api_test_results"):
+    st.caption(f"آخر اختبار: {st.session_state.get('api_test_time', '—')}")
+    for _api_name, _api_result in st.session_state.api_test_results.items():
+        if _api_result["ok"] is True:
+            st.success(f"✅ {_api_name}: {_api_result['message']}")
+        elif _api_result["ok"] is False:
+            st.error(f"❌ {_api_name}: {_api_result['message']}")
+        else:
+            st.info(f"⚪ {_api_name}: {_api_result['message']}")
+
+
+# ═══════════════════════════════════════════════
+# SINGLE PAIR ANALYSIS
+# ═══════════════════════════════════════════════
+st.markdown('<div class="section-title">📊 تحليل زوج محدد <span>Single Pair Analysis</span></div>',
+            unsafe_allow_html=True)
+st.caption("اختر الزوج من الشريط الأفقي، ثم اضغط تحليل. سيتم تحليل الزوج المختار فقط.")
+_pair_names = list(PAIRS.keys())
+if st.session_state.get("selected_pair") not in PAIRS:
+    st.session_state.selected_pair = _pair_names[0]
+_selected_pair = st.radio("اختر الزوج", _pair_names,
+    index=_pair_names.index(st.session_state.selected_pair),
+    horizontal=True, key="pair_selector_radio")
+st.session_state.selected_pair = _selected_pair
+
+st.markdown("""
+<style>
+div[role="radiogroup"] {
+  display:flex !important; flex-wrap:nowrap !important; overflow-x:auto !important;
+  overflow-y:hidden !important; white-space:nowrap !important; gap:8px !important;
+  padding:10px 4px 16px 4px !important; scrollbar-width:thin !important;
+  scrollbar-color:#e6c87c #171d28 !important;
+}
+div[role="radiogroup"] > label { flex:0 0 auto !important; white-space:nowrap !important;
+  background:#111722 !important; border:1px solid rgba(230,200,124,.25) !important;
+  border-radius:20px !important; padding:7px 14px !important; }
+div[role="radiogroup"] > label:has(input:checked) {
+  border-color:#e6c87c !important; background:rgba(230,200,124,.16) !important; }
+</style>
+""", unsafe_allow_html=True)
+
+if st.button(f"🔍 تحليل {_selected_pair} فقط", key="btn_analyze_selected",
+             width="stretch"):
+    _sym = PAIRS[_selected_pair]
+    with st.spinner(f"جارٍ جلب بيانات {_selected_pair} وتنفيذ التحليل..."):
+        _pair_df = get_historical_data(_sym, "6mo", "4h")
+        if _pair_df is None or len(_pair_df) < 50:
+            st.session_state.pair_analysis_result = {
+                "error": "تعذر جلب بيانات كافية لهذا الزوج من المصادر المتاحة."}
+            st.session_state.pair_analysis_pair = _selected_pair
+        else:
+            _pair_price = float(_pair_df["close"].iloc[-1])
+            _pair_source = _pair_df.attrs.get("data_source", "مصدر غير محدد")
+            _pair_candle_time = pd.Timestamp(_pair_df.index[-1])
+            try:
+                _pair_result = generate_signal(_pair_df, _pair_price,
+                    _selected_pair, _sym, skip_external_filters=False)
+                st.session_state.pair_analysis_result = {
+                    "result": _pair_result, "price": _pair_price,
+                    "source": _pair_source,
+                    "candle_time": _pair_candle_time.isoformat(),
+                    "analysis_time": datetime.now(timezone.utc).isoformat(),
+                    "rows": len(_pair_df), "timeframe": "4H"}
+                st.session_state.pair_analysis_pair = _selected_pair
+            except Exception as _e:
+                st.session_state.pair_analysis_result = {"error": str(_e)[:400]}
+                st.session_state.pair_analysis_pair = _selected_pair
+
+_pair_saved = st.session_state.get("pair_analysis_result")
+if _pair_saved and st.session_state.get("pair_analysis_pair") == _selected_pair:
+    if _pair_saved.get("error"):
+        st.error(f"فشل التحليل: {_pair_saved['error']}")
+    else:
+        _pr = _pair_saved["result"]
+        _psig = _pr.get("signal", "WAIT")
+        _pcolor = "🟢" if _psig == "BUY" else ("🔴" if _psig == "SELL" else "🟡")
+        st.markdown(f"### {_pcolor} {_selected_pair} — {_psig}")
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        _m1.metric("السعر المستخدم", fmt_price(_pair_saved["price"], _selected_pair))
+        _m2.metric("الاتجاه", _psig)
+        _m3.metric("الثقة", f"{_pr.get('confidence', 0):.1f}%")
+        _m4.metric("التقييم", _pr.get("trade_grade", "—"))
+        _pmeta1, _pmeta2 = st.columns(2)
+        with _pmeta1:
+            st.caption(f"🕒 وقت تنفيذ التحليل: {_pair_saved['analysis_time']}")
+            st.caption(f"🕯️ وقت آخر شمعة مستخدمة: {_pair_saved['candle_time']}")
+        with _pmeta2:
+            st.caption(f"📡 مصدر البيانات الفعلي: {_pair_saved['source']}")
+            st.caption(f"⏱️ الفريم: {_pair_saved['timeframe']} | عدد الشموع: {_pair_saved['rows']}")
+        _levels = _pr.get("levels")
+        if _levels:
+            _l1, _l2, _l3, _l4 = st.columns(4)
+            _l1.metric("وقف الخسارة SL", fmt_price(_levels["stop_loss"], _selected_pair))
+            _l2.metric("الهدف TP1", fmt_price(_levels["target1"], _selected_pair))
+            _l3.metric("الهدف TP2", fmt_price(_levels["target2"], _selected_pair))
+            _l4.metric("الهدف TP3", fmt_price(_levels["target3"], _selected_pair))
+        else:
+            st.info("لا توجد مستويات دخول صالحة حاليًا لهذا الزوج.")
+        st.markdown("#### تفاصيل التحليل")
+        _d1, _d2, _d3 = st.columns(3)
+        _d1.metric("BUY Score", f"{_pr.get('buy_score', 0):.1f}")
+        _d2.metric("SELL Score", f"{_pr.get('sell_score', 0):.1f}")
+        _d3.metric("التأكيد", f"{_pr.get('confirmation_score', 0):.1f}/100")
+        st.write(f"**حالة التنفيذ:** {_pr.get('execution_status', '—')} — {_pr.get('execution_reason', '—')}")
+        st.write(f"**الاتجاه متعدد الأطر:** {_pr.get('mtf_bias', '—')} | **الأسبوعي:** {_pr.get('weekly_bias', '—')} | **حالة السوق:** {_pr.get('regime', '—')}")
+        _filters = _pr.get("filter_results", {})
+        if _filters:
+            _filter_rows = [{"الفلتر": k, "الحالة": "✅ اجتاز" if v.get("pass") else "❌ لم يجتز",
+                             "التفاصيل": v.get("msg", "")} for k, v in _filters.items()]
+            st.dataframe(pd.DataFrame(_filter_rows), use_container_width=True, hide_index=True)
+        if _pr.get("reasons"):
+            st.write("**أسباب التحليل:**")
+            for _reason in _pr["reasons"][:12]:
+                st.write(f"• {_reason}")
 
 
 # ═══════════════════════════════════════════════
