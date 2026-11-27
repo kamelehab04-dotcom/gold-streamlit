@@ -1,9 +1,7 @@
-# ============================================================
-# BLACK PYRAMID v2010.6 — FULL ANALYSIS + SMC SEQUENCE BACKTEST
+﻿# ============================================================
+# BLACK PYRAMID v2010.3 — MULTI-MODE FREQUENCY EDITION
 # Institutional Analysis Terminal
 # ============================================================
-
-
 
 
 import os
@@ -17,8 +15,6 @@ import time
 import math
 
 
-
-
 import numpy as np
 import pandas as pd
 import requests
@@ -26,8 +22,6 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-
 
 
 try:
@@ -43,15 +37,11 @@ except ImportError:
     SKLEARN_AVAILABLE = False
 
 
-
-
 try:
     import xgboost as xgb
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-
-
 
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -65,26 +55,16 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-
-
-
-
 # ============================================================
 # APP CONFIG
 # ============================================================
 
 
-
-
-APP_VERSION = "v2010.6+FULL-ANALYSIS"
-
-
+APP_VERSION = "v2010.3"
 
 
 MODE = "balanced"
-MAX_STRONG_TRADES = 3
-
-
+MAX_STRONG_TRADES = 4
 
 
 _GATE_PRESETS = {
@@ -101,17 +81,12 @@ _GATE_PRESETS = {
 _p = _GATE_PRESETS.get(MODE, _GATE_PRESETS["balanced"])
 
 
-
-
 A_PLUS_MIN          = _p["a_plus"]
 A_MIN               = _p["a"]
 B_MIN               = _p["b"]
 C_MIN               = _p["c"]
 MIN_SIGNAL_GAP      = _p["gap"]
 MIN_EMIT_CONFIDENCE = _p["gate"]
-MIN_ANALYSIS_COMPLETENESS = 65.0
-
-
 
 
 PENALTY_MTF_AGAINST    = 8.0
@@ -122,33 +97,23 @@ MAX_SOFT_PENALTY       = 8.0
 SOFT_PENALTY_TOP_N     = 3
 
 
-
-
 MIN_RR_TP1 = 0.80
 MIN_RR_TP2 = 1.30
 MIN_RR_TP3 = 1.90
-
-
 
 
 CORRELATION_WINDOW_DAYS = 30
 CORRELATION_THRESHOLD = 0.70
 
 
-
-
 SENTIMENT_EXTREME_LONG = 75
 SENTIMENT_EXTREME_SHORT = 25
-
-
 
 
 ML_MIN_TRADES = 30
 ML_TEST_SIZE = 0.25
 ML_FEATURE_SELECTION_THRESHOLD = 0.02
 ML_CV_FOLDS = 5
-
-
 
 
 TUNING_MODE = "randomized"
@@ -158,13 +123,9 @@ TUNING_SCORING = "roc_auc"
 TUNING_N_JOBS = -1
 
 
-
-
 SL_MIN_DIST_ATR = 0.25
 SL_MAX_DIST_ATR = 1.50
 SL_BUFFER_ATR = 0.20
-
-
 
 
 ML_FEATURE_NAMES = [
@@ -176,8 +137,6 @@ ML_FEATURE_NAMES = [
     "rsi_val", "macd_hist_norm", "body_ratio", "wick_ratio",
     "consec_bars", "candles_since_bos", "divergence_flag", "vol_ratio",
 ]
-
-
 
 
 PARAM_GRIDS = {
@@ -195,12 +154,8 @@ PARAM_GRIDS = {
 }
 
 
-
-
 LOGO_CANDIDATES = ["file_000000005cb4824697f509df31f2168a.png",
                     "logo.png", "assets/logo.png", "static/logo.png"]
-
-
 
 
 ASSET_PROFILES = {
@@ -218,8 +173,6 @@ ASSET_PROFILES = {
                "confidence_threshold": 76, "confirmation_threshold": 70}}
 
 
-
-
 PAIRS = {
     "XAU/USD (Gold)": "GC=F", "XAG/USD (Silver)": "SI=F",
     "DXY (Dollar Index)": "DX-Y.NYB", "EUR/USD": "EURUSD=X",
@@ -235,8 +188,6 @@ PAIRS = {
     "BTC/USD (Bitcoin)": "BTC-USD", "ETH/USD (Ethereum)": "ETH-USD"}
 
 
-
-
 YF_SYMBOL_ALTERNATIVES = {
     "GC=F": ["GC=F", "XAUUSD=X", "GLD"], "SI=F": ["SI=F", "XAGUSD=X", "SLV"],
     "DX-Y.NYB": ["DX=F", "DX-Y.NYB", "UUP"],
@@ -247,17 +198,11 @@ YF_SYMBOL_ALTERNATIVES = {
     "NZDUSD=X": ["NZDUSD=X", "NZD=F"], "^VIX": ["^VIX", "VIXY", "VXX"]}
 
 
-
-
 KILL_ZONES = {"London Open": (7, 10), "NY Open": (12, 15), "London Close": (15, 17)}
-
-
 
 
 CENTRAL_BANK_RATES = {"USD": 5.25, "EUR": 4.00, "GBP": 5.25, "JPY": 0.10,
                        "CHF": 1.75, "AUD": 4.35, "NZD": 5.50, "CAD": 4.75}
-
-
 
 
 CURRENCY_PAIRS_MAP = {
@@ -279,14 +224,8 @@ CURRENCY_PAIRS_MAP = {
             ("AUDCAD=X", -1), ("NZDCAD=X", -1), ("CADJPY=X", 1), ("CADCHF=X", 1)]}
 
 
-
-
 RISK_OFF_CURRENCIES = {"USD", "JPY", "CHF"}
 RISK_ON_CURRENCIES = {"AUD", "NZD", "CAD"}
-
-
-
-
 
 
 
@@ -307,10 +246,6 @@ def get_secret(name, default=""):
 
 
 
-
-
-
-
 def init_state():
     defaults = {
         "selected_pair": "XAU/USD (Gold)", "all_signals": None,
@@ -320,22 +255,12 @@ def init_state():
         "show_market_status": False, "trade_journal": [],
         "ml_model": None, "_ccy_strength_cache": {},
         "show_details": False,
-        "strong_trade_result": None,
-        "selected_pair_analysis": None,
-        "selected_pair_analysis_name": None,
-        "key_test_results": None,
-        "key_test_time": None}
+        "strong_trade_result": None}
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
 
 
-
-
 init_state()
-
-
-
-
 
 
 
@@ -347,18 +272,12 @@ def safe_float(v, default=np.nan):
     except Exception: return default
 
 
-
-
 def clamp(v, lo, hi): return max(lo, min(hi, v))
-
-
 
 
 def safe_bool(v):
     try: return bool(v) and not pd.isna(v)
     except Exception: return False
-
-
 
 
 def asset_type_from_name(name):
@@ -368,11 +287,7 @@ def asset_type_from_name(name):
     return "forex"
 
 
-
-
 def profile_for(name): return ASSET_PROFILES[asset_type_from_name(name)]
-
-
 
 
 def get_asset_profile(pair_name):
@@ -382,15 +297,11 @@ def get_asset_profile(pair_name):
     return "forex"
 
 
-
-
 def fmt_price(v, pair_name):
     if v is None or not np.isfinite(safe_float(v)): return "N/A"
     if asset_type_from_name(pair_name) in ("gold","crypto"):
         return f"${float(v):,.2f}"
     return f"{float(v):.5f}"
-
-
 
 
 def trend_icon(state):
@@ -401,14 +312,10 @@ def trend_icon(state):
     return "⚪"
 
 
-
-
 def img_to_base64(path):
     try:
         with open(path,"rb") as f: return base64.b64encode(f.read()).decode()
     except Exception: return None
-
-
 
 
 def load_logo_b64():
@@ -419,8 +326,6 @@ def load_logo_b64():
     return None
 
 
-
-
 def parse_pair_currencies(pair_name):
     name = str(pair_name).upper()
     if "/" not in name: return "", ""
@@ -428,10 +333,6 @@ def parse_pair_currencies(pair_name):
     base = parts[0].strip().split()[0].split("(")[0]
     quote = parts[1].strip().split()[0].split("(")[0] if len(parts) > 1 else ""
     return base, quote
-
-
-
-
 
 
 
@@ -448,10 +349,6 @@ def log_trade_result(result, outcome):
 
 
 
-
-
-
-
 def is_market_open(pair_name):
     now = datetime.now(timezone.utc)
     if asset_type_from_name(pair_name) == "crypto": return True, "Crypto 24/7"
@@ -460,8 +357,6 @@ def is_market_open(pair_name):
     if wd == 5: return False, "🚫 السوق مغلق (السبت)"
     if wd == 6 and h < 22: return False, "🚫 السوق لم يفتح بعد (الأحد)"
     return True, "✅ السوق مفتوح"
-
-
 
 
 def get_current_session_info():
@@ -477,8 +372,6 @@ def get_current_session_info():
         if s <= h < e: kz = f"داخل {n} ✅"; break
     return {"session": cur, "icon": ic, "desc": dsc,
             "time_utc": f"{h:02d}:{m:02d} UTC", "kill_zone": kz, "hour": h}
-
-
 
 
 def get_market_status_info(symbol, pair_name):
@@ -515,8 +408,6 @@ def get_market_status_info(symbol, pair_name):
     except Exception: return None
 
 
-
-
 def get_todays_events(events, pair_name):
     if not events: return []
     now = datetime.now(timezone.utc); today = now.strftime("%Y-%m-%d")
@@ -540,10 +431,6 @@ def get_todays_events(events, pair_name):
 
 
 
-
-
-
-
 def sanitize_yf_symbol(sym):
     s = str(sym).strip().replace("(","").replace(")","")
     if "/" in s and s.count("/") == 1:
@@ -552,8 +439,6 @@ def sanitize_yf_symbol(sym):
         if a.upper() in ("BTC","ETH","SOL","XRP","ADA"): return f"{a.upper()}-{b.upper()}"
         return f"{a.upper()}{b.upper()}=X"
     return s
-
-
 
 
 def normalize_ohlcv(df, min_rows=50):
@@ -579,8 +464,6 @@ def normalize_ohlcv(df, min_rows=50):
     return df if len(df) >= min_rows else None
 
 
-
-
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yfinance(symbol, period="3mo", interval="4h"):
     try:
@@ -588,8 +471,6 @@ def get_yfinance(symbol, period="3mo", interval="4h"):
             period=period, interval=interval, auto_adjust=False,
             progress=False, threads=False))
     except Exception: return None
-
-
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -601,7 +482,7 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
           "AUDUSD=X":"AUD/USD","NZDUSD=X":"NZD/USD","USDCAD=X":"USD/CAD",
           "BTC-USD":"BTC/USD","ETH-USD":"ETH/USD"}
     td = mp.get(symbol, sanitize_yf_symbol(symbol))
-    im = {"5m":"5min","15m":"15min","1h":"1h","4h":"4h","1d":"1day"}
+    im = {"15m":"15min","1h":"1h","4h":"4h","1d":"1day"}
     try:
         r = requests.get("https://api.twelvedata.com/time_series",
             params={"symbol": td, "interval": im.get(interval, interval),
@@ -614,8 +495,6 @@ def get_twelve_data(symbol, interval="4h", outputsize=500):
         df = df.set_index("datetime").sort_index()
         return normalize_ohlcv(df)
     except Exception: return None
-
-
 
 
 @st.cache_data(ttl=90, show_spinner=False)
@@ -631,8 +510,6 @@ def get_historical_data(symbol, period="3mo", interval="4h"):
         df = get_yfinance(s, "1mo", interval)
         if df is not None and len(df) >= 30: return df
     return None
-
-
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -662,10 +539,6 @@ def get_spot_price(symbol):
 
 
 
-
-
-
-
 @st.cache_data(ttl=600, show_spinner=False)
 def get_currency_strength_matrix():
     strength = {}
@@ -684,8 +557,6 @@ def get_currency_strength_matrix():
     return {k: (v / ma) * 100 for k, v in strength.items()}
 
 
-
-
 def get_interest_rate_differential(pair_name):
     b, q = parse_pair_currencies(pair_name)
     if not b or not q: return 0.0, "لا يوجد زوج صالح"
@@ -693,8 +564,6 @@ def get_interest_rate_differential(pair_name):
         return 0.0, f"معدلات غير متاحة ({b}/{q})"
     d = CENTRAL_BANK_RATES[b] - CENTRAL_BANK_RATES[q]
     return d, f"{b}: {CENTRAL_BANK_RATES[b]}% | {q}: {CENTRAL_BANK_RATES[q]}% | Diff: {d:+.2f}%"
-
-
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -716,8 +585,6 @@ def get_risk_sentiment():
     return {"vix": vn, "vix_avg": va, "vix_change": vc, "vix_state": vs,
             "risk_mode": rm, "bias_impact": bi,
             "msg": f"VIX {vn:.2f} ({vs}) · {rm}"}
-
-
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -758,8 +625,6 @@ def get_bond_yields():
     return r
 
 
-
-
 def get_bond_bias_for_pair(pair_name, bonds=None):
     if bonds is None: bonds = get_bond_yields()
     b, q = parse_pair_currencies(pair_name)
@@ -774,10 +639,6 @@ def get_bond_bias_for_pair(pair_name, bonds=None):
     if b == "USD": return ub, ube, " · ".join(rr)
     elif q == "USD": return ube, ub, " · ".join(rr)
     return 0.0, 0.0, " · ".join(rr)
-
-
-
-
 
 
 
@@ -819,8 +680,6 @@ def estimate_retail_sentiment(df, profile):
             "msg": f"Retail: {ls:.0f}% Long · Contrarian → {ct}"}
 
 
-
-
 def get_sentiment_bias_for_signal(sentiment, signal):
     if sentiment is None or signal not in ("BUY","SELL"): return 0.0, ""
     bias = sentiment.get("bias","NEUTRAL"); stv = sentiment.get("strength", 0)
@@ -833,10 +692,6 @@ def get_sentiment_bias_for_signal(sentiment, signal):
     elif bias in ("EXTREME_SHORT","CROWD_SHORT") and signal == "SELL":
         return -min(stv * 0.3, 10), "⚠️ Sentiment ضد SELL"
     return 0.0, ""
-
-
-
-
 
 
 
@@ -855,10 +710,6 @@ def monte_carlo_simulation(trades_r, n_sims=1000, n_trades=None):
             "prob_profit": float((fe > 0).mean() * 100),
             "mean_dd": float(np.mean(md)), "p95_dd": float(np.percentile(md, 95)),
             "worst_dd": float(np.max(md)), "n_sims": n_sims, "n_trades": n_trades}
-
-
-
-
 
 
 
@@ -945,8 +796,6 @@ def extract_ml_features(result, direction):
             float(csb), float(dfg), float(vr)]
 
 
-
-
 def tune_model(model_name, model, param_grid, X, y, mode="randomized",
                n_iter=20, cv_folds=5):
     try:
@@ -964,8 +813,6 @@ def tune_model(model_name, model, param_grid, X, y, mode="randomized",
         return tuner.best_estimator_, tuner.best_params_, float(tuner.best_score_)
     except Exception:
         return model, {}, 0.0
-
-
 
 
 def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
@@ -990,8 +837,6 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
     res = {}; trep = {}
 
 
-
-
     try:
         lr = LogisticRegression(max_iter=1000, random_state=42)
         if use_tuning:
@@ -1012,8 +857,6 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
             "coefficients": dict(zip(ML_FEATURE_NAMES, lr.coef_[0].tolist())),
             "needs_scaling": True}
     except Exception as e: res["LogisticRegression"] = {"error": str(e)}
-
-
 
 
     try:
@@ -1041,8 +884,6 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
     except Exception as e: res["GradientBoosting"] = {"error": str(e)}
 
 
-
-
     try:
         rf = RandomForestClassifier(random_state=42, n_jobs=-1)
         if use_tuning:
@@ -1066,8 +907,6 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
             "importance": dict(zip(ML_FEATURE_NAMES, rf.feature_importances_.tolist())),
             "needs_scaling": False}
     except Exception as e: res["RandomForest"] = {"error": str(e)}
-
-
 
 
     if XGBOOST_AVAILABLE:
@@ -1095,8 +934,6 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
                 "importance": dict(zip(ML_FEATURE_NAMES, xm.feature_importances_.tolist())),
                 "needs_scaling": False}
         except Exception as e: res["XGBoost"] = {"error": str(e)}
-
-
 
 
     valid = {k: v for k, v in res.items() if "auc" in v}
@@ -1135,8 +972,6 @@ def train_ml_model(trades_data, use_tuning=False, tuning_mode="randomized",
             "trained_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 
 
-
-
 def predict_win_probability(ml_pack, result, direction):
     if not ml_pack or "model" not in ml_pack: return None
     try:
@@ -1147,8 +982,6 @@ def predict_win_probability(ml_pack, result, direction):
             X = ml_pack["scaler"].transform(X)
         return float(ml_pack["model"].predict_proba(X)[0, 1])
     except Exception: return None
-
-
 
 
 def ml_adjusted_confidence(result, direction, ml_pack):
@@ -1168,10 +1001,6 @@ def ml_adjusted_confidence(result, direction, ml_pack):
 
 
 
-
-
-
-
 def calc_rsi(series, period=14):
     d = series.diff(); g = d.clip(lower=0); l = -d.clip(upper=0)
     ag = g.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
@@ -1182,15 +1011,11 @@ def calc_rsi(series, period=14):
     return r.fillna(50).clip(0, 100)
 
 
-
-
 def calc_atr(df, period=14):
     pc = df["close"].shift(1)
     tr = pd.concat([df["high"]-df["low"], (df["high"]-pc).abs(),
                     (df["low"]-pc).abs()], axis=1).max(axis=1)
     return tr.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
-
-
 
 
 def calc_macd(s, f=12, sl=26, sig=9):
@@ -1199,13 +1024,9 @@ def calc_macd(s, f=12, sl=26, sig=9):
     return m, sg, m - sg
 
 
-
-
 def calc_bollinger(s, p=20, std=2.0):
     m = s.rolling(p).mean(); d = s.rolling(p).std()
     return m + std*d, m, m - std*d
-
-
 
 
 def calc_chaikin(df, period=21):
@@ -1216,8 +1037,6 @@ def calc_chaikin(df, period=21):
             df["volume"].rolling(period).sum().replace(0, np.nan)).fillna(0)
 
 
-
-
 def calc_rolling_vwap(df, period=20):
     tp = (df["high"]+df["low"]+df["close"])/3
     v = df["volume"].clip(lower=0); pv = tp*v
@@ -1226,8 +1045,6 @@ def calc_rolling_vwap(df, period=20):
     vw = cpv / cv.replace(0, np.nan)
     fb = tp.rolling(period, min_periods=period).mean()
     return vw.fillna(fb)
-
-
 
 
 def calc_session_vwap(df):
@@ -1244,15 +1061,9 @@ def calc_session_vwap(df):
 
 
 
-
-
-
-
 # ═══════════════════════════════════════════════════════════
 # SWING DETECTION (real swing prices)
 # ═══════════════════════════════════════════════════════════
-
-
 
 
 def find_confirmed_swings(df, order=3):
@@ -1274,10 +1085,6 @@ def find_confirmed_swings(df, order=3):
 
 
 
-
-
-
-
 def get_last_two_swings(df, kind="high"):
     c = "swing_high" if kind == "high" else "swing_low"
     pc = "swing_high_price" if kind == "high" else "swing_low_price"
@@ -1294,10 +1101,6 @@ def get_last_two_swings(df, kind="high"):
 
 
 
-
-
-
-
 def structure_state(df):
     h = get_last_two_swings(df, "high"); l = get_last_two_swings(df, "low")
     bu = False; be = False; s = "RANGE"
@@ -1307,10 +1110,6 @@ def structure_state(df):
         if hh and hl: bu = True; s = "BULLISH"
         elif lh and ll: be = True; s = "BEARISH"
     return {"state": s, "bullish": bu, "bearish": be, "highs": h, "lows": l}
-
-
-
-
 
 
 
@@ -1352,10 +1151,6 @@ def detect_bos_mss(df):
 
 
 
-
-
-
-
 def detect_liquidity_sweeps(df, tol_atr=0.10):
     out = df.copy(); t = out["atr"] * tol_atr
     ph = out["high"].rolling(3).max().shift(1)
@@ -1363,8 +1158,6 @@ def detect_liquidity_sweeps(df, tol_atr=0.10):
     out["liquidity_sweep_bearish"] = ((out["high"] > ph + t) & (out["close"] < ph)).fillna(False)
     out["liquidity_sweep_bullish"] = ((out["low"] < pl - t) & (out["close"] > pl)).fillna(False)
     return out
-
-
 
 
 def detect_fvg(df):
@@ -1377,8 +1170,6 @@ def detect_fvg(df):
     out["fvg_bear_low"] = out["high"].where(be, np.nan)
     out["fvg_bear_high"] = out["low"].shift(2).where(be, np.nan)
     return out
-
-
 
 
 def detect_order_blocks(df):
@@ -1396,8 +1187,6 @@ def detect_order_blocks(df):
     return out
 
 
-
-
 def add_premium_discount(df, lb=50):
     out = df.copy()
     sh = out["high"].rolling(lb).max().shift(1)
@@ -1406,8 +1195,6 @@ def add_premium_discount(df, lb=50):
     out["range_high"] = sh; out["range_low"] = sl; out["premium_mid"] = m
     out["in_discount"] = out["close"] < m; out["in_premium"] = out["close"] > m
     return out
-
-
 
 
 def analyze_smc(df, profile):
@@ -1433,10 +1220,6 @@ def analyze_smc(df, profile):
 
 
 
-
-
-
-
 def candle_confirmation(df, direction):
     if len(df) < 3: return False
     l = df.iloc[-1]
@@ -1444,10 +1227,6 @@ def candle_confirmation(df, direction):
     if direction == "BUY":
         return bool(l["close"] > l["open"] and (l["close"]-l["low"])/rng >= 0.60 and b/rng >= 0.35)
     return bool(l["close"] < l["open"] and (l["high"]-l["close"])/rng >= 0.60 and b/rng >= 0.35)
-
-
-
-
 
 
 
@@ -1479,10 +1258,6 @@ def detect_divergence(df):
 
 
 
-
-
-
-
 def smc_quality(df):
     if df is None or len(df) < 5: return 0.0, []
     l = df.iloc[-1]; sc = 0.0; rr = []
@@ -1494,10 +1269,6 @@ def smc_quality(df):
     for a, b, pts, lab in checks:
         if safe_bool(l.get(a)) or safe_bool(l.get(b)): sc += pts; rr.append(lab)
     return min(sc, 100.0), rr
-
-
-
-
 
 
 
@@ -1523,8 +1294,6 @@ def build_features(df, profile, use_rvwap=True):
     return out
 
 
-
-
 def timeframe_bias(df, pair_name=None):
     if df is None or len(df) < 80: return "NEUTRAL", 0
     x = build_features(df, profile_for(pair_name or "")); l = x.iloc[-1]
@@ -1548,68 +1317,23 @@ def timeframe_bias(df, pair_name=None):
     return "NEUTRAL", 0
 
 
-
-
-def get_timeframe_data_with_source(symbol, period, interval):
-    """Fetch a timeframe dataset and report the real provider used."""
-    for candidate in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
-        frame = get_yfinance(candidate, period, interval)
-        if frame is not None and len(frame) >= 30:
-            return frame, f"Yahoo Finance ({candidate})"
-    candidate = sanitize_yf_symbol(symbol)
-    frame = get_yfinance(candidate, period, interval)
-    if frame is not None and len(frame) >= 30:
-        return frame, f"Yahoo Finance ({candidate})"
-    frame = get_twelve_data(symbol, interval, 500)
-    if frame is not None and len(frame) >= 30:
-        return frame, "Twelve Data"
-    return None, "Unavailable"
-
-
 @st.cache_data(ttl=120, show_spinner=False)
 def get_mtf_analysis(symbol, pair_name=None):
-    # Higher timeframes dominate; the 5-minute chart is only an entry-timing aid.
-    fr = {"Daily": ("1y","1d",4.0), "4H": ("6mo","4h",3.0),
-          "1H": ("3mo","1h",2.0), "15M": ("30d","15m",1.0),
-          "5M": ("5d","5m",0.5)}
+    fr = {"1D": ("1y","1d",4.0), "4H": ("6mo","4h",3.0),
+          "1H": ("3mo","1h",2.0), "15M": ("30d","15m",1.0)}
     rs = {}; bu = be = tot = 0.0
-    for n, (period, interval, weight) in fr.items():
-        frame, source = get_timeframe_data_with_source(symbol, period, interval)
-        bias, strength = timeframe_bias(frame, pair_name)
-        details = {"bias":bias, "strength":strength, "weight":weight,
-                  "source":source, "data_time":str(frame.index[-1]) if frame is not None and len(frame) else "—",
-                  "price":None, "rsi":None, "macd_state":"—", "structure":"—",
-                  "bos_mss":"—", "available":bool(frame is not None and len(frame)>=30)}
-        if frame is not None and len(frame)>=30:
-            try:
-                feat = build_features(frame, profile_for(pair_name or ""))
-                last = feat.iloc[-1]
-                stx = structure_state(feat)
-                details.update({"price":safe_float(last.get("close")),
-                    "rsi":safe_float(last.get("rsi"),50),
-                    "macd_state":"Bullish" if safe_float(last.get("macd"))>safe_float(last.get("macd_signal")) else "Bearish",
-                    "structure":stx.get("state","RANGE"),
-                    "bos_mss":"Bullish BOS/MSS" if safe_bool(last.get("bos_bullish")) or safe_bool(last.get("mss_bullish")) else "Bearish BOS/MSS" if safe_bool(last.get("bos_bearish")) or safe_bool(last.get("mss_bearish")) else "None"})
-            except Exception:
-                pass
-        rs[n] = details
-        contribution = weight * (strength / 10.0)
-        if bias == "BULLISH": bu += contribution
-        elif bias == "BEARISH": be += contribution
-        if details["available"]: tot += weight
+    for n, (p, i, w) in fr.items():
+        f = get_historical_data(symbol, p, i)
+        b, s = timeframe_bias(f, pair_name)
+        rs[n] = {"bias": b, "strength": s, "weight": w}
+        c = w * (s / 10.0)
+        if b == "BULLISH": bu += c
+        elif b == "BEARISH": be += c
+        tot += w
     fi = ("BULLISH" if bu > be*1.20 and bu > 1.5
           else "BEARISH" if be > bu*1.20 and be > 1.5 else "NEUTRAL")
     cf = clamp(50 + abs(bu-be)/max(tot,1)*50, 50, 95)
-    # Consensus counts valid directional frames only; 5M excluded from higher-level consensus.
-    consensus_frames = [v for k,v in rs.items() if k!="5M" and v.get("available") and v.get("bias") in ("BULLISH","BEARISH")]
-    bull_count=sum(v["bias"]=="BULLISH" for v in consensus_frames)
-    bear_count=sum(v["bias"]=="BEARISH" for v in consensus_frames)
-    rs["consensus"]={"frames_checked":len(consensus_frames),"bullish":bull_count,
-                      "bearish":bear_count,"score":max(bull_count,bear_count),
-                      "label":"Strong alignment" if max(bull_count,bear_count)>=3 and min(bull_count,bear_count)==0 else "Partial alignment" if bull_count!=bear_count else "Conflicting/neutral"}
     return fi, cf, rs
-
-
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1629,8 +1353,6 @@ def get_dxy_context():
     return "NEUTRAL", 50, {"trend": "USD neutral"}
 
 
-
-
 def get_pair_usd_context(pair_name, dxy_bias="NEUTRAL"):
     b, q = parse_pair_currencies(pair_name)
     if not b or not q: return 0.0, "لا تأثير مباشر"
@@ -1644,8 +1366,6 @@ def get_pair_usd_context(pair_name, dxy_bias="NEUTRAL"):
     return 0.0, "محايد"
 
 
-
-
 @st.cache_data(ttl=300, show_spinner=False)
 def get_gold_dxy_correlation():
     d = get_historical_data("DX-Y.NYB", "3mo", "4h")
@@ -1655,8 +1375,6 @@ def get_gold_dxy_correlation():
                  axis=1, join="inner").dropna()
     if len(a) < 30: return None
     return float(a.iloc[:,0].rolling(30).corr(a.iloc[:,1]).iloc[-1])
-
-
 
 
 def detect_regime(df):
@@ -1684,10 +1402,6 @@ def detect_regime(df):
 
 
 
-
-
-
-
 @st.cache_data(ttl=180, show_spinner=False)
 def htf_zone_filter(symbol, direction, profile_key):
     try:
@@ -1701,8 +1415,6 @@ def htf_zone_filter(symbol, direction, profile_key):
         if direction == "SELL" and ip: return True, "SELL في Premium ✅", "PREMIUM"
         return True, "HTF محايد", "MID"
     except Exception: return True, "HTF فشل", "UNKNOWN"
-
-
 
 
 @st.cache_data(ttl=180, show_spinner=False)
@@ -1727,8 +1439,6 @@ def ltf_entry_trigger(symbol, direction, profile_key):
     except Exception: return True, "LTF فشل"
 
 
-
-
 def session_filter(pair_name, strict=True):
     h = datetime.now(timezone.utc).hour
     lo = 7 <= h <= 16; no = 12 <= h <= 21; ov = 12 <= h <= 16; asi = 0 <= h <= 7
@@ -1748,8 +1458,6 @@ def session_filter(pair_name, strict=True):
     return True, "غير مشدّد", "OFF"
 
 
-
-
 def volatility_regime_filter(df):
     a = df["atr"].dropna() if "atr" in df.columns else pd.Series()
     if len(a) < 100: return True, "بيانات قليلة", "NORMAL"
@@ -1761,8 +1469,6 @@ def volatility_regime_filter(df):
     if 1.5 < z <= 2.5: return True, f"تقلب مرتفع", "HIGH"
     if -1.0 <= z < -0.3: return True, f"تقلب منخفض", "LOW"
     return True, f"طبيعي (Z={z:.1f})", "NORMAL"
-
-
 
 
 def weighted_confluence(pillar_data, direction):
@@ -1777,16 +1483,12 @@ def weighted_confluence(pillar_data, direction):
     return clamp(t, 0, 100)
 
 
-
-
 def compute_soft_penalty(items, strict=False):
     if not items or not strict: return 0.0, []
     si = sorted([i for i in items if i[1] > 0], key=lambda x: x[1], reverse=True)[:SOFT_PENALTY_TOP_N]
     w = [1.0, 0.5, 0.25]
     tot = sum(p*w for (_,p), w in zip(si, w))
     return min(tot, MAX_SOFT_PENALTY), si
-
-
 
 
 def news_time_block(events, pair_name, window=45):
@@ -1812,8 +1514,6 @@ def news_time_block(events, pair_name, window=45):
     return False, ""
 
 
-
-
 def displacement_check(df, direction):
     if len(df) < 2: return False, "بيانات قليلة"
     l = df.iloc[-1]; atr = safe_float(l.get("atr"), 0)
@@ -1825,16 +1525,12 @@ def displacement_check(df, direction):
     return True, f"Displacement {b/atr:.1f}x ✅"
 
 
-
-
 def in_kill_zone(asset_type):
     h = datetime.now(timezone.utc).hour
     if asset_type == "crypto": return True, "Crypto 24/7"
     for n, (s, e) in KILL_ZONES.items():
         if s <= h < e: return True, f"{n} ✅"
     return False, "خارج Kill Zones"
-
-
 
 
 def ote_filter(df, direction):
@@ -1851,8 +1547,6 @@ def ote_filter(df, direction):
         r = (c - sl_v) / leg
         if 0.55 <= r <= 0.85: return True, f"OTE هابط {r*100:.0f}% ✅"
         return False, f"خارج OTE ({r*100:.0f}%)"
-
-
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1878,67 +1572,8 @@ def weekly_bias(symbol, pair_name):
 
 
 
-
-
-
-
 PILLAR_WEIGHTS = {"structure": 0.28, "trend": 0.18, "momentum": 0.14,
                   "volume": 0.14, "context": 0.26}
-
-
-
-
-
-def smc_setup_engine(df, lookback=40):
-    """Sequential SMC/ICT setup recognition (diagnostic; does not force trades)."""
-    result = {"direction":"NEUTRAL", "state":"NO_SETUP", "label":"لا يوجد نموذج مكتمل",
-              "sweep":False, "displacement":False, "fvg":False, "mitigation":False,
-              "rejection":False, "zone_low":None, "zone_high":None, "target":None,
-              "invalid_reason":None, "details":[]}
-    if df is None or len(df) < 10:
-        result["state"] = "INSUFFICIENT_DATA"; result["label"] = "بيانات غير كافية"; return result
-    w = df.tail(max(lookback, 10)).copy(); l = w.iloc[-1]
-    atr = safe_float(l.get("atr"), 0.0)
-    if not atr or atr <= 0: result["state"] = "INSUFFICIENT_DATA"; result["label"] = "ATR غير متاح"; return result
-    # Recent sweep / displacement flags (separate events are evaluated in sequence).
-    bull_sweep = w.get("liquidity_sweep_bullish", pd.Series(False,index=w.index)).tail(8).any()
-    bear_sweep = w.get("liquidity_sweep_bearish", pd.Series(False,index=w.index)).tail(8).any()
-    bull_disp = ((w["close"] > w["open"]) & ((w["close"]-w["open"]).abs() >= 1.2*w["atr"])).tail(6).any()
-    bear_disp = ((w["close"] < w["open"]) & ((w["close"]-w["open"]).abs() >= 1.2*w["atr"])).tail(6).any()
-    # Select direction using the most recent relevant event.
-    ev=[]
-    for ix,row in w.tail(10).iterrows():
-        if safe_bool(row.get("liquidity_sweep_bullish")): ev.append((ix,"BUY"))
-        if safe_bool(row.get("liquidity_sweep_bearish")): ev.append((ix,"SELL"))
-    direction = ev[-1][1] if ev else ("SELL" if bear_disp and not bull_disp else "BUY" if bull_disp and not bear_disp else "NEUTRAL")
-    result["direction"] = direction
-    if direction == "NEUTRAL": result["state"]="NO_SETUP"; result["label"]="لا يوجد Sweep/Displacement اتجاهي واضح"; return result
-    result["sweep"] = bool(bull_sweep if direction=="BUY" else bear_sweep)
-    result["displacement"] = bool(bull_disp if direction=="BUY" else bear_disp)
-    # Find recent FVG in the setup direction, preferring the most recent unmitigated zone.
-    lo_col,hi_col,flag = (("fvg_bull_low","fvg_bull_high","fvg_bullish") if direction=="BUY" else ("fvg_bear_low","fvg_bear_high","fvg_bearish"))
-    zones=[]
-    if flag in w.columns and lo_col in w.columns and hi_col in w.columns:
-        for ix in w.index[w[flag].fillna(False)]:
-            lo=safe_float(w.loc[ix,lo_col],np.nan); hi=safe_float(w.loc[ix,hi_col],np.nan)
-            if np.isfinite(lo) and np.isfinite(hi) and hi>lo: zones.append((ix,lo,hi))
-    if zones:
-        _,zlo,zhi=zones[-1]; result["fvg"]=True; result["zone_low"]=zlo; result["zone_high"]=zhi
-        price=safe_float(l.get("close"),0); result["mitigation"]=(zlo<=price<=zhi)
-        result["rejection"]=(result["mitigation"] and ((direction=="BUY" and l["close"]>l["open"] and l["close"]>zlo) or (direction=="SELL" and l["close"]<l["open"] and l["close"]<zhi)))
-    # Candidate liquidity target: recent swing opposite side.
-    target_col="swing_high_price" if direction=="BUY" else "swing_low_price"
-    if target_col in w.columns:
-        vals=w[target_col].dropna(); result["target"]=safe_float(vals.iloc[-1],None) if len(vals) else None
-    if not result["sweep"]: state="WAITING_FOR_SWEEP"; label="انتظار سحب السيولة"
-    elif not result["displacement"]: state="WAITING_FOR_DISPLACEMENT"; label="Sweep مرصود — انتظار حركة قوية"
-    elif not result["fvg"]: state="WAITING_FOR_FVG"; label="حركة قوية — انتظار FVG"
-    elif not result["mitigation"]: state="WAITING_FOR_RETRACEMENT"; label="انتظار عودة السعر إلى FVG"
-    elif not result["rejection"]: state="WAITING_FOR_CONFIRMATION"; label="السعر داخل FVG — انتظار رفض/تأكيد"
-    else: state="ENTRY_CONFIRMED"; label="تأكيد مبدئي للنموذج — تحقق من شروط التنفيذ والمخاطر"
-    result["state"]=state; result["label"]=label
-    result["details"]=[f"الاتجاه: {direction}",f"Sweep: {'نعم' if result['sweep'] else 'لا'}",f"Displacement: {'نعم' if result['displacement'] else 'لا'}",f"FVG: {'نعم' if result['fvg'] else 'لا'}",f"Mitigation: {'نعم' if result['mitigation'] else 'لا'}",f"Rejection: {'نعم' if result['rejection'] else 'لا'}"]
-    return result
 
 
 def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
@@ -2016,8 +1651,6 @@ def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
             "fund_buy": fb, "fund_sell": fs}
 
 
-
-
 def get_fundamental_score(pair_name, ccy_strength=None, rate_diff=0.0,
                           risk=None, bonds=None, sentiment=None):
     if ccy_strength is None: ccy_strength = get_currency_strength_matrix()
@@ -2053,8 +1686,6 @@ def get_fundamental_score(pair_name, ccy_strength=None, rate_diff=0.0,
             det.append({"factor": "Bond Yields", "buy": bbb, "sell": bsb, "msg": bmsg})
             bb += bbb; sb += bsb
     return clamp(bb, 0, 100), clamp(sb, 0, 100), det
-
-
 
 
 def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
@@ -2102,10 +1733,6 @@ def confirmation_gate(df, direction, pillar_scores, regime, mtf_bias="NEUTRAL",
 
 
 
-
-
-
-
 def latest_structure_levels(df):
     lo = df.index[df["swing_low"]].tolist()
     hi = df.index[df["swing_high"]].tolist()
@@ -2121,10 +1748,6 @@ def latest_structure_levels(df):
 
 
 
-
-
-
-
 def calc_pivot_points(df):
     if len(df) < 2: return None
     l = df.iloc[-1]; h = float(l["high"]); lo = float(l["low"]); c = float(l["close"])
@@ -2136,8 +1759,6 @@ def calc_pivot_points(df):
             "fib_r1": p+0.382*rng, "fib_r2": p+0.618*rng, "fib_r3": p+1.000*rng,
             "fib_s1": p-0.382*rng, "fib_s2": p-0.618*rng, "fib_s3": p-1.000*rng,
             "high": h, "low": lo, "close": c}
-
-
 
 
 def find_impulse_leg(df, direction, lookback=120):
@@ -2167,8 +1788,6 @@ def find_impulse_leg(df, direction, lookback=120):
         return {"start": st, "end": e, "leg": st-e, "direction": "SELL"}
 
 
-
-
 def fib_levels_from_impulse(impulse):
     if not impulse: return None
     s, e, lg = impulse["start"], impulse["end"], impulse["leg"]
@@ -2179,10 +1798,6 @@ def fib_levels_from_impulse(impulse):
                             "0.618": r(0.618), "0.786": r(0.786)},
             "extension": {"1.000": e, "1.272": x(1.272), "1.618": x(1.618),
                           "2.000": x(2.000), "2.618": x(2.618)}}
-
-
-
-
 
 
 
@@ -2204,10 +1819,6 @@ def collect_sr_levels(df, lookback=200):
         lv.append(float(w["high"].iloc[-20:].max()))
         lv.append(float(w["low"].iloc[-20:].min()))
     return sorted({l for l in lv if np.isfinite(l) and l > 0})
-
-
-
-
 
 
 
@@ -2235,10 +1846,6 @@ def detect_inducement(df, direction, lookback=50):
         pc = "swing_high_price" if "swing_high_price" in work.columns else "high"
         return safe_float(work.loc[prior[-1], pc],
                           safe_float(work.loc[prior[-1], "high"]))
-
-
-
-
 
 
 
@@ -2290,10 +1897,6 @@ def find_nearest_liquidity(df, current_price, direction, lookback=100):
 
 
 
-
-
-
-
 def find_nearest_fvg(df, current_price, direction, lookback=100):
     work = df.iloc[-lookback:] if len(df) > lookback else df
     fvgs = []
@@ -2315,10 +1918,6 @@ def find_nearest_fvg(df, current_price, direction, lookback=100):
 
 
 
-
-
-
-
 def find_order_block_levels(df, current_price, direction, lookback=100):
     work = df.iloc[-lookback:] if len(df) > lookback else df
     obs = []
@@ -2336,10 +1935,6 @@ def find_order_block_levels(df, current_price, direction, lookback=100):
                 obs.append({"name": "Bear OB", "low": lo, "high": hi, "mid": (lo+hi)/2})
     obs.sort(key=lambda x: x["mid"], reverse=(direction == "SELL"))
     return obs[:3]
-
-
-
-
 
 
 
@@ -2397,8 +1992,6 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         if np.isfinite(lvl): all_levels.append((lvl, "S/R", "sr"))
 
 
-
-
     buffer_price = 0.15 * atr
     if direction == "BUY":
         candidates = [(lvl, nm, src) for lvl, nm, src in all_levels
@@ -2410,13 +2003,9 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         candidates.sort(key=lambda x: x[0])
 
 
-
-
     min_dist = SL_MIN_DIST_ATR * atr
     max_dist = SL_MAX_DIST_ATR * atr
     chosen_level = None; chosen_name = "ATR Fallback"
-
-
 
 
     for lvl, nm, src in candidates:
@@ -2436,8 +2025,6 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         chosen_name = "ATR (No levels)"
 
 
-
-
     if direction == "BUY":
         sl = chosen_level - SL_BUFFER_ATR * atr
     else:
@@ -2448,12 +2035,8 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
         if (sl - current_price) < min_dist: sl = current_price + min_dist
 
 
-
-
     risk = abs(current_price - sl)
     if risk <= 0: return None
-
-
 
 
     liq_tp = find_nearest_liquidity(df, current_price, direction)
@@ -2510,8 +2093,6 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
     tp_cands.sort(key=lambda x: x[0], reverse=(direction == "SELL"))
 
 
-
-
     RR1, RR2, RR3 = MIN_RR_TP1, MIN_RR_TP2, MIN_RR_TP3
     min_t1 = current_price + risk * RR1 if direction == "BUY" else current_price - risk * RR1
     min_t2 = current_price + risk * RR2 if direction == "BUY" else current_price - risk * RR2
@@ -2547,10 +2128,6 @@ def calculate_ict_sl_tp(df, direction, current_price, profile):
 
 
 
-
-
-
-
 def validate_levels(signal, levels, profile):
     if not levels: return False, "لا مستويات"
     if signal == "BUY":
@@ -2567,15 +2144,9 @@ def validate_levels(signal, levels, profile):
 
 
 
-
-
-
-
 # ============================================================
 # FLIP DETECTION
 # ============================================================
-
-
 
 
 def detect_reversal_candle(df):
@@ -2603,10 +2174,6 @@ def detect_reversal_candle(df):
     if upper_wick > 3 * body and last["close"] < last["open"]:
         patterns.append(("Bearish Pin Bar", "BEARISH", 70))
     return patterns
-
-
-
-
 
 
 
@@ -2671,10 +2238,6 @@ def check_level_proximity(df, current_price, direction_of_flip, atr):
 
 
 
-
-
-
-
 def detect_signal_flip(df, current_price, original_signal, profile):
     if original_signal not in ("BUY", "SELL"): return None
     atr = safe_float(df["atr"].iloc[-1], np.nan)
@@ -2685,15 +2248,11 @@ def detect_signal_flip(df, current_price, original_signal, profile):
     total_score = 0.0
 
 
-
-
     candles = detect_reversal_candle(df) or []
     for pat_name, pat_dir, pat_score in candles:
         if pat_dir == flip_signal:
             triggers.append({"name": f"شمعة {pat_name}", "score": pat_score, "icon": "🕯️"})
             total_score += pat_score * 0.3
-
-
 
 
     level_hits = check_level_proximity(df, current_price, flip_signal, atr)
@@ -2702,22 +2261,16 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         total_score += 25
 
 
-
-
     if flip_signal == "BUY" and safe_bool(last.get("mss_bullish")):
         triggers.append({"name": "MSS صاعد", "score": 80, "icon": "🔄"}); total_score += 30
     if flip_signal == "SELL" and safe_bool(last.get("mss_bearish")):
         triggers.append({"name": "MSS هابط", "score": 80, "icon": "🔄"}); total_score += 30
 
 
-
-
     if flip_signal == "BUY" and safe_bool(last.get("liquidity_sweep_bullish")):
         triggers.append({"name": "Liquidity Sweep صاعد", "score": 75, "icon": "💧"}); total_score += 25
     if flip_signal == "SELL" and safe_bool(last.get("liquidity_sweep_bearish")):
         triggers.append({"name": "Liquidity Sweep هابط", "score": 75, "icon": "💧"}); total_score += 25
-
-
 
 
     dv = detect_divergence(df)
@@ -2727,15 +2280,11 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         triggers.append({"name": "RSI Divergence هابط", "score": 70, "icon": "📉"}); total_score += 20
 
 
-
-
     s_ = structure_state(df)
     if flip_signal == "BUY" and s_["bullish"] and original_signal == "SELL":
         triggers.append({"name": "الهيكل انقلب صاعداً", "score": 85, "icon": "🏗️"}); total_score += 35
     if flip_signal == "SELL" and s_["bearish"] and original_signal == "BUY":
         triggers.append({"name": "الهيكل انقلب هابطاً", "score": 85, "icon": "🏗️"}); total_score += 35
-
-
 
 
     rsi = safe_float(last.get("rsi"), 50)
@@ -2745,15 +2294,11 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         triggers.append({"name": f"RSI Overbought ({rsi:.0f})", "score": 65, "icon": "⚡"}); total_score += 15
 
 
-
-
     vwap = safe_float(last.get("vwap"), current_price)
     if flip_signal == "BUY" and current_price > vwap * 1.002:
         triggers.append({"name": "فوق VWAP", "score": 55, "icon": "📊"}); total_score += 10
     if flip_signal == "SELL" and current_price < vwap * 0.998:
         triggers.append({"name": "تحت VWAP", "score": 55, "icon": "📊"}); total_score += 10
-
-
 
 
     if flip_signal == "BUY" and last["macd"] > last["macd_signal"] and last["macd_histogram"] > 0:
@@ -2762,14 +2307,10 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         triggers.append({"name": "MACD انقلب هابطاً", "score": 60, "icon": "📉"}); total_score += 15
 
 
-
-
     if flip_signal == "BUY" and last["ema20"] > last["ema50"] and original_signal == "SELL":
         triggers.append({"name": "EMA20 > EMA50", "score": 60, "icon": "📈"}); total_score += 12
     if flip_signal == "SELL" and last["ema20"] < last["ema50"] and original_signal == "BUY":
         triggers.append({"name": "EMA20 < EMA50", "score": 60, "icon": "📉"}); total_score += 12
-
-
 
 
     total_score = clamp(total_score, 0, 100)
@@ -2777,8 +2318,6 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         return {"flip_signal": None, "confidence": total_score,
                 "triggers": triggers, "status": "NO_FLIP",
                 "message": "لا يوجد انعكاس", "new_levels": None}
-
-
 
 
     if total_score >= 65:
@@ -2789,23 +2328,15 @@ def detect_signal_flip(df, current_price, original_signal, profile):
         status = "WEAK_FLIP"; msg = f"💡 إشارة {flip_signal} مستقلة أولية"
 
 
-
-
     new_levels = None
     try:
         new_levels = calculate_ict_sl_tp(df, flip_signal, current_price, profile)
     except Exception: pass
 
 
-
-
     return {"flip_signal": flip_signal, "confidence": total_score,
             "triggers": triggers, "status": status,
             "message": msg, "new_levels": new_levels}
-
-
-
-
 
 
 
@@ -2816,15 +2347,9 @@ def flip_raw_to_pct(raw_score):
 
 
 
-
-
-
-
 # ============================================================
 # ENTRY CONFIRMATION
 # ============================================================
-
-
 
 
 def entry_confirmation_score(df, direction, levels, pair_name):
@@ -2835,11 +2360,7 @@ def entry_confirmation_score(df, direction, levels, pair_name):
     if atr <= 0: return None
 
 
-
-
     checks = []; total = 0
-
-
 
 
     if direction == "BUY":
@@ -2854,16 +2375,12 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "شمعة غير مؤكدة", "pass": False, "score": 0, "icon": "🕯️"})
 
 
-
-
     s_ = structure_state(df)
     struct_ok = (direction == "BUY" and s_["bullish"]) or (direction == "SELL" and s_["bearish"])
     if struct_ok:
         checks.append({"name": "الهيكل يدعم", "pass": True, "score": 15, "icon": "🏗️"}); total += 15
     else:
         checks.append({"name": "الهيكل ضد", "pass": False, "score": 0, "icon": "🏗️"})
-
-
 
 
     vol_avg = df["volume"].rolling(20).mean().iloc[-1]
@@ -2876,8 +2393,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "فوليوم ضعيف", "pass": False, "score": 0, "icon": "📊"})
 
 
-
-
     rsi = safe_float(last.get("rsi"), 50)
     macd_ok = (direction == "BUY" and last["macd_histogram"] > 0) or \
               (direction == "SELL" and last["macd_histogram"] < 0)
@@ -2888,8 +2403,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "زخم جزئي", "pass": True, "score": 5, "icon": "⚡"}); total += 5
     else:
         checks.append({"name": "زخم ضد", "pass": False, "score": 0, "icon": "⚡"})
-
-
 
 
     ema20 = safe_float(last.get("ema20"), 0)
@@ -2905,8 +2418,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "EMA20 غير متاح", "pass": False, "score": 0, "icon": "📍"})
 
 
-
-
     h = datetime.now(timezone.utc).hour
     asset = asset_type_from_name(pair_name)
     active = (7 <= h <= 21) or asset == "crypto"
@@ -2916,16 +2427,12 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "خارج الجلسات", "pass": False, "score": 0, "icon": "🕐"})
 
 
-
-
     dv = detect_divergence(df)
     div_ok = (direction == "BUY" and dv != "BEARISH") or (direction == "SELL" and dv != "BULLISH")
     if div_ok:
         checks.append({"name": "لا Divergence ضد", "pass": True, "score": 10, "icon": "🔄"}); total += 10
     else:
         checks.append({"name": "Divergence ضد", "pass": False, "score": 0, "icon": "🔄"})
-
-
 
 
     vwap = safe_float(last.get("vwap"), 0)
@@ -2940,8 +2447,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "VWAP غير متاح", "pass": False, "score": 0, "icon": "📉"})
 
 
-
-
     bos_ok = False
     try:
         if direction == "BUY" and "bos_bullish" in df.columns:
@@ -2953,8 +2458,6 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "BOS حديث", "pass": True, "score": 10, "icon": "🔓"}); total += 10
     else:
         checks.append({"name": "لا BOS حديث", "pass": False, "score": 0, "icon": "🔓"})
-
-
 
 
     zone_ok = False
@@ -2972,18 +2475,12 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         checks.append({"name": "منطقة دخول متباعدة", "pass": True, "score": 3, "icon": "🎯"}); total += 3
 
 
-
-
     final_total = max(0, min(total, 100))
-
-
 
 
     enter_thr = int(MIN_EMIT_CONFIDENCE)
     retr_thr  = max(55, enter_thr - 15)
     close_thr = max(35, enter_thr - 35)
-
-
 
 
     if final_total >= enter_thr:
@@ -2996,15 +2493,9 @@ def entry_confirmation_score(df, direction, levels, pair_name):
         verdict = "NO_ENTRY"; vtext = "🔴 لا تدخل الآن"; vcolor = "#f57a7a"
 
 
-
-
     return {"score": final_total, "raw_score": total,
             "verdict": verdict, "verdict_text": vtext,
             "verdict_color": vcolor, "checks": checks}
-
-
-
-
 
 
 
@@ -3019,10 +2510,6 @@ def compute_flip_grade(conf_pct, ec_score):
 
 
 
-
-
-
-
 def passes_confidence_gate(signal_conf, entry_score=None):
     if signal_conf < MIN_EMIT_CONFIDENCE:
         return False, f"الثقة {signal_conf:.1f}% < {MIN_EMIT_CONFIDENCE:.0f}%"
@@ -3033,167 +2520,6 @@ def passes_confidence_gate(signal_conf, entry_score=None):
 
 
 
-
-
-
-
-
-def build_full_analysis_audit(df, signal_result, mtf_details=None, filters=None,
-                             smc_setup=None, levels=None, pair_name=""):
-    """Transparent audit of which analysis families produced usable data."""
-    mtf_details = mtf_details or {}
-    filters = filters or {}
-    smc_setup = smc_setup or {}
-    levels = levels or {}
-
-    def present_columns(cols):
-        if df is None or not all(c in df.columns for c in cols):
-            return False
-        try:
-            return all(pd.notna(df.iloc[-1][c]) for c in cols)
-        except Exception:
-            return False
-
-    technical_groups = {
-        "Trend / EMA": {"columns": ["ema20", "ema50", "ema200"]},
-        "Momentum (RSI/MACD)": {"columns": ["rsi", "macd", "macd_signal", "macd_histogram"]},
-        "Volatility (ATR/BB)": {"columns": ["atr", "bb_upper", "bb_lower"]},
-        "Volume / VWAP / CMF": {"columns": ["vwap", "chaikin_mf", "volume"]},
-        "Market structure": {"columns": ["swing_high", "swing_low", "bos_bullish", "bos_bearish",
-                                          "mss_bullish", "mss_bearish"]},
-        "SMC liquidity / zones": {"columns": ["liquidity_sweep_bullish", "liquidity_sweep_bearish",
-                                               "fvg_bullish", "fvg_bearish",
-                                               "order_block_bullish", "order_block_bearish"]},
-        "Premium / Discount": {"columns": ["in_premium", "in_discount"]},
-        "Divergence": {"available": df is not None and len(df) >= 30},
-        "Candle confirmation": {"available": signal_result.get("confirmation_score") is not None},
-        "Technical Levels (Pivot/Fib/SR)": {"available": bool(levels and levels.get("sources"))},
-    }
-    technical = {}
-    for name, spec in technical_groups.items():
-        ok = spec.get("available", present_columns(spec.get("columns", [])))
-        _detail = ("تم فحصها؛ لا توجد إشارة Divergence" if name == "Divergence" and
-                   signal_result.get("divergence") is None else
-                   "المكونات الحسابية متاحة" if ok else "أعمدة/بيانات غير مكتملة")
-        technical[name] = {"status": "AVAILABLE" if ok else "MISSING_DATA",
-                           "detail": _detail}
-
-    mtf_items = {}
-    for tf, info in mtf_details.items():
-        if tf == "consensus":
-            continue
-        info = info or {}
-        mtf_items[tf] = {
-            "status": "AVAILABLE" if info.get("available") else "MISSING_DATA",
-            "bias": info.get("bias", "UNKNOWN"),
-            "source": info.get("source", "—"),
-            "data_time": info.get("data_time", "—"),
-            "strength": info.get("strength", 0),
-        }
-    mtf_available = sum(v["status"] == "AVAILABLE" for v in mtf_items.values())
-    mtf_total = len(mtf_items)
-
-    base_ccy, quote_ccy = parse_pair_currencies(pair_name)
-    _ccy_data = signal_result.get("currency_strength_data") or {}
-    _rates_applicable = base_ccy in CENTRAL_BANK_RATES and quote_ccy in CENTRAL_BANK_RATES
-    _strength_applicable = base_ccy in _ccy_data and quote_ccy in _ccy_data
-    _is_gold = "GOLD" in str(pair_name).upper() or "XAU" in str(pair_name).upper()
-    _ml_status = signal_result.get("ml_status", "no_model")
-    context_states = {
-        "DXY Context": ("AVAILABLE" if signal_result.get("dxy_bias") not in (None, "UNKNOWN") else "UNAVAILABLE",
-                        str(signal_result.get("dxy_bias", "—"))),
-        "Currency Strength": ("AVAILABLE" if _strength_applicable and
-                             any(np.isfinite(safe_float(v, np.nan)) for v in
-                                 [_ccy_data.get(base_ccy), _ccy_data.get(quote_ccy)])
-                             else "UNAVAILABLE_OR_NOT_APPLICABLE",
-                            f"{base_ccy}/{quote_ccy}"),
-        "Interest Rate Differential": ("AVAILABLE" if _rates_applicable else "NOT_APPLICABLE",
-                                      f"فرق المعدلات: {signal_result.get('rate_diff', '—')}"),
-        "Risk Sentiment": ("AVAILABLE" if signal_result.get("risk_data") and
-                           signal_result["risk_data"].get("vix") is not None else "UNAVAILABLE",
-                           str((signal_result.get("risk_data") or {}).get("msg", "VIX غير متاح"))),
-        "Bond Yields": ("AVAILABLE" if signal_result.get("bond_data") and
-                        signal_result["bond_data"].get("us10y") is not None else "UNAVAILABLE",
-                        str((signal_result.get("bond_data") or {}).get("us10y_trend", "غير متاح"))),
-        "Retail Sentiment": ("AVAILABLE" if signal_result.get("sentiment_data") and
-                             "غير كافية" not in str(signal_result["sentiment_data"].get("msg",""))
-                             else "UNAVAILABLE",
-                            str((signal_result.get("sentiment_data") or {}).get("msg", "—"))),
-        "Gold/DXY Correlation": ("AVAILABLE" if signal_result.get("gold_corr") is not None else
-                                 "UNAVAILABLE" if _is_gold else "NOT_APPLICABLE",
-                                str(signal_result.get("gold_corr", "لا ينطبق"))),
-        "Divergence": ("AVAILABLE" if signal_result.get("divergence") is not None else "NO_SIGNAL",
-                      str(signal_result.get("divergence", "لم يظهر تضارب"))),
-        "Fundamental Score": ("AVAILABLE" if signal_result.get("fund_buy") is not None and
-                              signal_result.get("fund_sell") is not None else "UNAVAILABLE",
-                             f"BUY {signal_result.get('fund_buy', '—')} / SELL {signal_result.get('fund_sell', '—')}"),
-        "Machine Learning": ("AVAILABLE" if _ml_status == "applied" else "OPTIONAL_NOT_ACTIVE",
-                            str(_ml_status)),
-    }
-    context = {k: {"status": status, "detail": detail}
-               for k, (status, detail) in context_states.items()}
-
-    timing = {}
-    for name, info in filters.items():
-        timing[name] = {"status": "PASS" if info.get("pass") else "BLOCK/CAUTION",
-                        "detail": info.get("msg", "—")}
-    time_filter_names = {"Session", "Kill Zone", "News Window", "Market Open"}
-    time_items = {k:v for k,v in timing.items() if k in time_filter_names}
-    timing_count = sum(1 for v in time_items.values() if v["status"] == "PASS")
-    timing_total = len(time_items)
-    timing_score = round(100 * timing_count / timing_total, 1) if timing_total else None
-
-    smc_tools = {
-        "Sequential Setup Engine": {"status": smc_setup.get("state", "UNKNOWN"),
-                                    "detail": smc_setup.get("label", "—")},
-        "SMC Quality": {"status": "AVAILABLE", "detail": "تقييم العناصر البنيوية"},
-    }
-    smc_score, smc_reasons = smc_quality(df) if df is not None else (0.0, [])
-    risk = {
-        "SL/TP Levels": {"status": "VALID" if levels else "UNAVAILABLE",
-                         "detail": "مستويات صالحة" if levels else "لم يتم إنشاء مستويات"},
-        "Entry Confirmation": {"status": "AVAILABLE",
-                                "detail": f"{signal_result.get('confirmation_score', 0):.1f}/100"},
-        "Execution Gate": {"status": signal_result.get("execution_status", "UNKNOWN"),
-                           "detail": signal_result.get("execution_reason", "—")},
-    }
-
-    # Coverage reports availability, not bullish/bearish agreement. Missing/not-applicable
-    # tools are explicitly disclosed instead of being treated as positive evidence.
-    sections = {
-        "technical": technical,
-        "mtf": mtf_items,
-        "context": context,
-        "timing": timing,
-        "smc": smc_tools,
-        "risk_execution": risk,
-    }
-    counts = {}
-    for section, items in sections.items():
-        if section == "mtf":
-            counts[section] = {"available": mtf_available, "total": mtf_total}
-        elif section == "timing":
-            counts[section] = {"available": len(items), "total": len(items)}
-        else:
-            vals = list(items.values())
-            unavailable_states = {"MISSING_DATA", "UNAVAILABLE", "UNAVAILABLE_OR_NOT_APPLICABLE",
-                                  "UNKNOWN", "INSUFFICIENT_DATA", "—"}
-            excluded_states = {"NOT_APPLICABLE", "OPTIONAL_NOT_ACTIVE"}
-            counts[section] = {
-                "available": sum(v.get("status") not in unavailable_states | excluded_states
-                                for v in vals),
-                "total": sum(v.get("status") not in excluded_states for v in vals)}
-    total_avail = sum(v["available"] for v in counts.values())
-    total_items = sum(v["total"] for v in counts.values())
-    completeness = round(100 * total_avail / total_items, 1) if total_items else 0.0
-    return {
-        "sections": sections, "counts": counts, "completeness": completeness,
-        "smc_quality": smc_score, "smc_quality_reasons": smc_reasons,
-        "mtf_available": mtf_available, "mtf_total": mtf_total,
-        "temporal_score": timing_score,
-    }
-
-
 def generate_signal(df, current_price, pair_name, symbol,
                     news_block=False, skip_external_filters=False,
                     precomputed=None, strict_soft=False):
@@ -3202,8 +2528,6 @@ def generate_signal(df, current_price, pair_name, symbol,
                  "bos_bullish","vwap","bb_upper"}
     if not _required.issubset(df.columns):
         df = build_features(df, profile)
-
-
 
 
     if precomputed is None:
@@ -3223,13 +2547,9 @@ def generate_signal(df, current_price, pair_name, symbol,
         rk = precomputed.get("risk"); bd = precomputed.get("bonds"); sent = precomputed.get("sentiment")
 
 
-
-
     sc = directional_score(df, pair_name, symbol, dxy_bias=dxy, gold_corr=gc,
                           ccy_strength=ccs, rate_diff=rd, risk=rk, bonds=bd)
     if sent is None: sent = estimate_retail_sentiment(df, profile)
-
-
 
 
     buy, sell = sc["buy"], sc["sell"]
@@ -3252,8 +2572,6 @@ def generate_signal(df, current_price, pair_name, symbol,
             if cand_dir == "SELL" and sell <= buy: sell = buy + 1.0
             gap = abs(buy - sell)
     signal = "WAIT" if gap < MIN_SIGNAL_GAP else ("BUY" if buy > sell else "SELL")
-
-
 
 
     l = df.iloc[-1]
@@ -3350,14 +2668,10 @@ def generate_signal(df, current_price, pair_name, symbol,
         ec = clamp(ec, 0, 99)
 
 
-
-
     cs_a_plus = _p["cs_a_plus"]
     cs_a = _p["cs_a"]
     cs_b = _p["cs_b"]
     cs_c = _p["cs_c"]
-
-
 
 
     if ec >= A_PLUS_MIN and cs >= cs_a_plus: tg = "A+"
@@ -3365,8 +2679,6 @@ def generate_signal(df, current_price, pair_name, symbol,
     elif ec >= B_MIN and cs >= cs_b: tg = "B"
     elif ec >= C_MIN and cs >= cs_c: tg = "C"
     else: tg = "WAIT"
-
-
 
 
     if skip_external_filters:
@@ -3396,24 +2708,7 @@ def generate_signal(df, current_price, pair_name, symbol,
             es, er = "WAIT", "لا اجتياز"
     conf = ec
     adv = ", ".join(f"{n}({p})" for n,p in sp) or "None"
-    smc_setup = smc_setup_engine(df, lookback=40)
-    analysis_audit = build_full_analysis_audit(
-        df, {"divergence": sc.get("divergence"), "confirmation_score": cs,
-             "dxy_bias": sc.get("dxy_bias"), "rate_diff": rd,
-             "sentiment_data": sent, "risk_data": rk, "bond_data": bd,
-             "fund_buy": sc.get("fund_buy"), "fund_sell": sc.get("fund_sell"),
-             "currency_strength_data": ccs, "gold_corr": gc, "ml_status": mlstat,
-             "execution_status": es, "execution_reason": er},
-        mtf_details=mtfd, filters=flt, smc_setup=smc_setup, levels=lv if rok else None,
-        pair_name=pair_name)
-    return {"signal": signal, "confidence": conf, "raw_confidence": rc, "smc_setup": smc_setup,
-            "analysis_audit": analysis_audit,
-            "analysis_completeness": analysis_audit["completeness"],
-            "smc_quality_score": analysis_audit["smc_quality"],
-            "smc_quality_reasons": analysis_audit["smc_quality_reasons"],
-            "mtf_available_count": analysis_audit["mtf_available"],
-            "mtf_total_count": analysis_audit["mtf_total"],
-            "temporal_score": analysis_audit["temporal_score"],
+    return {"signal": signal, "confidence": conf, "raw_confidence": rc,
             "buy_score": buy, "sell_score": sell, "weighted_confluence": wc,
             "pillars": pil, "mtf_bias": mtf, "mtf_conf": mtfc, "mtf_details": mtfd,
             "weekly_bias": wk, "levels": lv if rok else None, "df": df,
@@ -3427,14 +2722,9 @@ def generate_signal(df, current_price, pair_name, symbol,
             "divergence": sc["divergence"], "reasons": sc["reasons"] + cr,
             "fund_details": sc.get("fund_details", []),
             "fund_buy": sc.get("fund_buy", 0), "fund_sell": sc.get("fund_sell", 0),
-            "bond_data": bd, "risk_data": rk, "gold_corr": gc,
-            "sentiment_data": sent, "sentiment_msg": smsg,
+            "bond_data": bd, "sentiment_data": sent, "sentiment_msg": smsg,
             "ml_probability": mlprob, "ml_status": mlstat,
             "rate_diff": rd, "pair_name": pair_name}
-
-
-
-
 
 
 
@@ -3457,8 +2747,6 @@ def _bias_from_slice(df_s, pair_name):
     except Exception: return "NEUTRAL", 50.0
 
 
-
-
 def _weekly_bias_from_slice(df_s, pair_name):
     if df_s is None or len(df_s) < 100: return "NEUTRAL"
     try:
@@ -3472,140 +2760,6 @@ def _weekly_bias_from_slice(df_s, pair_name):
         if last < sma * 0.995: return "BEARISH"
         return "NEUTRAL"
     except Exception: return "NEUTRAL"
-
-
-
-
-
-@st.cache_data(ttl=600, show_spinner=False)
-def backtest_smc_sequence(symbol, pair_name, period="1y", interval="4h",
-                          lookback=40, max_holding_bars=20):
-    """Conservative SMC sequence backtest; signal uses data up to bar i, entry at i+1 open."""
-    try:
-        raw = get_historical_data(symbol, period, interval)
-        if raw is None or len(raw) < 120:
-            return {"error": "بيانات تاريخية غير كافية للاختبار (يلزم 120 شمعة على الأقل)."}
-        df = raw.copy().reset_index(drop=False)
-        # Normalize OHLC column names while preserving calculated indicator columns.
-        cols = {str(c).lower(): c for c in df.columns}
-        for required in ("open", "high", "low", "close"):
-            if required not in cols:
-                return {"error": f"عمود {required.upper()} غير موجود في البيانات."}
-        df = df.rename(columns={cols[k]: k for k in ("open", "high", "low", "close")})
-        if "atr" not in df.columns:
-            return {"error": "ATR غير متوفر؛ لا يمكن اختبار وقف الخسارة بشكل موثوق."}
-
-        trades, skipped = [], 0
-        i = max(60, lookback)
-        while i < len(df) - max_holding_bars - 2:
-            hist = df.iloc[:i+1].copy()
-            setup = smc_setup_engine(hist, lookback=lookback)
-            if setup.get("state") != "ENTRY_CONFIRMED":
-                i += 1
-                continue
-
-            direction = setup.get("direction")
-            zone_lo, zone_hi = setup.get("zone_low"), setup.get("zone_high")
-            atr = safe_float(hist.iloc[-1].get("atr"), 0)
-            if direction not in ("BUY", "SELL") or not atr or atr <= 0 or zone_lo is None or zone_hi is None:
-                skipped += 1
-                i += 1
-                continue
-
-            entry_i = i + 1
-            entry = safe_float(df.iloc[entry_i].get("open"), np.nan)
-            if not np.isfinite(entry):
-                skipped += 1
-                i += 1
-                continue
-            buffer = 0.20 * atr
-            sl = (float(zone_lo) - buffer) if direction == "BUY" else (float(zone_hi) + buffer)
-            risk = abs(entry - sl)
-            if risk <= 0:
-                skipped += 1
-                i += 1
-                continue
-
-            candidate_target = safe_float(setup.get("target"), np.nan)
-            if direction == "BUY":
-                target = candidate_target if np.isfinite(candidate_target) and candidate_target > entry else entry + 2.0*risk
-                rr = (target-entry)/risk
-            else:
-                target = candidate_target if np.isfinite(candidate_target) and candidate_target < entry else entry - 2.0*risk
-                rr = (entry-target)/risk
-            if rr < 1.0:
-                target = entry + 2.0*risk if direction == "BUY" else entry - 2.0*risk
-                rr = 2.0
-
-            outcome, exit_price, exit_i = "OPEN", None, None
-            end_i = min(len(df)-1, entry_i+max_holding_bars)
-            for j in range(entry_i, end_i+1):
-                bar = df.iloc[j]
-                hi, lo = safe_float(bar.get("high"), np.nan), safe_float(bar.get("low"), np.nan)
-                if not np.isfinite(hi) or not np.isfinite(lo):
-                    continue
-                # Conservative ordering: if stop and target are both touched in one bar, count stop first.
-                if direction == "BUY":
-                    if lo <= sl:
-                        outcome, exit_price, exit_i = "LOSS", sl, j
-                        break
-                    if hi >= target:
-                        outcome, exit_price, exit_i = "WIN", target, j
-                        break
-                else:
-                    if hi >= sl:
-                        outcome, exit_price, exit_i = "LOSS", sl, j
-                        break
-                    if lo <= target:
-                        outcome, exit_price, exit_i = "WIN", target, j
-                        break
-            if outcome == "OPEN":
-                exit_price = safe_float(df.iloc[end_i].get("close"), entry)
-                exit_i = end_i
-                outcome = "TIME_EXIT"
-                r_value = ((exit_price-entry)/risk) if direction == "BUY" else ((entry-exit_price)/risk)
-            else:
-                r_value = rr if outcome == "WIN" else -1.0
-
-            trades.append({
-                "signal_time": str(df.iloc[i].get("Date", df.index[i])),
-                "entry_time": str(df.iloc[entry_i].get("Date", df.index[entry_i])),
-                "direction": direction, "entry": entry, "stop": sl, "target": target,
-                "outcome": outcome, "R": float(r_value), "bars_held": int(exit_i-entry_i),
-                "setup_state": setup.get("state")
-            })
-            # Avoid overlapping trades: resume after the simulated position closes.
-            i = max(i+1, exit_i+1)
-
-        if not trades:
-            return {"trades": 0, "wins": 0, "losses": 0, "timeouts": 0,
-                    "win_rate": 0.0, "total_R": 0.0, "expectancy_R": 0.0,
-                    "profit_factor": 0.0, "max_drawdown_R": 0.0,
-                    "trades_log": [], "skipped": skipped,
-                    "note": "لم تُكتشف نماذج مكتملة وفق شروط المحرك خلال الفترة المختارة."}
-
-        vals = [t["R"] for t in trades]
-        wins = sum(t["outcome"] == "WIN" for t in trades)
-        losses = sum(t["outcome"] == "LOSS" for t in trades)
-        timeouts = sum(t["outcome"] == "TIME_EXIT" for t in trades)
-        gross_win = sum(x for x in vals if x > 0)
-        gross_loss = abs(sum(x for x in vals if x < 0))
-        equity, peak, max_dd = 0.0, 0.0, 0.0
-        for r in vals:
-            equity += r
-            peak = max(peak, equity)
-            max_dd = max(max_dd, peak-equity)
-        return {
-            "trades": len(trades), "wins": wins, "losses": losses, "timeouts": timeouts,
-            "win_rate": wins/len(trades)*100, "total_R": sum(vals),
-            "expectancy_R": sum(vals)/len(vals),
-            "profit_factor": gross_win/max(gross_loss, 1e-9),
-            "max_drawdown_R": max_dd, "trades_log": trades[-100:],
-            "skipped": skipped,
-            "note": "اختبار محافظ: الدخول عند افتتاح الشمعة التالية، والوقف يُحسب أولًا عند لمس الوقف والهدف داخل الشمعة نفسها. لا يشمل السبريد/العمولة/الانزلاق."
-        }
-    except Exception as exc:
-        return {"error": f"تعذر إجراء اختبار SMC: {exc}"}
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -3693,10 +2847,6 @@ def quick_backtest(symbol, pair_name, lookback=200, run_mc=True):
 
 
 
-
-
-
-
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_signals_parallel():
     results = []
@@ -3710,8 +2860,6 @@ def get_all_signals_parallel():
             sig_ = r["signal"]
 
 
-
-
             ec_score = 0; ec_verdict = "—"
             if sig_ in ("BUY","SELL") and lv:
                 try:
@@ -3722,20 +2870,10 @@ def get_all_signals_parallel():
                 except Exception: pass
 
 
-
-
-            orig_gate_ok = False; orig_gate = "—"; orig_gate_msg = "—"
+            orig_gate_ok = False; orig_gate = "—"
             if sig_ in ("BUY","SELL"):
-                orig_gate_ok, orig_gate_msg = passes_confidence_gate(r["confidence"], ec_score)
-                if r.get("execution_status") != "EXECUTE":
-                    orig_gate_ok = False
-                    orig_gate_msg = r.get("execution_reason", "Execution filters did not pass")
-                if safe_float(r.get("analysis_completeness"), 0) < MIN_ANALYSIS_COMPLETENESS:
-                    orig_gate_ok = False
-                    orig_gate_msg = f"Analysis coverage below {MIN_ANALYSIS_COMPLETENESS:.0f}%"
+                orig_gate_ok, _ = passes_confidence_gate(r["confidence"], ec_score)
                 orig_gate = "✅" if orig_gate_ok else "❌"
-
-
 
 
             flip_sig = "—"; flip_conf_raw = 0; flip_status = "NONE"; flip_icon = ""
@@ -3744,8 +2882,6 @@ def get_all_signals_parallel():
             flip_ec_score = 0; flip_ec_verdict = "—"; flip_grade_col = "—"
             flip_confidence_pct = 0
             flip_gate = "—"
-
-
 
 
             if sig_ in ("BUY", "SELL"):
@@ -3776,19 +2912,15 @@ def get_all_signals_parallel():
                                     flip_confidence_pct, fc["score"])
                         flip_gate_ok, _ = passes_confidence_gate(
                             flip_confidence_pct, flip_ec_score)
-                        if r.get("execution_status") != "EXECUTE" or safe_float(r.get("analysis_completeness"),0) < MIN_ANALYSIS_COMPLETENESS:
-                            flip_gate_ok = False
                         flip_gate = "✅" if flip_gate_ok else "❌"
                 except Exception: pass
-
-
 
 
             return {
                 "الزوج": pn, "الإشارة": sig_,
                 "الثقة": round(r["confidence"], 1),
                 "🎯 تأكيد": f"{ec_verdict} ({ec_score})" if ec_verdict != "—" else "—",
-                "🚦 أصلي": orig_gate, "Gate Reason": orig_gate_msg,
+                "🚦 أصلي": orig_gate,
                 "Grade": r.get("trade_grade", "WAIT"),
                 "🔄 Flip": f"{flip_icon} {flip_sig}" if flip_sig != "—" else "—",
                 "Flip Raw": flip_conf_raw if flip_conf_raw > 0 else "—",
@@ -3801,15 +2933,10 @@ def get_all_signals_parallel():
                 "🎯 F-TP1": flip_tp1, "🎯 F-TP2": flip_tp2, "🎯 F-TP3": flip_tp3,
                 "F-RR1": flip_rr1, "F-SL Src": flip_sl_src,
                 "BUY": round(r["buy_score"], 1), "SELL": round(r["sell_score"], 1),
-                "MTF": r["mtf_bias"], "MTF Confidence": round(r.get("mtf_conf",0),1),
-                "Weekly": r["weekly_bias"],
+                "MTF": r["mtf_bias"], "Weekly": r["weekly_bias"],
                 "Regime": r["regime"],
                 "Conf": round(r["weighted_confluence"], 0),
                 "Confirm": round(r["confirmation_score"], 1),
-                "Analysis Coverage": r.get("analysis_completeness", 0),
-                "SMC Quality": r.get("smc_quality_score", 0),
-                "Temporal": r.get("temporal_score", 0),
-                "MTF Available": f"{r.get('mtf_available_count',0)}/{r.get('mtf_total_count',0)}",
                 "Execution": r["execution_status"],
                 "السعر": fmt_price(p, pn),
                 "SL": fmt_price(lv.get("stop_loss"), pn),
@@ -3832,24 +2959,12 @@ def get_all_signals_parallel():
         if row.get("🚦 أصلي") == "✅": gate_score += 100
         if row.get("🚦 Flip") == "✅": gate_score += 100
         max_score = max(row.get("_ec_score", 0), row.get("_flip_ec_score", 0))
-        coverage = safe_float(row.get("Analysis Coverage"), 0)
-        smc = safe_float(row.get("SMC Quality"), 0)
-        temporal = safe_float(row.get("Temporal"), 0)
-        confluence = safe_float(row.get("Conf"), 0)
-        mtf_available = str(row.get("MTF Available", "0/0")).split("/")
-        mtf_ratio = (safe_float(mtf_available[0], 0) / max(safe_float(mtf_available[-1], 0), 1))
-        composite = 0.35*max_score + 0.20*safe_float(row.get("الثقة"),0) + \
-                    0.15*confluence + 0.10*smc + 0.10*temporal + 0.10*coverage
         sig = row["الإشارة"]
         sp_ = {"BUY": 0, "SELL": 1, "WAIT": 2}.get(sig, 3)
-        return (-gate_score, -coverage, -composite, -mtf_ratio, sp_)
+        return (-gate_score, -max_score, sp_)
     out["_sort"] = out.apply(sort_key, axis=1)
     out = out.sort_values("_sort").drop(columns=["_sort"])
     return out
-
-
-
-
 
 
 
@@ -3865,8 +2980,6 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
                 "message": "تعذر جلب البيانات — جرب 🔄 تحديث"}
 
 
-
-
     valid = df[df["الإشارة"].isin(["BUY", "SELL"])].copy()
     if valid.empty:
         return {"status": "NONE",
@@ -3874,52 +2987,33 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
                            "هذا طبيعي في أوقات التذبذب أو إغلاق السوق."}
 
 
-
-
     def calc_score(row):
-        ec_o = safe_float(row.get("_ec_score"), 0)
-        conf_o = safe_float(row.get("الثقة"), 0)
-        confluence = safe_float(row.get("Conf"), 0)
-        smc = safe_float(row.get("SMC Quality"), 0)
-        temporal = safe_float(row.get("Temporal"), 0)
-        coverage = safe_float(row.get("Analysis Coverage"), 0)
-        mtf_available = str(row.get("MTF Available", "0/0")).split("/")
-        mtf_ratio = safe_float(mtf_available[0], 0) / max(safe_float(mtf_available[-1], 0), 1)
-        mtf_conf = safe_float(row.get("MTF Confidence"), 50) * mtf_ratio
-        s_o = (0.20*ec_o + 0.20*conf_o + 0.15*confluence + 0.15*mtf_conf +
-               0.10*smc + 0.10*temporal + 0.10*coverage)
-        fc = safe_float(row.get("Flip Conf%"), 0)
-        ec_f = safe_float(row.get("_flip_ec_score"), 0)
-        s_f = (0.20*ec_f + 0.20*fc + 0.15*confluence + 0.15*mtf_conf +
-               0.10*smc + 0.10*temporal + 0.10*coverage)
+        ec_o = row.get("_ec_score", 0) or 0
+        conf_o = row.get("الثقة", 0) or 0
+        s_o = ec_o * 0.6 + conf_o * 0.4
+
+
+        fc = row.get("Flip Conf%", 0)
+        fc = fc if isinstance(fc, (int, float)) else 0
+        ec_f = row.get("_flip_ec_score", 0) or 0
+        s_f = ec_f * 0.6 + fc * 0.4
         return max(s_o, s_f)
-
-
 
 
     valid["_final_score"] = valid.apply(calc_score, axis=1)
 
 
-
-
     def sort_priority(row):
         passing = (row.get("🚦 أصلي") == "✅") or (row.get("🚦 Flip") == "✅")
-        coverage = safe_float(row.get("Analysis Coverage"), 0)
-        return (1000.0 if passing else 0.0) + coverage*0.5 + float(row.get("_final_score", 0))
-
-
+        return (1000.0 if passing else 0.0) + float(row.get("_final_score", 0))
 
 
     valid["_sort"] = valid.apply(sort_priority, axis=1)
-    valid = valid.sort_values("_sort", ascending=False)
-
-
+    valid = valid.sort_values("_sort", ascending=False).head(max_trades)
 
 
     trades = []
     for _, best in valid.iterrows():
-        if len(trades) >= max_trades:
-            break
         pair = best["الزوج"]
         sym = PAIRS.get(pair)
         if not sym:
@@ -3937,8 +3031,6 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
             continue
 
 
-
-
         ec = None
         try:
             ec = entry_confirmation_score(
@@ -3947,27 +3039,9 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
             ec = None
 
 
-
-
         ec_s = ec["score"] if ec else 0
         gate_ok, gate_msg = passes_confidence_gate(
             result["confidence"], ec_s)
-        if result.get("execution_status") != "EXECUTE":
-            gate_ok = False
-            gate_msg = result.get("execution_reason", "Execution filters did not pass")
-        if safe_float(result.get("analysis_completeness"),0) < MIN_ANALYSIS_COMPLETENESS:
-            gate_ok = False
-            gate_msg = f"اكتمال التحليل أقل من {MIN_ANALYSIS_COMPLETENESS:.0f}%"
-        _fresh_mtf_ratio = (result.get("mtf_available_count",0) /
-                            max(result.get("mtf_total_count",0),1))
-        _fresh_score = (
-            0.20*safe_float(ec_s,0) +
-            0.20*safe_float(result.get("confidence"),0) +
-            0.15*safe_float(result.get("weighted_confluence"),0) +
-            0.15*safe_float(result.get("mtf_conf"),0)*_fresh_mtf_ratio +
-            0.10*safe_float(result.get("smc_quality_score"),0) +
-            0.10*safe_float(result.get("temporal_score"),0) +
-            0.10*safe_float(result.get("analysis_completeness"),0))
 
 
         trades.append({
@@ -3975,13 +3049,7 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
             "result": result, "row": best.to_dict(),
             "ec": ec,
             "gate_ok": gate_ok, "gate_msg": gate_msg,
-            "analysis_completeness": result.get("analysis_completeness", 0),
-            "smc_quality": result.get("smc_quality_score", 0),
-            "temporal_score": result.get("temporal_score", 0),
-            "mtf_conf": result.get("mtf_conf", 0),
-            "score": float(_fresh_score)})
-
-
+            "score": float(best.get("_final_score", 0))})
 
 
     if not trades:
@@ -3989,20 +3057,12 @@ def find_strongest_trades(max_trades=MAX_STRONG_TRADES):
                 "message": "الإشارات المكتشفة لم تنجح إعادة التحليل — جرب 🔄 تحديث"}
 
 
-
-
     trades.sort(key=lambda t: (not t["gate_ok"], -t["score"]))
     n_pass = sum(1 for t in trades if t["gate_ok"])
 
 
-
-
     return {"status": "FOUND", "trades": trades,
             "count": len(trades), "n_pass": n_pass}
-
-
-
-
 
 
 
@@ -4021,8 +3081,6 @@ def get_fmp_economic_calendar():
     except Exception: return []
 
 
-
-
 def event_risk_message(events, pair_name):
     if not events: return "لا توجد بيانات تقويم"
     b, m = news_time_block(events, pair_name)
@@ -4032,15 +3090,9 @@ def event_risk_message(events, pair_name):
 
 
 
-
-
-
-
 # ============================================================
 # RENDER HELPERS
 # ============================================================
-
-
 
 
 def render_signal_card(title, direction, confidence, grade, verdict_text,
@@ -4079,10 +3131,6 @@ def render_signal_card(title, direction, confidence, grade, verdict_text,
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-
-
-
 
 
 
@@ -4129,10 +3177,6 @@ def render_entry_checks(ec, prefix=""):
 
 
 
-
-
-
-
 def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c",
                       dimmed=False):
     if not levels: return
@@ -4161,85 +3205,13 @@ def render_trade_plan(levels, pair_name, title="Trade Plan", accent="#e6c87c",
 
 
 
-
-
-
-
-
-
-def test_api_and_data_sources():
-    """اختبار اتصال فعلي بالمصادر دون إظهار المفاتيح."""
-    checks = []
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    # Yahoo Finance test
-    try:
-        sample = yf.download("EURUSD=X", period="5d", interval="1h",
-                            auto_adjust=False, progress=False, threads=False)
-        sample = normalize_ohlcv(sample, min_rows=2)
-        checks.append({"source": "Yahoo Finance", "status": bool(sample is not None),
-                       "detail": f"تم جلب {len(sample)} شمعة" if sample is not None else "لم تصل بيانات كافية"})
-    except Exception as e:
-        checks.append({"source": "Yahoo Finance", "status": False, "detail": str(e)[:180]})
-
-    # Twelve Data key and endpoint check
-    td_key = get_secret("TWELVE_API_KEY", "")
-    if not td_key:
-        checks.append({"source": "Twelve Data", "status": False, "detail": "المفتاح غير مدخل"})
-    else:
-        try:
-            rr = requests.get("https://api.twelvedata.com/time_series",
-                params={"symbol":"EUR/USD","interval":"1h","outputsize":3,
-                        "apikey":td_key,"format":"JSON"}, timeout=12)
-            payload = rr.json()
-            ok = rr.status_code == 200 and "values" in payload and bool(payload["values"])
-            detail = f"HTTP {rr.status_code} · {len(payload.get('values', []))} شموع" if ok else str(payload.get("message", payload.get("status", rr.text[:160])))
-            checks.append({"source":"Twelve Data", "status":ok, "detail":detail})
-        except Exception as e:
-            checks.append({"source":"Twelve Data", "status":False, "detail":str(e)[:180]})
-
-    fmp_key = get_secret("FMP_API_KEY", "")
-    if not fmp_key:
-        checks.append({"source":"FMP Calendar", "status":False, "detail":"المفتاح غير مدخل"})
-    else:
-        try:
-            rr = requests.get("https://financialmodelingprep.com/stable/economic-calendar",
-                params={"apikey":fmp_key}, timeout=12)
-            payload = rr.json()
-            ok = rr.status_code == 200 and isinstance(payload, (list, dict)) and not (isinstance(payload,dict) and "Error" in payload)
-            detail = f"HTTP {rr.status_code} · استجابة صالحة" if ok else str(payload)[:180]
-            checks.append({"source":"FMP Economic Calendar", "status":ok, "detail":detail})
-        except Exception as e:
-            checks.append({"source":"FMP Economic Calendar", "status":False, "detail":str(e)[:180]})
-    return {"tested_at":now, "checks":checks}
-
-
-def fetch_analysis_data_with_source(symbol, pair_name):
-    """يرجع بيانات التحليل مع اسم المصدر الفعلي وأحدث توقيت للشمعة."""
-    for candidate in YF_SYMBOL_ALTERNATIVES.get(symbol, [symbol]):
-        df = get_yfinance(candidate, "6mo", "4h")
-        if df is not None and len(df) >= 50:
-            return df, f"Yahoo Finance ({candidate})"
-    df = get_yfinance(sanitize_yf_symbol(symbol), "6mo", "4h")
-    if df is not None and len(df) >= 50:
-        return df, f"Yahoo Finance ({sanitize_yf_symbol(symbol)})"
-    df = get_twelve_data(symbol, "4h", 500)
-    if df is not None and len(df) >= 50:
-        return df, "Twelve Data"
-    return None, "لم يتم العثور على مصدر بيانات صالح"
-
-
 # ============================================================
 # UI
 # ============================================================
 
 
-
-
 st.set_page_config(page_title=f"BLACK PYRAMID {APP_VERSION}",
                    page_icon="▲", layout="wide")
-
-
 
 
 st.markdown("""
@@ -4350,10 +3322,6 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 
 
 
-
-
-
-
 # ═══════════════════════════════════════════════
 # HERO
 # ═══════════════════════════════════════════════
@@ -4386,8 +3354,6 @@ with hl:
         </div>""", unsafe_allow_html=True)
 
 
-
-
 with hr:
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     br = st.columns([1, 1])
@@ -4406,10 +3372,6 @@ with hr:
 
 
 
-
-
-
-
 # ═══════════════════════════════════════════════
 # API KEYS SECTION
 # ═══════════════════════════════════════════════
@@ -4419,14 +3381,10 @@ st.caption("أدخل مفاتيح API لجلب البيانات من مصادر 
            "يتم الحفظ في الجلسة الحالية فقط (Session).")
 
 
-
-
 if "_td_api_input" not in st.session_state:
     st.session_state._td_api_input = get_secret("TWELVE_API_KEY", "")
 if "_fmp_api_input" not in st.session_state:
     st.session_state._fmp_api_input = get_secret("FMP_API_KEY", "")
-
-
 
 
 kc1, kc2 = st.columns(2)
@@ -4441,8 +3399,6 @@ with kc1:
     st.caption(f"الحالة: {_td_status}")
 
 
-
-
 with kc2:
     fmp_val = st.text_input(
         "FMP API Key",
@@ -4452,30 +3408,6 @@ with kc2:
         help="مطلوب فقط لجلب التقويم الاقتصادي.")
     _fmp_status = "✅ نشط" if fmp_val else "⚪ غير مفعّل"
     st.caption(f"الحالة: {_fmp_status}")
-
-
-
-
-_test_col, _test_info = st.columns([1, 2])
-with _test_col:
-    if st.button("🔍 اختبار المفاتيح ومصادر البيانات", key="btn_test_keys", width="stretch"):
-        with st.spinner("يتم اختبار الاتصالات وجلب بيانات تجريبية..."):
-            st.session_state.key_test_results = test_api_and_data_sources()
-            st.session_state.key_test_time = st.session_state.key_test_results["tested_at"]
-with _test_info:
-    st.caption("الاختبار يتحقق من الاستجابة وجلب بيانات فعلية، وليس فقط وجود المفتاح.")
-
-if st.session_state.get("key_test_results"):
-    _test = st.session_state.key_test_results
-    _good = sum(1 for _c in _test["checks"] if _c["status"])
-    st.markdown(f"**نتيجة الاختبار:** {_good}/{len(_test['checks'])} مصادر ناجحة · {_test['tested_at']}")
-    for _c in _test["checks"]:
-        if _c["status"]:
-            st.success(f"✅ {_c['source']}: {_c['detail']}")
-        else:
-            st.warning(f"⚠️ {_c['source']}: {_c['detail']}")
-
-
 
 
 _changed = False
@@ -4491,172 +3423,10 @@ if _changed:
 
 
 
-
-
-
-
-# ═══════════════════════════════════════════════
-# SELECTED PAIR ANALYSIS
-# ═══════════════════════════════════════════════
-st.markdown('<div class="section-title">📊 تحليل الزوج المختار <span>Single Pair Analysis</span></div>',
-            unsafe_allow_html=True)
-_pair_names = list(PAIRS.keys())
-_selected = st.select_slider("مرّر لاختيار الزوج المطلوب تحليله فقط",
-                             options=_pair_names,
-                             value=st.session_state.get("selected_pair", _pair_names[0]),
-                             key="pair_slider")
-st.session_state.selected_pair = _selected
-_sel_symbol = PAIRS[_selected]
-if st.button(f"🔎 تحليل {_selected} فقط", key="btn_analyze_selected", width="stretch"):
-    with st.spinner(f"يتم جلب البيانات وتحليل {_selected}..."):
-        _sdf, _source = fetch_analysis_data_with_source(_sel_symbol, _selected)
-        if _sdf is not None and len(_sdf) >= 50:
-            _spot, _chg = get_spot_price(_sel_symbol)
-            if _spot is None:
-                _spot = float(_sdf["close"].iloc[-1])
-            _result = generate_signal(_sdf, _spot, _selected, _sel_symbol,
-                                      skip_external_filters=False)
-            st.session_state.selected_pair_analysis = {
-                "pair":_selected, "symbol":_sel_symbol, "result":_result,
-                "source":_source, "data_time":str(_sdf.index[-1]),
-                "analysis_time":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-                "price":_spot, "change":_chg}
-        else:
-            st.session_state.selected_pair_analysis = {
-                "pair":_selected, "error":"تعذر جلب 50 شمعة أو أكثر من مصادر البيانات.",
-                "source":_source, "analysis_time":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
-        st.rerun()
-
-_pair_analysis = st.session_state.get("selected_pair_analysis")
-if _pair_analysis and _pair_analysis.get("pair") == _selected:
-    if _pair_analysis.get("error"):
-        st.error(_pair_analysis["error"])
-        st.caption(f"المصدر الذي تم فحصه: {_pair_analysis.get('source','—')} · وقت المحاولة: {_pair_analysis.get('analysis_time','—')}")
-    else:
-        _ar = _pair_analysis["result"]
-        _al = _ar.get("levels") or {}
-        _sig = _ar.get("signal","WAIT")
-        _signal_color = "#7cd4a0" if _sig == "BUY" else "#f57a7a" if _sig == "SELL" else "#f5c87a"
-        st.markdown(f"""<div style="padding:16px;border:1px solid {_signal_color}66;border-radius:14px;background:{_signal_color}12;">
-        <b style="color:{_signal_color};font-size:1.5rem;">{_selected} · {_sig}</b>
-        <span style="margin-right:12px;">Confidence {_ar.get('confidence',0):.1f}%</span>
-        <span style="margin-right:12px;">Grade {_ar.get('trade_grade','WAIT')}</span></div>""", unsafe_allow_html=True)
-        _m1,_m2,_m3,_m4 = st.columns(4)
-        _m1.metric("السعر الحالي",fmt_price(_pair_analysis["price"],_selected))
-        _m2.metric("BUY Score",f"{_ar.get('buy_score',0):.1f}")
-        _m3.metric("SELL Score",f"{_ar.get('sell_score',0):.1f}")
-        _m4.metric("تأكيد",f"{_ar.get('confirmation_score',0):.1f}/100")
-        _meta1,_meta2,_meta3 = st.columns(3)
-        _meta1.caption(f"🕒 وقت التحليل: {_pair_analysis['analysis_time']}")
-        _meta2.caption(f"📡 المصدر: {_pair_analysis['source']}")
-        _meta3.caption(f"🕯️ آخر شمعة: {_pair_analysis['data_time']}")
-        _audit = _ar.get("analysis_audit", {}) or {}
-        _ac1,_ac2,_ac3 = st.columns(3)
-        _ac1.metric("اكتمال التحليل", f"{_audit.get('completeness',0):.1f}%")
-        _ac2.metric("SMC Quality", f"{_audit.get('smc_quality',0):.1f}/100")
-        _ac3.metric("تقييم التوقيت", f"{_audit.get('temporal_score',0):.1f}/100" if _audit.get('temporal_score') is not None else "غير متاح")
-        with st.expander("🧾 تقرير تدقيق جميع أدوات التحليل — ما عمل وما لم يتوفر"):
-            _audit_rows=[]
-            for _section_name,_section in (_audit.get("sections",{}) or {}).items():
-                for _tool_name,_tool_info in (_section or {}).items():
-                    _audit_rows.append({"المجموعة":_section_name,"الأداة":_tool_name,
-                        "الحالة":_tool_info.get("status","—"),"التفاصيل":_tool_info.get("detail","—"),
-                        "الاتجاه":_tool_info.get("bias","—"),"المصدر":_tool_info.get("source","—"),
-                        "آخر بيانات":_tool_info.get("data_time","—")})
-            if _audit_rows:
-                st.dataframe(pd.DataFrame(_audit_rows),hide_index=True,use_container_width=True)
-            st.caption("درجة الاكتمال تقيس توافر البيانات والأدوات، ولا تعني نسبة نجاح الصفقة. العناصر غير المتاحة أو غير المنطبقة تظهر صراحة.")
-        _setup = _ar.get("smc_setup", {}) or {}
-        st.markdown("### 🧩 SMC Setup Engine — تسلسل النموذج")
-        _setup_color = "#7cd4a0" if _setup.get("state") == "ENTRY_CONFIRMED" else "#f5c87a" if _setup.get("state","").startswith("WAITING") else "#aab2bd"
-        st.markdown(f"<div style='padding:12px;border:1px solid {_setup_color}66;border-radius:12px;background:{_setup_color}12'><b>{_setup.get('label','—')}</b><br>الحالة: {_setup.get('state','—')} · الاتجاه: {_setup.get('direction','—')}</div>", unsafe_allow_html=True)
-        _s1,_s2,_s3,_s4,_s5 = st.columns(5)
-        _s1.metric("Liquidity Sweep", "✔" if _setup.get("sweep") else "—")
-        _s2.metric("Displacement", "✔" if _setup.get("displacement") else "—")
-        _s3.metric("FVG", "✔" if _setup.get("fvg") else "—")
-        _s4.metric("Mitigation", "✔" if _setup.get("mitigation") else "—")
-        _s5.metric("Rejection", "✔" if _setup.get("rejection") else "—")
-        if _setup.get("zone_low") is not None and _setup.get("zone_high") is not None:
-            st.caption(f"FVG Zone: {_setup.get('zone_low')} – {_setup.get('zone_high')} · Target liquidity: {_setup.get('target','—')}")
-        st.caption("تنبيه: محرك النماذج في هذه المرحلة تشخيصي؛ لا يفرض دخولًا ولا يستبدل بوابات التنفيذ وإدارة المخاطر.")
-
-        st.markdown("### 🧪 اختبار تاريخي لنموذج SMC")
-        st.caption("يختبر تسلسل النموذج على بيانات 4 ساعات؛ الدخول عند افتتاح الشمعة التالية لتقليل الانحياز المستقبلي.")
-        _bt_period = st.selectbox("فترة الاختبار", ["6mo", "1y", "2y"], index=1,
-                                  key=f"smc_bt_period_{_selected}")
-        if st.button(f"▶️ تشغيل اختبار SMC على {_selected}", key=f"smc_bt_run_{_selected}", width="stretch"):
-            with st.spinner("يتم اختبار النماذج التاريخية..."):
-                _bt = backtest_smc_sequence(_sel_symbol, _selected, period=_bt_period, interval="4h")
-                st.session_state[f"smc_bt_result_{_selected}"] = _bt
-        _bt_saved = st.session_state.get(f"smc_bt_result_{_selected}")
-        if _bt_saved:
-            if _bt_saved.get("error"):
-                st.error(_bt_saved["error"])
-            else:
-                _bc1,_bc2,_bc3,_bc4 = st.columns(4)
-                _bc1.metric("عدد الصفقات", _bt_saved.get("trades",0))
-                _bc2.metric("Win Rate", f"{_bt_saved.get('win_rate',0):.1f}%")
-                _bc3.metric("صافي R", f"{_bt_saved.get('total_R',0):.2f}R")
-                _bc4.metric("Expectancy", f"{_bt_saved.get('expectancy_R',0):.2f}R")
-                _bc5,_bc6,_bc7 = st.columns(3)
-                _bc5.metric("Profit Factor", f"{_bt_saved.get('profit_factor',0):.2f}")
-                _bc6.metric("Max Drawdown", f"{_bt_saved.get('max_drawdown_R',0):.2f}R")
-                _bc7.metric("خروج زمني", _bt_saved.get("timeouts",0))
-                if _bt_saved.get("trades_log"):
-                    st.dataframe(pd.DataFrame(_bt_saved["trades_log"]), hide_index=True, use_container_width=True)
-                if _bt_saved.get("note"):
-                    st.info(_bt_saved["note"])
-
-        st.markdown("**ملخص الاتجاه والعوامل**")
-        _d1,_d2,_d3,_d4 = st.columns(4)
-        _d1.metric("MTF",_ar.get("mtf_bias","—"))
-        _d2.metric("Weekly",_ar.get("weekly_bias","—"))
-        _d3.metric("Regime",_ar.get("regime","—"))
-        _d4.metric("Execution",_ar.get("execution_status","—"))
-        st.write(f"**Confluence:** {_ar.get('weighted_confluence',0):.1f} · **Confirmation:** {_ar.get('confirmation_score',0):.1f} · **DXY:** {_ar.get('dxy_bias','—')}")
-        st.write(f"**Divergence:** {_ar.get('divergence','—')} · **ML:** {_ar.get('ml_status','—')} · **Rate Differential:** {_ar.get('rate_diff',0):.2f}")
-        _mtfd = _ar.get("mtf_details", {}) or {}
-        st.markdown("### 🧭 لوحة الفريمات الزمنية — MTF")
-        _mtf_labels = {"Daily":"يومي","4H":"4 ساعات","1H":"ساعة","15M":"15 دقيقة","5M":"5 دقائق"}
-        _mtf_rows=[]
-        for _tf in ("Daily","4H","1H","15M","5M"):
-            _td = _mtfd.get(_tf, {})
-            if not _td: continue
-            _mtf_rows.append({"الفريم":_mtf_labels.get(_tf,_tf),"الاتجاه":_td.get("bias","—"),
-                "القوة/10":_td.get("strength",0),"RSI":round(_td.get("rsi",0),1) if _td.get("rsi") is not None else "—",
-                "MACD":_td.get("macd_state","—"),"Structure":_td.get("structure","—"),
-                "BOS/MSS":_td.get("bos_mss","—"),"آخر شمعة":_td.get("data_time","—"),
-                "المصدر":_td.get("source","—"),"البيانات": "متاحة" if _td.get("available") else "غير متاحة"})
-        if _mtf_rows: st.dataframe(pd.DataFrame(_mtf_rows),hide_index=True,use_container_width=True)
-        _cons = _mtfd.get("consensus", {})
-        if _cons:
-            st.info(f"توافق الفريمات الكبيرة (باستثناء 5M): {_cons.get('bullish',0)} صاعد / {_cons.get('bearish',0)} هابط — {_cons.get('label','—')}. فريم 5 دقائق مخصص لتوقيت الدخول وليس لتغيير الاتجاه الرئيسي.")
-        with st.expander("📋 تفاصيل التحليل"):
-            st.write("**الأسباب:**")
-            st.write(_ar.get("reasons",[]))
-            st.write("**التأكيدات:**")
-            st.write(_ar.get("confirmation_reasons",[]))
-            st.write("**العوائق:**")
-            st.write(_ar.get("confirmation_blockers",[]))
-            st.write("**الفلاتر:**")
-            st.json(_ar.get("filter_results",{}))
-            if _al:
-                st.markdown("**Trade Plan**")
-                _p1,_p2,_p3,_p4 = st.columns(4)
-                _p1.metric("SL",fmt_price(_al.get("stop_loss"),_selected))
-                _p2.metric("TP1",fmt_price(_al.get("target1"),_selected))
-                _p3.metric("TP2",fmt_price(_al.get("target2"),_selected))
-                _p4.metric("TP3",fmt_price(_al.get("target3"),_selected))
-                st.caption(f"RR: TP1 1:{_al.get('risk_reward_1',0):.2f} · TP2 1:{_al.get('risk_reward_2',0):.2f} · TP3 1:{_al.get('risk_reward_3',0):.2f}")
-
-
-
 # ═══════════════════════════════════════════════
 # STRONGEST TRADES DISPLAY
 # ═══════════════════════════════════════════════
 _str_res = st.session_state.get("strong_trade_result")
-
-
 
 
 if _str_res:
@@ -4665,10 +3435,8 @@ if _str_res:
                     unsafe_allow_html=True)
         _msg = _str_res.get("message", "لا توجد إشارات صالحة الآن.")
         st.warning(f"⏸️ **{_msg}**")
-        st.caption(f"البوابة تتطلب: ثقة وتأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}%، "
-                   f"Execution=EXECUTE، واكتمال تحليل ≥ {MIN_ANALYSIS_COMPLETENESS:.0f}%")
-
-
+        st.caption(f"البوابة تتطلب: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% **و** "
+                   f"تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100")
 
 
     elif _str_res.get("status") == "FOUND":
@@ -4676,8 +3444,6 @@ if _str_res:
         _n = len(_trades)
         _n_pass = _str_res.get("n_pass", 0)
         _n_watch = _n - _n_pass
-
-
 
 
         if _n_pass > 0 and _n_watch > 0:
@@ -4696,8 +3462,6 @@ if _str_res:
                           f"أقوى {_n} إشارات للمراقبة فقط ⚠️")
 
 
-
-
         st.markdown(f"""
         <div style="background:{_summ_color}22; padding:14px 20px;
                     border-radius:12px; margin:20px 0;
@@ -4706,12 +3470,10 @@ if _str_res:
                 {_summ_icon} {_summ_text}
             </span>
             <div style="color:#8b95a8; font-size:0.82rem; margin-top:6px;">
-                بوابة الجودة: ثقة وتأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Execution=EXECUTE · Analysis Coverage ≥ {MIN_ANALYSIS_COMPLETENESS:.0f}%
+                بوابة الجودة: ثقة ≥ {MIN_EMIT_CONFIDENCE:.0f}% و تأكيد ≥ {MIN_EMIT_CONFIDENCE:.0f}/100
             </div>
         </div>
         """, unsafe_allow_html=True)
-
-
 
 
         for idx, t in enumerate(_trades, 1):
@@ -4722,8 +3484,6 @@ if _str_res:
             _gate_msg = t.get("gate_msg", "")
             _bacc = "#7cd4a0" if _bsig == "BUY" else "#f57a7a"
             _rank_icon = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"#{idx}")
-
-
 
 
             if _gate_ok:
@@ -4744,8 +3504,6 @@ if _str_res:
                 _opacity = "0.92"
 
 
-
-
             st.markdown(
                 f'<div style="margin:24px 0 14px 0; padding:12px 18px; '
                 f'background:linear-gradient(90deg, {_bacc}22, transparent); '
@@ -4759,8 +3517,6 @@ if _str_res:
                 f'{_badge}'
                 f'</div>',
                 unsafe_allow_html=True)
-
-
 
 
             _bs1, _bs2 = st.columns([1.4, 1.2])
@@ -4785,14 +3541,8 @@ if _str_res:
                 </div>""", unsafe_allow_html=True)
 
 
-
-
             with _bs2:
                 st.metric("💵 السعر", fmt_price(_bprice, _bp))
-                _trm1,_trm2 = st.columns(2)
-                _trm1.metric("اكتمال التحليل", f"{t.get('analysis_completeness',0):.1f}%")
-                _trm2.metric("درجة SMC", f"{t.get('smc_quality',0):.1f}/100")
-                st.caption(f"MTF {t.get('mtf_conf',0):.1f} · توقيت {t.get('temporal_score',0):.1f} · Composite {t.get('score',0):.1f}")
                 if _blv:
                     st.metric("🛑 SL", fmt_price(_blv["stop_loss"], _bp),
                               help=_blv.get("sources", {}).get("sl", ""))
@@ -4802,8 +3552,6 @@ if _str_res:
                               help=_blv.get("sources", {}).get("tp2", ""))
                     st.metric("🎯 TP3", fmt_price(_blv["target3"], _bp),
                               help=_blv.get("sources", {}).get("tp3", ""))
-
-
 
 
             if _blv:
@@ -4832,8 +3580,6 @@ if _str_res:
                     unsafe_allow_html=True)
 
 
-
-
                 if not _gate_ok and _gate_msg:
                     st.markdown(
                         f'<div style="margin-top:10px; padding:8px 14px; '
@@ -4844,11 +3590,7 @@ if _str_res:
                         unsafe_allow_html=True)
 
 
-
-
             st.markdown("---")
-
-
 
 
 else:
@@ -4857,10 +3599,6 @@ else:
     st.info(f"🎯 اضغط **'أعثر على {MAX_STRONG_TRADES} صفقات قوية'** أعلاه لبدء البحث "
             f"في جميع الأزواج ({len(PAIRS)} زوج). سيتم عرض أفضل {MAX_STRONG_TRADES} "
             f"إشارات (العابرة للبوابة أولاً ثم الأقوى).")
-
-
-
-
 
 
 
@@ -4874,8 +3612,6 @@ st.markdown(f"""
     {MODE.upper()} Mode · Gate ≥ {MIN_EMIT_CONFIDENCE:.0f}% · Top {MAX_STRONG_TRADES} Trades · Analysis Only
 </div>
 """, unsafe_allow_html=True)
-
-
 
 
 st.stop()
