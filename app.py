@@ -76,7 +76,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2011.0+UNIFIED-INTELLIGENCE"
+APP_VERSION = "v2012.0+PREMIUM-UI"
 
 
 
@@ -4321,7 +4321,7 @@ def fetch_analysis_data_with_source(symbol, pair_name):
 
 
 st.set_page_config(page_title=f"BLACK PYRAMID {APP_VERSION}",
-                   page_icon="▲", layout="wide")
+                   page_icon="▲", layout="wide", initial_sidebar_state="expanded")
 
 
 
@@ -4428,6 +4428,47 @@ hr { border: none; height: 1px;
     margin-top: 40px; font-size: 0.85rem; letter-spacing: 0.5px; }
 details { background: #0d1017 !important; border-radius: 16px !important;
     border: 1px solid rgba(255,255,255,0.05) !important; }
+/* V2012 Premium Trading Terminal skin */
+:root { --bp-gold:#d9a441; --bp-gold2:#f6d477; --bp-green:#16c784;
+         --bp-red:#ff5c68; --bp-bg:#07090d; --bp-panel:#0c1119; }
+.stApp { background: radial-gradient(ellipse at 60% -10%, rgba(212,160,65,.10), transparent 45%),
+          linear-gradient(180deg,#07090d 0%,#090d13 45%,#07090d 100%); }
+[data-testid="stSidebar"] { background:linear-gradient(180deg,#090b10,#0c1118 55%,#080a0e) !important;
+    border-left:1px solid rgba(217,164,65,.18); }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color:#aeb8c9; }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color:var(--bp-gold2); }
+[data-testid="stSidebar"] div[data-testid="stButton"] button { border-radius:12px; text-align:right; }
+.block-container { padding-top:1.25rem !important; padding-bottom:2.5rem !important;
+    max-width:1600px; }
+.hero { background:linear-gradient(125deg,rgba(20,23,30,.97),rgba(9,12,17,.97) 62%,rgba(33,25,13,.8));
+    border:1px solid rgba(217,164,65,.26); border-radius:22px; padding:24px 28px;
+    box-shadow:0 18px 45px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.025); }
+.hero::before { height:2px; background:linear-gradient(90deg,transparent,var(--bp-gold),#fff0b0,var(--bp-gold),transparent); }
+.hero-title { color:var(--bp-gold2); font-size:clamp(1.6rem,2.4vw,2.5rem); letter-spacing:2px; }
+.hero-sub { color:#9aa5b7; }
+.hero-badge { background:rgba(217,164,65,.10); border-color:rgba(217,164,65,.3); }
+.section-title { display:flex; align-items:center; gap:10px; font-size:1.12rem;
+    color:#f0ca76; margin:26px 0 14px; padding:0 0 11px;
+    border-bottom:1px solid rgba(217,164,65,.17); }
+.section-title span { font-size:.72rem; color:#6f7b8d; margin-right:auto; }
+div[data-testid="stMetric"] { background:linear-gradient(145deg,#111722,#0b1017);
+    border:1px solid rgba(217,164,65,.13); border-radius:15px; padding:14px 16px;
+    box-shadow:0 8px 22px rgba(0,0,0,.22); }
+div[data-testid="stMetric"] .stMetricValue { color:#f4f5f7 !important; }
+div[data-testid="stMetric"] label { color:#8d9aab !important; }
+div.stButton>button { background:linear-gradient(130deg,#292114,#17140f);
+    border:1px solid rgba(217,164,65,.35); border-radius:13px; min-height:44px; }
+div.stButton>button:hover { background:linear-gradient(130deg,#3a2c17,#201a11); border-color:#e5bd64; }
+[data-testid="stExpander"] { background:rgba(12,16,23,.72); border:1px solid rgba(217,164,65,.12); border-radius:14px; }
+[data-testid="stDataFrame"] { border:1px solid rgba(217,164,65,.15); border-radius:12px; overflow:hidden; }
+[data-testid="stAlert"] { border-radius:13px; }
+[data-testid="stSelectSlider"] label, [data-testid="stSelectbox"] label,
+[data-testid="stRadio"] label { color:#d9b86e !important; }
+/* section navigation anchors */
+.bp-anchor { scroll-margin-top:85px; }
+@media(max-width:900px) { .block-container {padding-left:1rem!important;padding-right:1rem!important;}
+    .hero {padding:16px;border-radius:16px;} .hero-title{letter-spacing:1px;} }
+@media(max-width:600px) { .section-title{font-size:1rem;} .hero-sub{font-size:.72rem;} }
 </style>
 """, unsafe_allow_html=True)
 
@@ -4439,8 +4480,29 @@ details { background: #0d1017 !important; border-radius: 16px !important;
 
 
 # ═══════════════════════════════════════════════
+# V2012 PREMIUM SIDEBAR NAVIGATION
+# ═══════════════════════════════════════════════
+with st.sidebar:
+    st.markdown("""<div style='padding:10px 6px 18px;text-align:center'>
+      <div style='font-size:2.2rem;color:#e6c36b;text-shadow:0 0 22px #8a6428'>▲</div>
+      <div style='font-size:1.15rem;font-weight:900;letter-spacing:1.5px;color:#e6c36b'>BLACK PYRAMID</div>
+      <div style='font-size:.72rem;color:#8490a2;letter-spacing:2px'>UNIFIED INTELLIGENCE</div>
+      <div style='margin-top:10px;padding:5px 10px;border:1px solid #57421f;border-radius:20px;color:#d8b35c;font-size:.68rem'>PREMIUM TERMINAL · V2012</div>
+    </div>""", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("**التنقل السريع**")
+    st.markdown("""[⌂ الرئيسية](#bp-home)  
+[◈ تحليل السوق](#bp-market)  
+[⚙ مفاتيح البيانات](#bp-keys)  
+[◎ تحليل الزوج](#bp-pair)  
+[🏆 الصفقات القوية](#bp-trades)""", unsafe_allow_html=True)
+    st.markdown("---")
+    st.caption("واجهة محسّنة · الوظائف الأصلية محفوظة")
+
+# ═══════════════════════════════════════════════
 # HERO
 # ═══════════════════════════════════════════════
+st.markdown('<div id="bp-home" class="bp-anchor"></div>', unsafe_allow_html=True)
 _logo = load_logo_b64()
 hl, hr = st.columns([1.15, 1.6])
 with hl:
@@ -4494,9 +4556,15 @@ with hr:
 
 
 
+st.markdown("""<div style='margin:12px 0;padding:10px 14px;border:1px solid rgba(217,164,65,.16);border-radius:12px;background:#0b1017;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap'>
+<span style='color:#a9b5c6;font-size:.78rem'>● <span style='color:#16c784'>READY · ENGINE STATUS</span></span>
+<span style='color:#d7b563;font-size:.78rem'>SMC · MTF · PRICE ACTION · RISK ENGINE</span>
+<span style='color:#7f8b9e;font-size:.78rem'>UNIFIED INTELLIGENCE</span></div>""", unsafe_allow_html=True)
+
 # ═══════════════════════════════════════════════
 # API KEYS SECTION
 # ═══════════════════════════════════════════════
+st.markdown('<div id="bp-keys" class="bp-anchor"></div>', unsafe_allow_html=True)
 st.markdown('<div class="section-title">🔑 مفاتيح المصادر <span>API Keys · Data Sources</span></div>',
             unsafe_allow_html=True)
 st.caption("أدخل مفاتيح API لجلب البيانات من مصادر إضافية. "
@@ -4582,7 +4650,8 @@ if _changed:
 # ═══════════════════════════════════════════════
 # SELECTED PAIR ANALYSIS
 # ═══════════════════════════════════════════════
-st.markdown('<div class="section-title">📊 تحليل الزوج المختار <span>Single Pair Analysis</span></div>',
+st.markdown('<div id="bp-pair" class="bp-anchor"></div>', unsafe_allow_html=True)
+st.markdown('<div id="bp-market" class="bp-anchor"></div><div class="section-title">📊 تحليل الزوج المختار <span>Single Pair Analysis</span></div>',
             unsafe_allow_html=True)
 _pair_names = list(PAIRS.keys())
 _selected = st.select_slider("مرّر لاختيار الزوج المطلوب تحليله فقط",
@@ -4631,7 +4700,7 @@ if _pair_analysis and _pair_analysis.get("pair") == _selected:
         _m3.metric("SELL Score",f"{_ar.get('sell_score',0):.1f}")
         _m4.metric("تأكيد",f"{_ar.get('confirmation_score',0):.1f}/100")
         _ui = _ar.get("unified_intelligence", {}) or {}; _pa = _ar.get("price_action", {}) or {}
-        with st.expander("🧠 V2011 Unified Intelligence — دمج الأدلة والتعارضات", expanded=True):
+        with st.expander("🧠 V2012 Premium Intelligence — دمج الأدلة والتعارضات", expanded=True):
             _u1,_u2,_u3,_u4 = st.columns(4)
             _u1.metric("Price Action BUY",f"{_ui.get('pa_buy',0):.1f}/100")
             _u2.metric("Price Action SELL",f"{_ui.get('pa_sell',0):.1f}/100")
@@ -4757,7 +4826,7 @@ _str_res = st.session_state.get("strong_trade_result")
 
 if _str_res:
     if _str_res.get("status") == "NONE":
-        st.markdown('<div class="section-title">🏆 الصفقات القوية</div>',
+        st.markdown('<div id="bp-trades" class="bp-anchor"></div><div class="section-title">🏆 الصفقات القوية</div>',
                     unsafe_allow_html=True)
         _msg = _str_res.get("message", "لا توجد إشارات صالحة الآن.")
         st.warning(f"⏸️ **{_msg}**")
