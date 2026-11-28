@@ -76,7 +76,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2010.6+FULL-ANALYSIS"
+APP_VERSION = "v2011.0+UNIFIED-INTELLIGENCE"
 
 
 
@@ -1941,6 +1941,88 @@ def smc_setup_engine(df, lookback=40):
     return result
 
 
+
+
+def price_action_engine(df):
+    """Independent candle/price-action assessment; current bar only."""
+    out = {"buy_score": 0.0, "sell_score": 0.0, "direction": "NEUTRAL",
+           "confidence": 0.0, "patterns": [], "evidence": [], "conflicts": [],
+           "candle_quality": 0.0, "status": "INSUFFICIENT_DATA"}
+    if df is None or len(df) < 3: return out
+    x, p = df.iloc[-1], df.iloc[-2]
+    vals = [safe_float(x.get(k), np.nan) for k in ("open","high","low","close")]
+    pv = [safe_float(p.get(k), np.nan) for k in ("open","high","low","close")]
+    if not all(np.isfinite(v) for v in vals+pv): return out
+    o,h,l,c = vals; po,ph,pl,pc = pv
+    rng=max(h-l,1e-12); body=abs(c-o); uw=h-max(o,c); lw=min(o,c)-l
+    br=body/rng; ur=uw/rng; lr=lw/rng; cp=(c-l)/rng
+    buy=sell=0.0
+    if br>=.70:
+        if c>o: buy+=15; out["evidence"].append("جسم صاعد قوي")
+        elif c<o: sell+=15; out["evidence"].append("جسم هابط قوي")
+    elif br>=.50:
+        if c>o: buy+=8
+        elif c<o: sell+=8
+    if cp>=.80: buy+=12; out["evidence"].append("إغلاق قرب القمة")
+    elif cp<=.20: sell+=12; out["evidence"].append("إغلاق قرب القاع")
+    if pc<po and c>o and o<=pc and c>=po: buy+=22; out["patterns"].append("BULLISH_ENGULFING")
+    if pc>po and c<o and o>=pc and c<=po: sell+=22; out["patterns"].append("BEARISH_ENGULFING")
+    if lr>=.55 and br<=.35 and cp>=.60: buy+=18; out["patterns"].append("BULLISH_PIN_BAR")
+    if ur>=.55 and br<=.35 and cp<=.40: sell+=18; out["patterns"].append("BEARISH_PIN_BAR")
+    if lw>=2*max(body,1e-12) and uw<=body and cp>=.60: buy+=10; out["patterns"].append("HAMMER")
+    if uw>=2*max(body,1e-12) and lw<=body and cp<=.40: sell+=10; out["patterns"].append("SHOOTING_STAR")
+    if h<ph and l>pl: out["patterns"].append("INSIDE_BAR"); out["evidence"].append("Inside bar — ضغط وانتظار كسر")
+    if h>ph and l<pl:
+        out["patterns"].append("OUTSIDE_BAR")
+        if c>pc: buy+=8
+        elif c<pc: sell+=8
+    if br<=.10:
+        out["patterns"].append("DOJI"); out["conflicts"].append("تردد شمعة")
+        buy*=.8; sell*=.8
+    atr=safe_float(x.get("atr"),np.nan); body_atr=body/atr if np.isfinite(atr) and atr>0 else 0
+    if body_atr>=1:
+        if c>o: buy+=10
+        elif c<o: sell+=10
+    elif body_atr>=.6:
+        if c>o: buy+=5
+        elif c<o: sell+=5
+    out["candle_quality"]=round(min(100,br*50+cp*25+min(body_atr,2)*12.5),2)
+    buy=clamp(buy,0,100); sell=clamp(sell,0,100)
+    out.update(buy_score=round(buy,2),sell_score=round(sell,2),status="AVAILABLE")
+    if buy>=30 and buy>sell*1.25: out.update(direction="BUY",confidence=buy)
+    elif sell>=30 and sell>buy*1.25: out.update(direction="SELL",confidence=sell)
+    elif buy or sell: out["conflicts"].append("إشارات شموع متعارضة/ضعيفة")
+    return out
+
+
+def unified_intelligence_engine(base_buy, base_sell, pa, smc_setup):
+    """Blend legacy score with independent PA and sequential SMC evidence."""
+    state_weights={"ENTRY_CONFIRMED":100,"WAITING_FOR_CONFIRMATION":72,
+      "WAITING_FOR_RETRACEMENT":58,"WAITING_FOR_FVG":48,
+      "WAITING_FOR_DISPLACEMENT":38,"WAITING_FOR_SWEEP":28,"NO_SETUP":15}
+    state=smc_setup.get("state","NO_SETUP")
+    seq=state_weights.get(state,0) if smc_setup.get("state") not in ("INSUFFICIENT_DATA",) else 0
+    sd=smc_setup.get("direction","NEUTRAL")
+    pb=safe_float(pa.get("buy_score"),0); ps=safe_float(pa.get("sell_score"),0)
+    sb=seq if sd=="BUY" else 0; ss=seq if sd=="SELL" else 0
+    # Legacy model retains 82%; PA adds 10%, sequential SMC adds 8%.
+    buy=clamp(.82*base_buy+.10*pb+.08*sb,0,100)
+    sell=clamp(.82*base_sell+.10*ps+.08*ss,0,100)
+    direction="BUY" if buy>sell else "SELL" if sell>buy else "WAIT"
+    conflicts=[]; hard=False
+    if direction=="BUY" and ps>=65 and pb<35: conflicts.append("Price Action قوي ضد BUY"); hard=True
+    if direction=="SELL" and pb>=65 and ps<35: conflicts.append("Price Action قوي ضد SELL"); hard=True
+    if direction in ("BUY","SELL") and sd in ("BUY","SELL") and sd!=direction and seq>=58:
+        conflicts.append(f"SMC Sequence {sd} يعارض الاتجاه المرشح {direction}"); hard=True
+    return {"buy_score":round(buy,2),"sell_score":round(sell,2),
+      "direction":direction,"pa_buy":pb,"pa_sell":ps,"pa_direction":pa.get("direction"),
+      "pa_patterns":pa.get("patterns",[]),"pa_evidence":pa.get("evidence",[]),
+      "pa_conflicts":pa.get("conflicts",[]),"pa_quality":pa.get("candle_quality",0),
+      "smc_sequence_score":seq,"smc_sequence_direction":sd,"smc_sequence_state":state,
+      "conflicts":conflicts,"hard_conflict":hard,
+      "weights":{"legacy":82,"price_action":10,"smc_sequence":8}}
+
+
 def directional_score(df, pair_name, symbol, dxy_bias=None, gold_corr=None,
                      ccy_strength=None, rate_diff=0.0, risk=None, bonds=None):
     l = df.iloc[-1]
@@ -3227,12 +3309,12 @@ def generate_signal(df, current_price, pair_name, symbol,
 
     sc = directional_score(df, pair_name, symbol, dxy_bias=dxy, gold_corr=gc,
                           ccy_strength=ccs, rate_diff=rd, risk=rk, bonds=bd)
+    pa_result = price_action_engine(df)
+    smc_setup = smc_setup_engine(df, lookback=40)
+    unified = unified_intelligence_engine(sc["buy"], sc["sell"], pa_result, smc_setup)
     if sent is None: sent = estimate_retail_sentiment(df, profile)
 
-
-
-
-    buy, sell = sc["buy"], sc["sell"]
+    buy, sell = unified["buy_score"], unified["sell_score"]
     if mtf == "BULLISH": buy += 8; sell -= 4
     elif mtf == "BEARISH": sell += 8; buy -= 4
     if wk == "BULLISH": buy += 5; sell -= 3
@@ -3260,6 +3342,7 @@ def generate_signal(df, current_price, pair_name, symbol,
     mc = False
     if safe_bool(l.get("mss_bullish")) and sell > buy: mc = True
     if safe_bool(l.get("mss_bearish")) and buy > sell: mc = True
+    if unified.get("hard_conflict"): mc = True
     r = safe_float(l.get("rsi"), 50); reg = sc["regime"]
     if reg == "RANGE":
         if signal == "BUY" and r > profile["rsi_ob"] and not safe_bool(l.get("mss_bullish")):
@@ -3396,7 +3479,6 @@ def generate_signal(df, current_price, pair_name, symbol,
             es, er = "WAIT", "لا اجتياز"
     conf = ec
     adv = ", ".join(f"{n}({p})" for n,p in sp) or "None"
-    smc_setup = smc_setup_engine(df, lookback=40)
     analysis_audit = build_full_analysis_audit(
         df, {"divergence": sc.get("divergence"), "confirmation_score": cs,
              "dxy_bias": sc.get("dxy_bias"), "rate_diff": rd,
@@ -3415,6 +3497,7 @@ def generate_signal(df, current_price, pair_name, symbol,
             "mtf_total_count": analysis_audit["mtf_total"],
             "temporal_score": analysis_audit["temporal_score"],
             "buy_score": buy, "sell_score": sell, "weighted_confluence": wc,
+            "price_action": pa_result, "unified_intelligence": unified,
             "pillars": pil, "mtf_bias": mtf, "mtf_conf": mtfc, "mtf_details": mtfd,
             "weekly_bias": wk, "levels": lv if rok else None, "df": df,
             "confirmation_ok": co, "confirmation_score": cs,
@@ -3423,6 +3506,7 @@ def generate_signal(df, current_price, pair_name, symbol,
             "soft_penalties": pt, "soft_advisories": adv,
             "filter_results": flt, "all_filters_passed": ap,
             "filter_block_reason": br_, "regime": sc["regime"],
+            "intelligence_conflicts": unified.get("conflicts", []),
             "dxy_bias": sc["dxy_bias"], "usd_msg": sc["usd_msg"],
             "divergence": sc["divergence"], "reasons": sc["reasons"] + cr,
             "fund_details": sc.get("fund_details", []),
@@ -4546,6 +4630,18 @@ if _pair_analysis and _pair_analysis.get("pair") == _selected:
         _m2.metric("BUY Score",f"{_ar.get('buy_score',0):.1f}")
         _m3.metric("SELL Score",f"{_ar.get('sell_score',0):.1f}")
         _m4.metric("تأكيد",f"{_ar.get('confirmation_score',0):.1f}/100")
+        _ui = _ar.get("unified_intelligence", {}) or {}; _pa = _ar.get("price_action", {}) or {}
+        with st.expander("🧠 V2011 Unified Intelligence — دمج الأدلة والتعارضات", expanded=True):
+            _u1,_u2,_u3,_u4 = st.columns(4)
+            _u1.metric("Price Action BUY",f"{_ui.get('pa_buy',0):.1f}/100")
+            _u2.metric("Price Action SELL",f"{_ui.get('pa_sell',0):.1f}/100")
+            _u3.metric("PA Patterns",", ".join(_ui.get("pa_patterns",[])) or "لا يوجد")
+            _u4.metric("SMC Sequence",f"{_ui.get('smc_sequence_score',0)}/100")
+            st.caption("أوزان الدمج: المحرك الأصلي 82% · Price Action 10% · تسلسل SMC 8%. هذه أوزان أولية وليست مثبتة بالاختبار التاريخي.")
+            _conflicts=_ui.get("conflicts",[]) or _ui.get("pa_conflicts",[])
+            if _conflicts: st.warning("تعارضات: " + " | ".join(_conflicts))
+            else: st.success("لا يوجد تعارض رئيسي مكتشف من محرك الدمج.")
+            if _ui.get("pa_evidence"): st.write("أدلة Price Action: " + " · ".join(_ui.get("pa_evidence",[])))
         _meta1,_meta2,_meta3 = st.columns(3)
         _meta1.caption(f"🕒 وقت التحليل: {_pair_analysis['analysis_time']}")
         _meta2.caption(f"📡 المصدر: {_pair_analysis['source']}")
