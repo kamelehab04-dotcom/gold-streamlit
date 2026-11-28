@@ -76,7 +76,7 @@ warnings.filterwarnings("ignore", message=".*Expecting value.*")
 
 
 
-APP_VERSION = "v2012.0+PREMIUM-UI"
+APP_VERSION = "v2012.1+PREMIUM-RESPONSIVE-ATR"
 
 
 
@@ -3576,8 +3576,23 @@ def backtest_smc_sequence(symbol, pair_name, period="1y", interval="4h",
             if required not in cols:
                 return {"error": f"عمود {required.upper()} غير موجود في البيانات."}
         df = df.rename(columns={cols[k]: k for k in ("open", "high", "low", "close")})
-        if "atr" not in df.columns:
-            return {"error": "ATR غير متوفر؛ لا يمكن اختبار وقف الخسارة بشكل موثوق."}
+        # ATR is often absent in raw historical downloads (Yahoo data is OHLCV only).
+        # Rebuild it from normalized OHLC instead of aborting the backtest.
+        atr_period = safe_int(profile_for(pair_name).get("atr_period", 14), 14)
+        atr_period = max(2, min(atr_period, 100))
+        try:
+            computed_atr = calc_atr(df, atr_period)
+            if "atr" in cols:
+                existing_atr = pd.to_numeric(df[cols["atr"]], errors="coerce")
+                # Preserve valid precomputed values; repair missing/invalid values with OHLC ATR.
+                df["atr"] = existing_atr.where(existing_atr.gt(0) & np.isfinite(existing_atr), computed_atr)
+            else:
+                df["atr"] = computed_atr
+            df["atr"] = pd.to_numeric(df["atr"], errors="coerce")
+        except Exception as atr_exc:
+            return {"error": f"تعذر حساب ATR من بيانات OHLC: {atr_exc}"}
+        if df["atr"].dropna().empty or not np.isfinite(df["atr"].dropna().iloc[-1]) or df["atr"].dropna().iloc[-1] <= 0:
+            return {"error": "بيانات OHLC لا تكفي لحساب ATR صالح؛ يلزم بيانات High/Low/Close سليمة وعدد شموع كافٍ."}
 
         trades, skipped = [], 0
         i = max(60, lookback)
@@ -3591,7 +3606,7 @@ def backtest_smc_sequence(symbol, pair_name, period="1y", interval="4h",
             direction = setup.get("direction")
             zone_lo, zone_hi = setup.get("zone_low"), setup.get("zone_high")
             atr = safe_float(hist.iloc[-1].get("atr"), 0)
-            if direction not in ("BUY", "SELL") or not atr or atr <= 0 or zone_lo is None or zone_hi is None:
+            if direction not in ("BUY", "SELL") or not np.isfinite(atr) or atr <= 0 or zone_lo is None or zone_hi is None:
                 skipped += 1
                 i += 1
                 continue
@@ -4468,7 +4483,37 @@ div.stButton>button:hover { background:linear-gradient(130deg,#3a2c17,#201a11); 
 .bp-anchor { scroll-margin-top:85px; }
 @media(max-width:900px) { .block-container {padding-left:1rem!important;padding-right:1rem!important;}
     .hero {padding:16px;border-radius:16px;} .hero-title{letter-spacing:1px;} }
-@media(max-width:600px) { .section-title{font-size:1rem;} .hero-sub{font-size:.72rem;} }
+@media(max-width:700px) {
+  /* Responsive layout: columns wrap instead of shrinking into unreadable cards */
+  [data-testid="stHorizontalBlock"] { display:flex !important; flex-wrap:wrap !important;
+      align-items:stretch !important; gap:.55rem !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+      flex:1 1 calc(50% - .55rem) !important; width:calc(50% - .55rem) !important;
+      min-width:calc(50% - .55rem) !important; max-width:calc(50% - .25rem) !important; }
+  div[data-testid="stMetric"] { padding:10px 11px !important; min-height:82px; }
+  div[data-testid="stMetric"] label { font-size:.68rem !important; letter-spacing:.35px !important;
+      white-space:normal !important; line-height:1.25 !important; }
+  div[data-testid="stMetric"] .stMetricValue { font-size:clamp(1.05rem,5vw,1.55rem) !important;
+      white-space:normal !important; overflow-wrap:anywhere !important; line-height:1.2 !important; }
+  div[data-testid="stMetric"] [data-testid="stMetricDelta"] {font-size:.72rem !important; white-space:normal !important;}
+  .section-title {font-size:1rem !important; margin:20px 0 12px !important;}
+  .hero {padding:13px !important;} .hero-title{font-size:1.45rem !important;}
+  .hero-sub{font-size:.72rem !important; line-height:1.55 !important;}
+  .tool-card {padding:12px !important;}
+  [data-testid="stDataFrame"], [data-testid="stTable"] {max-width:100% !important; overflow-x:auto !important;}
+  [data-testid="stDataFrame"] iframe {max-width:100% !important;}
+  [data-testid="stExpander"] details, [data-testid="stExpander"] summary {font-size:.9rem !important;}
+  div.stButton>button {padding:.58rem .8rem !important; font-size:.88rem !important;}
+}
+@media(max-width:380px) {
+  .block-container {padding-left:.55rem!important;padding-right:.55rem!important;}
+  [data-testid="stHorizontalBlock"] {gap:.4rem !important;}
+  [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+      flex-basis:calc(50% - .4rem) !important; min-width:calc(50% - .4rem) !important;
+      width:calc(50% - .4rem) !important; }
+  div[data-testid="stMetric"] {padding:8px !important;}
+  div[data-testid="stMetric"] label {font-size:.62rem !important;}
+}
 </style>
 """, unsafe_allow_html=True)
 
